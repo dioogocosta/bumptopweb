@@ -33,6 +33,10 @@ const ptBR: Dict = {
   'menu.toggleAutoAlign': 'Alinhamento automático',
   'menu.toggleExplodingPiles': 'Explodir pilhas ao puxar',
   'menu.physicsLevel': 'Física: nível {n}',
+  'menu.toggleWallPin': 'Prender ao jogar na parede',
+  'hint.toggleWallPin': 'Ligado: item arremessado ou arrastado até a parede fica preso nela. Desligado: bate e volta',
+  'toast.wallPinOn': 'Prender na parede: ligado',
+  'toast.wallPinOff': 'Prender na parede: desligado',
   'menu.newNote': 'Nova nota adesiva',
   'menu.autoPile': 'Auto-pilha por tipo',
   // P0 — seleção
@@ -162,6 +166,10 @@ const en: Dict = {
   'menu.toggleAutoAlign': 'Auto-align',
   'menu.toggleExplodingPiles': 'Explode piles on pull',
   'menu.physicsLevel': 'Physics: level {n}',
+  'menu.toggleWallPin': 'Stick to wall on toss',
+  'hint.toggleWallPin': 'On: items tossed or dragged into a wall stick to it. Off: they bounce back',
+  'toast.wallPinOn': 'Stick to wall: on',
+  'toast.wallPinOff': 'Stick to wall: off',
   'menu.newNote': 'New sticky note',
   'menu.autoPile': 'Auto-pile by type',
   // P0 — selection

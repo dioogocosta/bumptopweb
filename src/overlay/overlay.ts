@@ -491,7 +491,7 @@ export class DomOverlay implements IOverlay {
         },
       ];
 
-      const R = 54;
+      const R = 64;
       const count = widgets.length;
       for (let i = 0; i < count; i++) {
         const w = widgets[i];

@@ -549,6 +549,7 @@ describe('Fase 7: WallToss (toss na parede prende o objeto)', () => {
   it('toss rápido em direção à parede prega o objeto e dispara o toast', async () => {
     const overlay = makeOverlayMock();
     const { world } = await makeWorld(overlay);
+    world.setAutoWallPin(true);
     // Perto da parede norte (-z); faceN interna = -130 + 5 + 1.6 + 2.5 = -120.9
     const id = world.addBox({ x: 0, y: 1.6, z: -115 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
 
@@ -1074,5 +1075,40 @@ describe('Girar, paredes e níveis de física', () => {
     expect(physics.setItemCollisions).toHaveBeenLastCalledWith(false);
     expect(world.togglePhysicsLevel()).toBe(2);
     expect(physics.setItemCollisions).toHaveBeenLastCalledWith(true);
+  });
+});
+
+describe('Parede: prender é opcional e item preso pode ser puxado', () => {
+  it('por padrão, arremessar contra a parede NÃO prende o item', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    expect(world.isAutoWallPin()).toBe(false);
+    const id = world.addBox({ x: 0, y: 1.6, z: -100 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    world.processAction({ type: 'pointerDown', world: { x: 0, y: 0, z: -100 }, screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerMove', world: { x: 0, y: 0, z: -140 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+    for (let i = 0; i < 6; i++) world.update(1 / 60);
+    world.processAction({ type: 'pointerUp', world: { x: 0, y: 0, z: -140 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+    for (let i = 0; i < 3; i++) world.update(1 / 60);
+    expect(world.getObject(id)!.pinnedWall).toBeNull();
+  });
+
+  it('item preso é pego pela posição na tela e arrastar o solta da parede', async () => {
+    const { world, renderer } = await makeWorld();
+    (renderer.projectToScreen as ReturnType<typeof vi.fn>).mockImplementation((v: Vec3) => ({
+      x: v.x + 300,
+      y: v.z + 300 - v.y * 2,
+      visible: true,
+    }));
+    const id = world.addBox({ x: 0, y: 1.6, z: -100 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    world.pinToWall(id, 0);
+    const p = world.getObject(id)!.pose.position;
+    const screen = { x: p.x + 300, y: p.z + 300 - p.y * 2 };
+    world.processAction({ type: 'pointerDown', world: { x: 0, y: 0, z: -400 }, screen, button: 0, pointerId: 1 });
+    expect(world.getObject(id)!.pinnedWall).toBeNull();
+    world.processAction({ type: 'pointerMove', world: { x: 0, y: 0, z: 0 }, screen: { x: 300, y: 300 }, pointerId: 1 });
+    for (let i = 0; i < 90; i++) world.update(1 / 60);
+    world.processAction({ type: 'pointerUp', world: { x: 0, y: 0, z: 0 }, screen: { x: 300, y: 300 }, pointerId: 1 });
+    expect(world.getObject(id)!.pose.position.z).toBeGreaterThan(-20);
+    expect(world.getObject(id)!.pinnedWall).toBeNull();
   });
 });
