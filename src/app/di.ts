@@ -144,6 +144,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       const loose = ctxTargets.filter((id) => !world.inPile(id) && !world.isPinned(id));
       const base = world.createPileFrom(loose);
       overlay.toast(base ? t('toast.lassoPiled', { n: loose.length }) : t('toast.nothingToPile2'));
+    } else if (a === 'toggleWallPin') {
+      const on = world.toggleAutoWallPin();
+      overlay.toast(t(on ? 'toast.wallPinOn' : 'toast.wallPinOff'));
     } else if (a === 'physicsLevel') {
       const level = world.togglePhysicsLevel();
       overlay.toast(t(level === 2 ? 'toast.physicsLevel2' : 'toast.physicsLevel1'));
@@ -259,7 +262,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
 
   input.setListener((action: InputAction) => {
     if (action.type === 'context') {
-      ctxTarget = world.pickObjectAt(action.world);
+      ctxTarget = world.pickObjectAt(action.world, action.screen);
       // Alvos: seleção inteira se o item clicado está selecionado, senão só ele
       const selected = world.getSelectedIds();
       ctxTargets = ctxTarget
@@ -344,6 +347,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           hint: t('hint.toggleExplodingPiles'),
         });
         items.push({
+          label: `${t('menu.toggleWallPin')} (${world.isAutoWallPin() ? '✓' : '✗'})`,
+          action: 'toggleWallPin',
+          hint: t('hint.toggleWallPin'),
+        });
+        items.push({
           label: t('menu.physicsLevel', { n: world.getPhysicsLevel() }),
           action: 'physicsLevel',
           hint: t('hint.physicsLevel'),
@@ -365,7 +373,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
 
     // Soltar em pasta → move o arquivo (M2)
     if (action.type === 'pointerDown') {
-      dragSourceId = world.pickObjectAt(action.world);
+      dragSourceId = world.pickObjectAt(action.world, action.screen);
     }
     world.processAction(action);
     if (action.type === 'pointerUp' && dragSourceId) {

@@ -130,9 +130,9 @@ body {
 /* Pile Widget Halo (P1 — anel de widgets ao redor da pilha) */
 .pile-halo {
   position: absolute;
-  width: 140px;
-  height: 90px;
-  margin: -70px 0 0 -70px;
+  width: 2px;
+  height: 2px;
+  margin: -1px 0 0 -1px;
   pointer-events: auto;
   z-index: 25;
   transition: opacity 0.15s ease;

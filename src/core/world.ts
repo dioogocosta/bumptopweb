@@ -104,6 +104,8 @@ export class World {
   private groupStartScreen: { x: number; y: number } | null = null;
   private groupMoved = false;
   private physicsLevel: PhysicsLevel;
+  /** Prender automaticamente na parede ao arremessar/arrastar até ela (desligado: o item bate e volta). */
+  private autoWallPin = false;
   /** ids lançados recentemente (TTL em s) → elegíveis a WallToss. */
   private recentToss = new Map<string, number>();
 
@@ -337,7 +339,7 @@ export class World {
     const worldPoint = a.world;
     // Botão direito / do meio: órbita da câmera (não arrasta objeto)
     if (a.button !== 0) return;
-    const hit = this.pickAt(worldPoint);
+    const hit = this.pickAt(worldPoint, undefined, a.screen);
     const isTouch = a.pointerType === 'touch';
 
     // Shift+clique → seleção aditiva (multi-select, Fase 7)
@@ -508,7 +510,7 @@ export class World {
       this.deps.physics.setFrozen(e.body, false);
       if (velocity) {
         this.deps.physics.setVelocity(e.body, velocity);
-        this.recentToss.set(m.id, 3);
+        if (this.autoWallPin) this.recentToss.set(m.id, 3);
       }
     }
     this.group = [];
@@ -654,7 +656,7 @@ export class World {
       this.deps.physics.setFrozen(e.body, false);
       if (toss) {
         this.deps.physics.setVelocity(e.body, velocity);
-        this.recentToss.set(e.data.id, 3);
+        if (this.autoWallPin) this.recentToss.set(e.data.id, 3);
       }
       this.releaseGroup(toss ? velocity : null);
       if (clicked) this.select(e.data.id);
@@ -667,11 +669,11 @@ export class World {
     if (toss) {
       // TOSS: o objeto voa como projétil com a velocidade da mola
       this.deps.physics.setVelocity(e.body, velocity);
-      // WallToss (Fase 7): toss recente pode pregar o objeto na parede
-      this.recentToss.set(e.data.id, 3);
+      // WallToss (Fase 7): toss recente pode pregar o objeto na parede (se ligado)
+      if (this.autoWallPin) this.recentToss.set(e.data.id, 3);
     } else {
       // B: arrastar até a parede (sem toss) gruda — antes do tryStack
-      const wall = this.wallContact(e);
+      const wall = this.autoWallPin ? this.wallContact(e) : null;
       if (wall !== null) {
         this.pinToWall(e.data.id, wall);
         this.deps.overlay?.toast(t('toast.pinnedToWall'));
@@ -1412,8 +1414,8 @@ export class World {
   }
 
   /** Objeto sob um ponto de mundo (p/ duplo-clique → abrir, M2). */
-  pickObjectAt(worldPoint: Vec3): string | null {
-    return this.pickAt(worldPoint);
+  pickObjectAt(worldPoint: Vec3, screen?: { x: number; y: number }): string | null {
+    return this.pickAt(worldPoint, undefined, screen);
   }
 
   // -------------------------------------------------------------------------
@@ -1947,7 +1949,15 @@ export class World {
    * Encontra o objeto mais próximo de um ponto de mundo, opcionalmente
    * excluindo um id (o próprio item arrastado).
    */
-  private pickAt(worldPoint: Vec3, excludeId?: string): string | null {
+  private pickAt(
+    worldPoint: Vec3,
+    excludeId?: string,
+    screen?: { x: number; y: number },
+  ): string | null {
+    if (screen) {
+      const pinned = this.pickPinnedOnScreen(screen, excludeId);
+      if (pinned) return pinned;
+    }
     let best: string | null = null;
     let bestDist = 13.0; // raio de captura em unidades de mundo (ícone ~14 de largo)
     for (const [id, e] of this.entries) {
@@ -1963,6 +1973,41 @@ export class World {
       }
     }
     return best;
+  }
+
+  /**
+   * Itens presos na parede ficam no alto: o ponto do chão sob o cursor cai
+   * "atrás" da parede, longe deles. Por isso eles são escolhidos pela tela.
+   */
+  private pickPinnedOnScreen(screen: { x: number; y: number }, excludeId?: string): string | null {
+    let best: string | null = null;
+    let bestDist = 40;
+    for (const [id, e] of this.entries) {
+      if (id === excludeId || e.data.pinnedWall == null) continue;
+      if (this.deps.renderer.isVisible(e.render) === false) continue;
+      const s = this.deps.renderer.projectToScreen(e.data.pose.position);
+      if (!s.visible) continue;
+      const d = Math.hypot(s.x - screen.x, s.y - screen.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  isAutoWallPin(): boolean {
+    return this.autoWallPin;
+  }
+
+  setAutoWallPin(enabled: boolean): void {
+    this.autoWallPin = enabled;
+    if (!enabled) this.recentToss.clear();
+  }
+
+  toggleAutoWallPin(): boolean {
+    this.setAutoWallPin(!this.autoWallPin);
+    return this.autoWallPin;
   }
 
   // -------------------------------------------------------------------------
