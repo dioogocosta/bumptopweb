@@ -54,6 +54,11 @@ function makePhysicsMock(): IPhysics {
       if (f) frozen.add(h);
       else frozen.delete(h);
     }),
+    moveKinematic: vi.fn((h, p) => {
+      const pose = poses.get(h);
+      if (pose) pose.position = { ...p };
+    }),
+    setItemCollisions: vi.fn(),
     raycast: vi.fn(() => null),
     step: vi.fn(),
     isSleeping: vi.fn(() => false),

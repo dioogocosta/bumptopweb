@@ -18,6 +18,7 @@ import type {
   Vec3,
 } from './model/types';
 import { DEFAULT_PHYSICS, DEFAULT_ROOM, ObjectKind, PileLayout, TypeFlags } from './model/types';
+import type { PhysicsLevel } from './model/types';
 import type { BodyHandle, IOverlay, IPhysics, IRenderer, InputAction, ObjectHandle } from './ports/index';
 import { t } from './i18n/i18n';
 import { DampedSpringDrag, type SpringConfig } from './interaction/dampedSpringDrag';
@@ -37,13 +38,26 @@ import {
   isPointInPolygon,
 } from './selection/lassoGeometry';
 import type { Theme } from './theme/theme';
-import { identityQuat, vec3 } from './util/math';
+import { clamp, identityQuat, vec3 } from './util/math';
 
 /** Limites de escala (P0 — Scale com feedback de limite): [0.4, 3.0]. */
 export const SCALE_MIN = 0.4;
 export const SCALE_MAX = 3.0;
 const SCALE_STEP = 0.25;
 const FLICK_SPEED_PX = 1100; // px/s — limiar p/ flick folhear pilha (C)
+export const LASSO_START_RADIUS = 22;
+export const LASSO_CROSS_RADIUS = 20;
+const GROUP_CLICK_PX = 3;
+const ESCAPE_MARGIN = 1;
+
+interface GroupMember {
+  id: string;
+  dx: number;
+  dz: number;
+  y: number;
+}
+
+export type LassoMenuListener = (screen: { x: number; y: number }, ids: string[]) => void;
 
 interface Entry {
   data: BumpObjectData;
@@ -82,6 +96,14 @@ export class World {
   private lassoStart: { x: number; y: number } | null = null;
   private lassoPoints: Array<{ x: number; y: number }> = [];
   private lassoBase = new Set<string>();
+  private lassoLeftStart = false;
+  private lassoClosed = false;
+  private lassoCrossTarget: { x: number; y: number } | null = null;
+  private lassoMenuListener: LassoMenuListener | null = null;
+  private group: GroupMember[] = [];
+  private groupStartScreen: { x: number; y: number } | null = null;
+  private groupMoved = false;
+  private physicsLevel: PhysicsLevel;
   /** ids lançados recentemente (TTL em s) → elegíveis a WallToss. */
   private recentToss = new Map<string, number>();
 
@@ -110,6 +132,7 @@ export class World {
     this.deps = deps;
     this.room = opts?.room ?? DEFAULT_ROOM;
     this.physicsConfig = opts?.physics ?? DEFAULT_PHYSICS;
+    this.physicsLevel = this.physicsConfig.level ?? 2;
     this.camera = new OrbitCameraController();
     // O limiar de toss vem das constantes reais do original (ground-truth).
     this.drag.setConfig({ minTossVelocitySq: this.physicsConfig.minStartTossVelocitySq });
@@ -137,6 +160,10 @@ export class World {
     opts?: { fsPath?: string; isDir?: boolean; thumb?: string | null },
   ): string {
     const id = newId();
+    const inner = this.innerWall();
+    const mx = Math.max(0, inner - halfExtents.x);
+    const mz = Math.max(0, inner - halfExtents.z);
+    pos = { x: clamp(pos.x, -mx, mx), y: Math.max(halfExtents.y, pos.y), z: clamp(pos.z, -mz, mz) };
     const body = this.deps.physics.createBox(id, pos, halfExtents);
     const render = this.deps.renderer.addBox(id, halfExtents, color);
     this.deps.renderer.setPose(render, { position: pos, rotation: identityQuat() });
@@ -319,6 +346,11 @@ export class World {
       return;
     }
 
+    if (hit && this.canGroupDrag(hit)) {
+      this.beginGroupDrag(hit, worldPoint, a.screen);
+      return;
+    }
+
     // Seleção (M4): clicar seleciona; clicar no vazio limpa
     this.select(hit);
 
@@ -338,6 +370,9 @@ export class World {
         this.lassoStart = { ...a.screen };
         this.lassoPoints = [{ ...a.screen }];
         this.lassoBase = new Set(this.selectedIds);
+        this.lassoLeftStart = false;
+        this.lassoClosed = false;
+        this.lassoCrossTarget = null;
         this.deps.overlay?.setLasso({
           x: a.screen.x,
           y: a.screen.y,
@@ -419,9 +454,65 @@ export class World {
     }
 
     if (!this.pickedId || !this.drag.isDragging) return;
-    // O alvo da mola fica no plano horizontal da altura do objeto
-    const target = { x: worldPoint.x, y: this.dragHeight, z: worldPoint.z };
-    this.drag.setTarget(target);
+    if (this.groupStartScreen && !this.groupMoved) {
+      const moved = Math.hypot(screen.x - this.groupStartScreen.x, screen.y - this.groupStartScreen.y);
+      if (moved >= GROUP_CLICK_PX) this.groupMoved = true;
+    }
+    this.drag.setTarget({ x: worldPoint.x, y: this.dragHeight, z: worldPoint.z });
+  }
+
+  /** Clicar num item que já faz parte de uma seleção múltipla arrasta o grupo. */
+  private canGroupDrag(hit: string): boolean {
+    if (!this.selectedIds.has(hit) || this.selectedIds.size < 2) return false;
+    if (this.piles.contains(hit)) return false;
+    if (this.entries.get(hit)?.data.pinnedWall != null) return false;
+    return this.layoutTargets().length >= 2;
+  }
+
+  /**
+   * Arraste em grupo: o item clicado segue a mola e os demais selecionados
+   * acompanham mantendo a distância relativa (formação), todos kinematic.
+   */
+  private beginGroupDrag(hit: string, worldPoint: Vec3, screen: { x: number; y: number }): void {
+    this.scrunchActive = false;
+    this.hoveredPileId = null;
+    this.dwellTimer = 0;
+    this.dwellActive = false;
+    this.scrubIndex = 0;
+    this.resetPeel();
+
+    const leader = this.entries.get(hit)!;
+    const lp = leader.data.pose.position;
+    this.group = [];
+    for (const id of this.layoutTargets()) {
+      if (id === hit) continue;
+      const e = this.entries.get(id)!;
+      const p = e.data.pose.position;
+      this.group.push({ id, dx: p.x - lp.x, dz: p.z - lp.z, y: p.y });
+      this.deps.physics.setFrozen(e.body, true);
+    }
+    this.groupStartScreen = { ...screen };
+    this.groupMoved = false;
+    this.pickedId = hit;
+    this.dragHeight = lp.y;
+    this.deps.physics.setFrozen(leader.body, true);
+    this.drag.begin(lp, worldPoint);
+    this.dirty = true;
+  }
+
+  /** Solta os seguidores do grupo (com a mesma velocidade do líder se houve toss). */
+  private releaseGroup(velocity: Vec3 | null): void {
+    for (const m of this.group) {
+      const e = this.entries.get(m.id);
+      if (!e) continue;
+      this.deps.physics.setFrozen(e.body, false);
+      if (velocity) {
+        this.deps.physics.setVelocity(e.body, velocity);
+        this.recentToss.set(m.id, 3);
+      }
+    }
+    this.group = [];
+    this.groupStartScreen = null;
   }
 
   /**
@@ -524,12 +615,15 @@ export class World {
 
   private onPointerUp(worldPoint: Vec3, screen?: { x: number; y: number }): void {
     if (this.lassoing) {
-      // Mantém a seleção; só some com o laço (como o original)
-      this.lassoing = false;
-      this.lassoStart = null;
-      this.lassoPoints = [];
-      this.deps.overlay?.setLasso(null);
-      this.dirty = true;
+      const start = this.lassoStart;
+      const end = screen ?? this.lassoPoints[this.lassoPoints.length - 1] ?? null;
+      const inDisc =
+        start !== null &&
+        end !== null &&
+        Math.hypot(end.x - start.x, end.y - start.y) <= LASSO_START_RADIUS;
+      const openMenu = this.lassoClosed && inDisc && this.selectedIds.size > 0;
+      this.endLasso();
+      if (openMenu && start) this.lassoMenuListener?.(start, [...this.selectedIds]);
       return;
     }
     if (this.shoving) {
@@ -554,6 +648,19 @@ export class World {
     const e = this.entries.get(this.pickedId);
     this.pickedId = null;
     if (!e) return;
+    if (this.groupStartScreen) {
+      const { velocity, toss } = this.drag.end();
+      const clicked = !this.groupMoved;
+      this.deps.physics.setFrozen(e.body, false);
+      if (toss) {
+        this.deps.physics.setVelocity(e.body, velocity);
+        this.recentToss.set(e.data.id, 3);
+      }
+      this.releaseGroup(toss ? velocity : null);
+      if (clicked) this.select(e.data.id);
+      this.dirty = true;
+      return;
+    }
     const { velocity, toss } = this.drag.end();
     // Descongela e devolve ao mundo físico
     this.deps.physics.setFrozen(e.body, false);
@@ -1178,36 +1285,51 @@ export class World {
   pinToWall(objectId: string, wall: number | null): void {
     const e = this.entries.get(objectId);
     if (!e) return;
-    const he = this.scaledHalf(e); // meia-extensão já escalada (P0 — Scale)
+    const he = this.scaledHalf(e);
     if (wall === null) {
+      if (e.data.pinnedWall == null) return;
       e.data.pinnedWall = null;
+      const rot = identityQuat();
+      e.data.pose = { position: e.data.pose.position, rotation: rot };
+      const pos = this.clampToRoom(e, { ...e.data.pose.position, y: he.y + 0.5 });
       this.deps.physics.setFrozen(e.body, false);
+      this.deps.physics.setRotation(e.body, rot);
+      this.placeAt(e, pos);
       this.dirty = true;
       return;
     }
-    const hs = this.room.halfSize;
-    const t = this.room.wallThickness;
-    const y = Math.min(
-      this.room.wallHeight - he.y - 2,
-      Math.max(he.y + 2, e.data.pose.position.y),
-    );
-    const inset = he.y + t / 2 + 0.5; // espessura (eixo Y) p/ encostar na parede
+    const inner = this.innerWall();
+    const lowest = he.z + 2;
+    const highest = Math.max(lowest, this.room.wallHeight - he.z - 2);
+    const y = clamp(Math.max(e.data.pose.position.y, this.room.wallHeight * 0.4), lowest, highest);
+    const off = inner - he.y - 0.5;
+    const alongX = clamp(e.data.pose.position.x, -(inner - he.x), inner - he.x);
+    const alongZ = clamp(e.data.pose.position.z, -(inner - he.x), inner - he.x);
     let pos: Vec3;
+    let rot: Pose['rotation'];
     switch (wall) {
-      case 0: pos = { x: e.data.pose.position.x, y, z: -hs + inset }; break; // parede norte
-      case 1: pos = { x: e.data.pose.position.x, y, z: hs - inset }; break; // sul
-      case 2: pos = { x: -hs + inset, y, z: e.data.pose.position.z }; break; // oeste
-      case 3: pos = { x: hs - inset, y, z: e.data.pose.position.z }; break; // leste
-      default: return;
+      case 0:
+        pos = { x: alongX, y, z: -off };
+        rot = { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 };
+        break;
+      case 1:
+        pos = { x: alongX, y, z: off };
+        rot = { x: 0, y: Math.SQRT1_2, z: -Math.SQRT1_2, w: 0 };
+        break;
+      case 2:
+        pos = { x: -off, y, z: alongZ };
+        rot = { x: 0.5, y: 0.5, z: -0.5, w: 0.5 };
+        break;
+      case 3:
+        pos = { x: off, y, z: alongZ };
+        rot = { x: 0.5, y: -0.5, z: 0.5, w: 0.5 };
+        break;
+      default:
+        return;
     }
     e.data.pinnedWall = wall;
     this.deps.physics.setFrozen(e.body, true);
     this.deps.physics.setPosition(e.body, pos);
-    // Rotaciona p/ encostar a "costa" na parede (face paralela)
-    const rot =
-      wall <= 1
-        ? { x: 0, y: 0, z: 0, w: 1 }
-        : { x: 0, y: Math.SQRT1_2, z: 0, w: Math.SQRT1_2 };
     this.deps.physics.setRotation(e.body, rot);
     e.data.pose = { position: pos, rotation: rot };
     this.deps.renderer.setPose(e.render, e.data.pose);
@@ -1234,16 +1356,15 @@ export class World {
    * Retorna índice da parede (0=N, 1=S, 2=O, 3=L) ou null.
    */
   private wallContact(e: Entry): number | null {
-    const hs = this.room.halfSize;
-    const t = this.room.wallThickness;
     const CONTACT = 2.5;
-    const he = this.scaledHalf(e);
+    const inner = this.innerWall();
+    const { ex, ez } = this.floorExtents(e);
     const p = e.data.pose.position;
 
-    const faceN = -hs + t / 2 + he.y + CONTACT;
-    const faceS = hs - t / 2 - he.y - CONTACT;
-    const faceW = -hs + t / 2 + he.x + CONTACT;
-    const faceE = hs - t / 2 - he.x - CONTACT;
+    const faceN = -inner + ez + CONTACT;
+    const faceS = inner - ez - CONTACT;
+    const faceW = -inner + ex + CONTACT;
+    const faceE = inner - ex - CONTACT;
 
     if (p.z <= faceN) return 0;
     if (p.z >= faceS) return 1;
@@ -1276,14 +1397,8 @@ export class World {
   }
 
   private onCancel(): void {
-    // Laço ativo → esconde o retângulo mantendo a seleção (como o original)
-    if (this.lassoing) {
-      this.lassoing = false;
-      this.lassoStart = null;
-      this.lassoPoints = [];
-      this.deps.overlay?.setLasso(null);
-      this.dirty = true;
-    }
+    // Laço ativo → esconde o laço mantendo a seleção (como o original)
+    if (this.lassoing) this.endLasso();
     this.shoving = false;
     this.lastShovePoint = null;
     this.hoveredPileId = null;
@@ -1292,6 +1407,7 @@ export class World {
     this.pickedId = null;
     this.drag.cancel();
     if (e) this.deps.physics.setFrozen(e.body, false);
+    this.releaseGroup(null);
     this.dirty = true;
   }
 
@@ -1360,6 +1476,79 @@ export class World {
     return { x: b.x * s, y: b.y * s, z: b.z * s };
   }
 
+  /** Meias-extensões do item no piso (X/Z) considerando o giro em Y. */
+  private floorExtents(e: Entry): { ex: number; ez: number } {
+    const he = this.scaledHalf(e);
+    const q = e.data.pose.rotation;
+    const yaw = 2 * Math.atan2(q.y, q.w);
+    const c = Math.abs(Math.cos(yaw));
+    const sn = Math.abs(Math.sin(yaw));
+    return { ex: c * he.x + sn * he.z, ez: sn * he.x + c * he.z };
+  }
+
+  /** Face interna das paredes (distância do centro da sala). */
+  private innerWall(): number {
+    return this.room.halfSize - this.room.wallThickness / 2;
+  }
+
+  /** Posição mais próxima de `p` em que o item cabe inteiro dentro da sala. */
+  private clampToRoom(e: Entry, p: Vec3): Vec3 {
+    const inner = this.innerWall();
+    const { ex, ez } = this.floorExtents(e);
+    const mx = Math.max(0, inner - ex);
+    const mz = Math.max(0, inner - ez);
+    return {
+      x: clamp(p.x, -mx, mx),
+      y: Math.max(this.scaledHalf(e).y, p.y),
+      z: clamp(p.z, -mz, mz),
+    };
+  }
+
+  /** True se o item está inteiro dentro da sala (com folga numérica). */
+  isInsideRoom(id: string): boolean {
+    const e = this.entries.get(id);
+    if (!e) return false;
+    const p = e.data.pose.position;
+    if (e.data.pinnedWall != null) {
+      const inner = this.innerWall();
+      return Math.abs(p.x) <= inner && Math.abs(p.z) <= inner && p.y >= 0;
+    }
+    const c = this.clampToRoom(e, p);
+    return (
+      Math.abs(c.x - p.x) <= ESCAPE_MARGIN &&
+      Math.abs(c.z - p.z) <= ESCAPE_MARGIN &&
+      p.y >= -ESCAPE_MARGIN
+    );
+  }
+
+  /**
+   * Rede de segurança: qualquer item solto que tenha escapado da sala (por
+   * erro numérico ou arremesso extremo) volta para dentro, sem velocidade.
+   */
+  private containEscapees(): void {
+    for (const e of this.entries.values()) {
+      const id = e.data.id;
+      if (id === this.pickedId || this.piles.contains(id) || e.data.pinnedWall != null) continue;
+      if (this.isGroupMember(id)) continue;
+      if (this.deps.physics.isSleeping(e.body)) continue;
+      const pose = this.deps.physics.getPose(e.body);
+      const c = this.clampToRoom(e, pose.position);
+      const out =
+        Math.abs(c.x - pose.position.x) > ESCAPE_MARGIN ||
+        Math.abs(c.z - pose.position.z) > ESCAPE_MARGIN ||
+        pose.position.y < -ESCAPE_MARGIN;
+      if (!out) continue;
+      this.deps.physics.setPosition(e.body, c);
+      this.deps.physics.setVelocity(e.body, vec3());
+      this.dirty = true;
+    }
+  }
+
+  private isGroupMember(id: string): boolean {
+    for (const m of this.group) if (m.id === id) return true;
+    return false;
+  }
+
   /**
    * Alvos de operações de layout/escala: itens SOLTOs (não em pilha) e não
    * pregados na parede — pilha e pin são gerenciados pelos próprios gestos.
@@ -1383,6 +1572,45 @@ export class World {
     this.deps.physics.setPosition(e.body, pos);
     this.deps.physics.setVelocity(e.body, vec3());
     this.deps.renderer.setPose(e.render, e.data.pose);
+  }
+
+  /** Gira os itens soltos da seleção em torno do eixo vertical. */
+  rotateSelection(radians: number, ids?: string[]): number {
+    const targets = this.layoutTargets(ids);
+    const h = radians / 2;
+    const r = { x: 0, y: Math.sin(h), z: 0, w: Math.cos(h) };
+    for (const id of targets) {
+      const e = this.entries.get(id)!;
+      const q = e.data.pose.rotation;
+      const next = {
+        x: r.w * q.x + r.x * q.w + r.y * q.z - r.z * q.y,
+        y: r.w * q.y - r.x * q.z + r.y * q.w + r.z * q.x,
+        z: r.w * q.z + r.x * q.y - r.y * q.x + r.z * q.w,
+        w: r.w * q.w - r.x * q.x - r.y * q.y - r.z * q.z,
+      };
+      this.deps.physics.setRotation(e.body, next);
+      e.data.pose = { position: e.data.pose.position, rotation: next };
+      const inside = this.clampToRoom(e, e.data.pose.position);
+      this.placeAt(e, inside);
+    }
+    if (targets.length > 0) this.dirty = true;
+    return targets.length;
+  }
+
+  /** Nível de física: 1 = interação visual, 2 = física real (caixas colidem). */
+  getPhysicsLevel(): PhysicsLevel {
+    return this.physicsLevel;
+  }
+
+  setPhysicsLevel(level: PhysicsLevel): void {
+    this.physicsLevel = level;
+    this.deps.physics.setItemCollisions(level === 2);
+    this.dirty = true;
+  }
+
+  togglePhysicsLevel(): PhysicsLevel {
+    this.setPhysicsLevel(this.physicsLevel === 2 ? 1 : 2);
+    return this.physicsLevel;
   }
 
   /**
@@ -1603,32 +1831,98 @@ export class World {
     const start = this.lassoStart;
     if (!start) return;
 
-    // Amostra novos pontos a cada >= 3px de movimento
     const last = this.lassoPoints[this.lassoPoints.length - 1];
     if (!last || Math.hypot(screen.x - last.x, screen.y - last.y) >= 3) {
       this.lassoPoints.push({ ...screen });
     }
 
+    const fromStart = Math.hypot(screen.x - start.x, screen.y - start.y);
+    if (fromStart > LASSO_START_RADIUS * 1.6) this.lassoLeftStart = true;
+
+    if (!this.lassoClosed) {
+      this.selectInsideLasso();
+      if (this.lassoLeftStart && fromStart <= LASSO_START_RADIUS && this.selectedIds.size > 0) {
+        this.lassoClosed = true;
+        this.lassoCrossTarget = this.selectedIds.size >= 2 ? this.selectionScreenCentroid() : null;
+      }
+    } else if (
+      this.lassoCrossTarget &&
+      fromStart > LASSO_START_RADIUS &&
+      last &&
+      distToSegmentSq(this.lassoCrossTarget, last, screen) <= LASSO_CROSS_RADIUS * LASSO_CROSS_RADIUS
+    ) {
+      const ids = this.layoutTargets();
+      const base = this.createPileFrom(ids);
+      this.endLasso();
+      if (base) this.deps.overlay?.toast(t('toast.lassoPiled', { n: ids.length }));
+      return;
+    }
+    this.pushLassoOverlay();
+  }
+
+  /** Lasso'n'Cross / LassoMenu: callback ao fechar o laço e soltar no disco azul. */
+  onLassoMenu(listener: LassoMenuListener | null): void {
+    this.lassoMenuListener = listener;
+  }
+
+  /** Estado do laço (p/ testes e overlay). */
+  getLassoState(): { active: boolean; closed: boolean; crossTarget: { x: number; y: number } | null } {
+    return { active: this.lassoing, closed: this.lassoClosed, crossTarget: this.lassoCrossTarget };
+  }
+
+  private endLasso(): void {
+    this.lassoing = false;
+    this.lassoStart = null;
+    this.lassoPoints = [];
+    this.lassoLeftStart = false;
+    this.lassoClosed = false;
+    this.lassoCrossTarget = null;
+    this.deps.overlay?.setLasso(null);
+    this.dirty = true;
+  }
+
+  private pushLassoOverlay(): void {
+    const start = this.lassoStart;
+    if (!start) return;
     const aabb = computePointsAABB(this.lassoPoints);
-    const lassoData = {
+    this.deps.overlay?.setLasso({
       ...aabb,
       points: this.lassoPoints,
-    };
-    this.deps.overlay?.setLasso(lassoData);
+      start,
+      startRadius: this.lassoLeftStart ? LASSO_START_RADIUS : 0,
+      closed: this.lassoClosed,
+      crossTarget: this.lassoCrossTarget,
+    });
+  }
 
+  private selectionScreenCentroid(): { x: number; y: number } | null {
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (const id of this.selectedIds) {
+      const e = this.entries.get(id);
+      if (!e) continue;
+      const s = this.deps.renderer.projectToScreen(e.data.pose.position);
+      if (!s.visible) continue;
+      sx += s.x;
+      sy += s.y;
+      n++;
+    }
+    return n > 0 ? { x: sx / n, y: sy / n } : null;
+  }
+
+  /** Seleciona os objetos visíveis cujo centro projetado cai dentro do laço. */
+  private selectInsideLasso(): void {
+    const aabb = computePointsAABB(this.lassoPoints);
     const ids = new Set(this.lassoBase);
     if (aabb.w > 3 || aabb.h > 3) {
       for (const e of this.entries.values()) {
         if (this.deps.renderer.isVisible(e.render) === false) continue;
         const s = this.deps.renderer.projectToScreen(e.data.pose.position);
         if (!s.visible) continue;
-
-        // Fora do AABB: descarta imediatamente
         if (s.x < aabb.x || s.x > aabb.x + aabb.w || s.y < aabb.y || s.y > aabb.y + aabb.h) {
           continue;
         }
-
-        // Se há traço livre com múltiplos pontos, testa ponto em polígono ou proximidade ao traço
         let hit = false;
         if (this.lassoPoints.length >= 4) {
           hit = isPointInPolygon(s, this.lassoPoints);
@@ -1643,7 +1937,6 @@ export class World {
         } else {
           hit = true;
         }
-
         if (hit) ids.add(e.data.id);
       }
     }
@@ -1681,16 +1974,30 @@ export class World {
     if (this.pickedId && this.drag.isDragging) {
       const e = this.entries.get(this.pickedId);
       if (e) {
-        const p = this.drag.step(dt);
-        this.deps.physics.setPosition(e.body, p);
+        const p = this.clampToRoom(e, this.drag.step(dt));
+        this.deps.physics.moveKinematic(e.body, p);
+        for (const m of this.group) {
+          const f = this.entries.get(m.id);
+          if (!f) continue;
+          const fp = this.clampToRoom(f, { x: p.x + m.dx, y: m.y, z: p.z + m.dz });
+          this.deps.physics.moveKinematic(f.body, fp);
+        }
       }
+    }
+
+    const preStep = new Map<string, Vec3>();
+    for (const id of this.recentToss.keys()) {
+      const e = this.entries.get(id);
+      if (e) preStep.set(id, this.deps.physics.getVelocity(e.body));
     }
 
     // Passo de física
     this.deps.physics.step(dt);
+    this.containEscapees();
 
-    // WallToss (Fase 7): toss recente que encosta numa parede → prega nela
-    this.checkWallToss(dt);
+    // WallToss (Fase 7): toss recente que encosta numa parede → prega nela.
+    // Usa a velocidade de ANTES do passo: o impacto com a parede a zera.
+    this.checkWallToss(dt, preStep);
 
     // Dwell & Scrub (P1): incrementa dwellTimer quando o cursor repousa sobre a pilha
     if (this.hoveredPileId && !this.drag.isDragging && !this.lassoing && !this.shoving) {
@@ -1711,7 +2018,11 @@ export class World {
 
     // Sincroniza poses físico → modelo → render (só corpos acordados p/ perf)
     for (const e of this.entries.values()) {
-      if (this.deps.physics.isSleeping(e.body) && this.pickedId !== e.data.id) continue;
+      if (
+        this.deps.physics.isSleeping(e.body) &&
+        this.pickedId !== e.data.id &&
+        !this.isGroupMember(e.data.id)
+      ) continue;
       const pose = this.deps.physics.getPose(e.body);
       e.data.pose = pose;
       e.data.velocity = this.deps.physics.getVelocity(e.body);
@@ -1728,11 +2039,10 @@ export class World {
    * velocidade o leva até uma parede (encostou), ele prega naquela parede —
    * espelha o comportamento "jogue na parede e fica preso" do original.
    */
-  private checkWallToss(dt: number): void {
+  private checkWallToss(dt: number, preStep: Map<string, Vec3>): void {
     if (this.recentToss.size === 0) return;
-    const hs = this.room.halfSize;
-    const t = this.room.wallThickness;
     const CONTACT = 2.5; // tolerância de contato com a face interna da parede
+    const inner = this.innerWall();
 
     for (const [id, ttl] of [...this.recentToss]) {
       const remaining = ttl - dt; // decai com o timestep
@@ -1747,17 +2057,16 @@ export class World {
         this.recentToss.delete(id);
         continue;
       }
-      const v = this.deps.physics.getVelocity(e.body);
+      const v = preStep.get(id) ?? this.deps.physics.getVelocity(e.body);
       const speed = Math.hypot(v.x, v.z);
       if (speed < 40) continue; // devagar demais = não foi um toss em voo
 
-      const p = e.data.pose.position;
-      const he = this.scaledHalf(e); // contato com a parede considera a escala
-      // Parede interna em ±(hs - t/2); objeto encostou se centro + meia-largura chega lá
-      const faceN = -hs + t / 2 + he.y + CONTACT;
-      const faceS = hs - t / 2 - he.y - CONTACT;
-      const faceW = -hs + t / 2 + he.x + CONTACT;
-      const faceE = hs - t / 2 - he.x - CONTACT;
+      const p = this.deps.physics.getPose(e.body).position;
+      const { ex, ez } = this.floorExtents(e);
+      const faceN = -inner + ez + CONTACT;
+      const faceS = inner - ez - CONTACT;
+      const faceW = -inner + ex + CONTACT;
+      const faceE = inner - ex - CONTACT;
 
       if (p.z <= faceN && v.z < -20) this.pinToss(id, 0);
       else if (p.z >= faceS && v.z > 20) this.pinToss(id, 1);

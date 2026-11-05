@@ -48,6 +48,11 @@ function makePhysicsMock(): IPhysics {
       if (f) frozen.add(h);
       else frozen.delete(h);
     }),
+    moveKinematic: vi.fn((h, p) => {
+      const pose = poses.get(h);
+      if (pose) pose.position = { ...p };
+    }),
+    setItemCollisions: vi.fn(),
     raycast: vi.fn(() => null),
     step: vi.fn(),
     isSleeping: vi.fn(() => false),
@@ -896,5 +901,178 @@ describe('Fase 7: auto-pilha por tipo e rename', () => {
     const obj = world.getObject(id)!;
     expect(obj.pose.position.x).toBe(18.0);
     expect(obj.pose.position.z).toBe(36.0);
+  });
+});
+
+describe('Paredes: nada sai da sala', () => {
+  it('arrastar além da parede para o item na face interna', async () => {
+    const { world } = await makeWorld();
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const p = (x: number, z: number) => ({ x, y: 0, z });
+    world.processAction({ type: 'pointerDown', world: p(0, 0), screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerMove', world: p(400, -400), screen: { x: 9, y: 9 }, pointerId: 1 });
+    for (let i = 0; i < 120; i++) world.update(1 / 60);
+    const pos = world.getObject(id)!.pose.position;
+    expect(pos.x).toBeLessThanOrEqual(118 + 1e-6);
+    expect(pos.z).toBeGreaterThanOrEqual(-118 - 1e-6);
+    expect(world.isInsideRoom(id)).toBe(true);
+  });
+
+  it('item que escapou da física volta para dentro da sala', async () => {
+    const { world, physics } = await makeWorld();
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    physics.setPosition(1 as BodyHandle, { x: 500, y: -40, z: -300 });
+    world.update(1 / 60);
+    const pos = world.getObject(id)!.pose.position;
+    expect(pos).toEqual({ x: 118, y: 1.6, z: -118 });
+    expect(world.isInsideRoom(id)).toBe(true);
+  });
+});
+
+describe('Seleção em grupo: arrastar vários objetos juntos', () => {
+  async function twoSelected() {
+    const ctx = await makeWorld();
+    const a = ctx.world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = ctx.world.addBox({ x: 30, y: 1.6, z: 10 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    ctx.world.select(a);
+    ctx.world.toggleSelect(b);
+    return { ...ctx, a, b };
+  }
+  const p = (x: number, z: number) => ({ x, y: 0, z });
+
+  it('arrastar um item selecionado move toda a seleção mantendo a formação', async () => {
+    const { world, a, b } = await twoSelected();
+    world.processAction({ type: 'pointerDown', world: p(0, 0), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerMove', world: p(-40, 20), screen: { x: 60, y: 120 }, pointerId: 1 });
+    for (let i = 0; i < 120; i++) world.update(1 / 60);
+    world.processAction({ type: 'pointerUp', world: p(-40, 20), screen: { x: 60, y: 120 }, pointerId: 1 });
+    const pa = world.getObject(a)!.pose.position;
+    const pb = world.getObject(b)!.pose.position;
+    expect(pa.x).toBeCloseTo(-40, 0);
+    expect(pa.z).toBeCloseTo(20, 0);
+    expect(pb.x - pa.x).toBeCloseTo(30, 5);
+    expect(pb.z - pa.z).toBeCloseTo(10, 5);
+    expect(world.getSelectedIds().sort()).toEqual([a, b].sort());
+  });
+
+  it('clique sem arrastar num item da seleção deixa só ele selecionado', async () => {
+    const { world, a } = await twoSelected();
+    world.processAction({ type: 'pointerDown', world: p(0, 0), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerUp', world: p(0, 0), screen: { x: 100, y: 100 }, pointerId: 1 });
+    expect(world.getSelectedIds()).toEqual([a]);
+  });
+
+  it('o grupo também não atravessa as paredes', async () => {
+    const { world, b } = await twoSelected();
+    world.processAction({ type: 'pointerDown', world: p(0, 0), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerMove', world: p(110, 0), screen: { x: 300, y: 100 }, pointerId: 1 });
+    for (let i = 0; i < 120; i++) world.update(1 / 60);
+    expect(world.getObject(b)!.pose.position.x).toBeLessThanOrEqual(118 + 1e-6);
+    expect(world.isInsideRoom(b)).toBe(true);
+  });
+});
+
+describe("Laço do vídeo: Lasso'n'Cross e LassoMenu", () => {
+  async function lassoWorld() {
+    const overlay = makeOverlayMock();
+    const ctx = await makeWorld(overlay);
+    (ctx.renderer.projectToScreen as ReturnType<typeof vi.fn>).mockImplementation((v: Vec3) => ({
+      x: v.x + 300,
+      y: v.z + 300,
+      visible: true,
+    }));
+    const ids = [
+      ctx.world.addBox({ x: -20, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt'),
+      ctx.world.addBox({ x: 20, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt'),
+      ctx.world.addBox({ x: 0, y: 1.6, z: 30 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt'),
+    ];
+    return { ...ctx, overlay, ids };
+  }
+  const floor = { x: 0, y: 0, z: -200 };
+  const move = (world: World, x: number, y: number) =>
+    world.processAction({ type: 'pointerMove', world: floor, screen: { x, y }, pointerId: 1 });
+
+  function drawLoop(world: World) {
+    world.processAction({ type: 'pointerDown', world: floor, screen: { x: 300, y: 240 }, button: 0, pointerId: 1 });
+    const cx = 300;
+    const cy = 310;
+    for (let i = 1; i <= 36; i++) {
+      const a = -Math.PI / 2 + (i / 36) * Math.PI * 2;
+      move(world, cx + 80 * Math.cos(a), cy + 70 * Math.sin(a));
+    }
+  }
+
+  it('fechar o laço e soltar no disco azul abre o LassoMenu com a seleção', async () => {
+    const { world, ids } = await lassoWorld();
+    const menu = vi.fn();
+    world.onLassoMenu(menu);
+    drawLoop(world);
+    expect(world.getLassoState().closed).toBe(true);
+    world.processAction({ type: 'pointerUp', world: floor, screen: { x: 300, y: 240 }, pointerId: 1 });
+    expect(menu).toHaveBeenCalledTimes(1);
+    expect((menu.mock.calls[0][1] as string[]).sort()).toEqual([...ids].sort());
+    expect(world.getLassoState().active).toBe(false);
+  });
+
+  it('cruzar o alvo central depois de fechar o laço empilha a seleção', async () => {
+    const { world, ids, overlay } = await lassoWorld();
+    const menu = vi.fn();
+    world.onLassoMenu(menu);
+    drawLoop(world);
+    const target = world.getLassoState().crossTarget!;
+    expect(target).not.toBeNull();
+    move(world, 300, 275);
+    move(world, target.x, target.y + 2);
+    for (const id of ids) expect(world.inPile(id)).toBe(true);
+    expect(overlay.toast).toHaveBeenCalledWith(expect.stringContaining('3'));
+    world.processAction({ type: 'pointerUp', world: floor, screen: { x: target.x, y: target.y }, pointerId: 1 });
+    expect(menu).not.toHaveBeenCalled();
+  });
+
+  it('laço aberto (sem voltar ao início) só seleciona, sem menu', async () => {
+    const { world } = await lassoWorld();
+    const menu = vi.fn();
+    world.onLassoMenu(menu);
+    world.processAction({ type: 'pointerDown', world: floor, screen: { x: 200, y: 250 }, button: 0, pointerId: 1 });
+    move(world, 400, 250);
+    move(world, 400, 360);
+    move(world, 200, 360);
+    world.processAction({ type: 'pointerUp', world: floor, screen: { x: 200, y: 360 }, pointerId: 1 });
+    expect(menu).not.toHaveBeenCalled();
+    expect(world.getSelectedIds().length).toBeGreaterThan(0);
+  });
+});
+
+describe('Girar, paredes e níveis de física', () => {
+  it('rotateSelection gira em Y e mantém o item dentro da sala', async () => {
+    const { world } = await makeWorld();
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    expect(world.rotateSelection(Math.PI / 2, [id])).toBe(1);
+    const q = world.getObject(id)!.pose.rotation;
+    expect(q.y).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(q.w).toBeCloseTo(Math.SQRT1_2, 5);
+  });
+
+  it('pregar na parede deixa o item em pé, encostado na face interna; despregar deita de volta', async () => {
+    const { world } = await makeWorld();
+    const id = world.addBox({ x: 10, y: 1.6, z: -100 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    world.pinToWall(id, 0);
+    let o = world.getObject(id)!;
+    expect(o.pose.rotation.x).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(o.pose.position.z).toBeCloseTo(-125 + 1.6 + 0.5, 5);
+    expect(o.pose.position.y).toBeGreaterThanOrEqual(7 + 2);
+    world.pinToWall(id, null);
+    o = world.getObject(id)!;
+    expect(o.pose.rotation).toEqual({ x: 0, y: 0, z: 0, w: 1 });
+    expect(world.isInsideRoom(id)).toBe(true);
+  });
+
+  it('alternar o nível de física liga/desliga a colisão entre itens', async () => {
+    const { world, physics } = await makeWorld();
+    expect(world.getPhysicsLevel()).toBe(2);
+    expect(world.togglePhysicsLevel()).toBe(1);
+    expect(physics.setItemCollisions).toHaveBeenLastCalledWith(false);
+    expect(world.togglePhysicsLevel()).toBe(2);
+    expect(physics.setItemCollisions).toHaveBeenLastCalledWith(true);
   });
 });
