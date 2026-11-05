@@ -1,0 +1,706 @@
+/* BumpTop 3D Web — estilos base (overlay, menu, labels, toast) */
+:root {
+  --bg: #1a1a20;
+  --panel: #26262e;
+  --border: #3a3a44;
+  --text: #e6e6ea;
+  --accent: #4f9cff;
+  --danger: #ff6b6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  overscroll-behavior: none;
+}
+
+#scene-root {
+  position: fixed;
+  inset: 0;
+}
+
+#scene-root canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Laço livre e elíptico (P1 — BumpTop Freehand & Curved Dotted Lasso) */
+.lasso-rect {
+  position: absolute;
+  border: none;
+  background: transparent;
+  pointer-events: none;
+}
+
+.lasso-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.lasso-polygon {
+  fill: rgba(56, 189, 248, 0.12);
+}
+
+.lasso-line {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2.5;
+  stroke-dasharray: 6 5;
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.65));
+}
+
+.lasso-start-ring {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2;
+}
+
+.lasso-pen-tip {
+  fill: #38bdf8;
+  stroke: #ffffff;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.95));
+}
+
+/* Handle de resize da seleção (A — arrastar o canto p/ redimensionar) */
+.resize-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px; /* centraliza no canto do bbox */
+  background: var(--accent);
+  border: 2px solid #fff;
+  border-radius: 3px;
+  cursor: nwse-resize;
+  touch-action: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  z-index: 11;
+}
+
+/* Pile Widget Halo (P1 — anel de widgets ao redor da pilha) */
+.pile-halo {
+  position: absolute;
+  width: 140px;
+  height: 90px;
+  margin: -70px 0 0 -70px;
+  pointer-events: auto;
+  z-index: 25;
+  transition: opacity 0.15s ease;
+}
+
+.pile-halo-btn {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border-radius: 50%;
+  background: rgba(22, 40, 58, 0.88);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.pile-halo-btn:hover {
+  transform: scale(1.18);
+  background: var(--accent);
+  border-color: #ffffff;
+}
+
+.pile-halo-btn.active {
+  background: var(--accent);
+  border-color: #ffffff;
+  box-shadow: 0 0 10px rgba(79, 156, 255, 0.6);
+}
+
+.pile-halo-btn[data-action="break"]:hover {
+  background: var(--danger);
+}
+
+/* Tooltip preto do botão do halo (igual aos hints do original) */
+.pile-halo-btn[data-hint]::after {
+  content: attr(data-hint);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.92);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 50;
+}
+
+.pile-halo-btn[data-hint]:hover::after {
+  opacity: 1;
+}
+
+/* Dwell Ring (P1 — Dwell & Scrub: anel verde suave no piso/topo da pilha) */
+.dwell-ring {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  pointer-events: none;
+  z-index: 24;
+  transition: opacity 0.15s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dwell-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 8px rgba(81, 207, 102, 0.4));
+}
+
+.dwell-fg {
+  transition: stroke-dashoffset 0.08s linear;
+}
+
+.dwell-ring.active {
+  transform: scale(1.15);
+  animation: dwellPulse 1.8s infinite ease-in-out;
+}
+
+@keyframes dwellPulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(81, 207, 102, 0.6));
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(81, 207, 102, 0.95));
+  }
+}
+
+/* Scrub Strip (P1 — Faixa de miniaturas de folheamento/peel) */
+.scrub-strip {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(22, 30, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 12px rgba(81, 207, 102, 0.2);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  z-index: 26;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  max-width: 90vw;
+  overflow-x: auto;
+}
+
+.scrub-chip {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  flex-shrink: 0;
+}
+
+.scrub-chip:hover,
+.scrub-chip.active {
+  transform: scale(1.22);
+  border-color: #51cf66;
+  box-shadow: 0 0 12px rgba(81, 207, 102, 0.65);
+  background: rgba(81, 207, 102, 0.2);
+  z-index: 2;
+}
+
+.scrub-chip-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.scrub-chip-icon {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  border-radius: 4px;
+}
+
+.scrub-chip[data-hint]::after {
+  content: attr(data-hint);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.94);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 50;
+}
+
+.scrub-chip:hover::after,
+.scrub-chip.active::after {
+  opacity: 1;
+}
+
+.ctx-menu {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 140px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Menu Radial (Blue Pie Menu — Design original BumpTop) */
+.ctx-menu.radial-menu {
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  margin: -140px 0 0 -140px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  display: block;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
+  animation: radialPopIn 0.16s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 35;
+  pointer-events: auto;
+}
+
+@keyframes radialPopIn {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.radial-pie-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+  overflow: visible;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.45));
+}
+
+.radial-slice {
+  fill: rgba(18, 52, 92, 0.88);
+  stroke: rgba(147, 197, 253, 0.38);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: fill 0.12s ease, stroke 0.12s ease, filter 0.12s ease;
+}
+
+.radial-slice:hover,
+.radial-slice.active {
+  fill: rgba(30, 96, 210, 0.96);
+  stroke: #67e8f9;
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.85));
+}
+
+.radial-slice.danger {
+  fill: rgba(86, 20, 30, 0.88);
+  stroke: rgba(252, 165, 165, 0.38);
+}
+
+.radial-slice.danger:hover,
+.radial-slice.danger.active {
+  fill: rgba(220, 38, 38, 0.95);
+  stroke: #fca5a5;
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.85));
+}
+
+.radial-hub {
+  position: absolute;
+  left: 140px;
+  top: 140px;
+  width: 84px;
+  height: 84px;
+  margin: -42px 0 0 -42px;
+  border-radius: 50%;
+  pointer-events: auto;
+  cursor: pointer;
+  background: radial-gradient(circle at 35% 35%, #1e4976 0%, #112a46 65%, #0b1a2c 100%);
+  border: 2px solid rgba(147, 197, 253, 0.6);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), inset 0 2px 4px rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #fff;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  z-index: 5;
+}
+
+.radial-hub:hover {
+  transform: scale(1.06);
+  border-color: #67e8f9;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.6), inset 0 2px 4px rgba(255, 255, 255, 0.4);
+}
+
+.radial-hub-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 74px;
+  overflow: hidden;
+  padding: 2px;
+}
+
+.radial-hub-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #60a5fa;
+  height: 24px;
+}
+
+.radial-hub-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 72px;
+  margin-top: 2px;
+}
+
+.ctx-menu.radial-menu .radial-btn.ctx-item {
+  position: absolute !important;
+  margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #ffffff !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  width: 48px !important;
+  height: 44px !important;
+  box-sizing: border-box !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  transition: transform 0.12s ease;
+  z-index: 6 !important;
+}
+
+.ctx-menu.radial-menu .radial-btn.ctx-item:hover,
+.ctx-menu.radial-menu .radial-btn.ctx-item.active {
+  transform: translate(-50%, -50%) scale(1.15) !important;
+  color: #ffffff !important;
+}
+
+/* Oculta tooltip ::after flutuante no menu radial para não sobrepor fatias vizinhas */
+.ctx-menu.radial-menu .radial-btn.ctx-item[data-hint]::after {
+  display: none !important;
+}
+
+/* Barra inferior de dica suave da ação em foco */
+.radial-hint-bar {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(11, 26, 44, 0.92);
+  border: 1px solid rgba(147, 197, 253, 0.4);
+  color: #e2e8f0;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  transition: opacity 0.15s ease;
+  z-index: 20;
+}
+
+.radial-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #93c5fd;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+  transition: color 0.12s ease, filter 0.12s ease;
+}
+
+.radial-btn:hover .radial-btn-icon,
+.radial-btn.active .radial-btn-icon {
+  color: #ffffff;
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.9));
+}
+
+.radial-btn-label {
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.05;
+  text-align: center;
+  color: #f1f5f9;
+  margin-top: 1px;
+  max-width: 44px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+}
+
+.ctx-item {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ctx-item:hover {
+  background: rgba(79, 156, 255, 0.18);
+}
+
+.ctx-item.danger {
+  color: var(--danger);
+}
+
+/* Tooltip preto dos itens em menus verticais (P0) */
+.ctx-menu:not(.radial-menu) .ctx-item {
+  position: relative;
+}
+
+.ctx-item[data-hint]::after {
+  content: attr(data-hint);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.92);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  width: max-content;
+  max-width: 240px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 40;
+}
+
+.ctx-item[data-hint]:hover::after {
+  opacity: 1;
+}
+
+/* Menu colado na borda direita → tooltip para a esquerda */
+.ctx-menu.flip .ctx-item[data-hint]::after {
+  left: auto;
+  right: calc(100% + 10px);
+}
+
+/* Menu perto do rodapé → tooltip acima do item */
+.ctx-menu.flip-y .ctx-item[data-hint]::after {
+  top: auto;
+  bottom: calc(100% + 8px);
+  transform: none;
+}
+
+/* Botão Reset Camera (P0) — canto superior direito */
+.reset-cam {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 12;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.reset-cam:hover {
+  background: rgba(79, 156, 255, 0.18);
+}
+
+/* Labels de objeto — Estilo BumpTop: texto elegante sob o card */
+.obj-label {
+  position: absolute;
+  transform: translate(-50%, 0);
+  font-size: 11px;
+  font-weight: 500;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.8);
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 1px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  letter-spacing: 0.2px;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.25s ease;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
+/* PWA update toast */
+#pwa-toast {
+  position: fixed;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  right: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+#pwa-toast[hidden] {
+  display: none;
+}
+
+/* Editor de nota adesiva (M6) */
+.note-editor {
+  background: #ffd43b;
+  border-radius: 4px 4px 8px 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  padding: 8px;
+  z-index: 30;
+  width: 220px;
+}
+
+.note-textarea {
+  width: 100%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  background: #fff8c4;
+  font: 13px/1.35 inherit;
+  padding: 6px;
+  resize: vertical;
+  min-height: 90px;
+}
+
+.note-textarea:focus {
+  outline: 2px solid #f59f00;
+}
+
+.note-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+#pwa-toast button {
+  border: 1px solid var(--border);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#pwa-toast button#pwa-dismiss {
+  background: transparent;
+  color: var(--text);
+}

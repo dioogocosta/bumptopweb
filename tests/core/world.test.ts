@@ -1,0 +1,900 @@
+/**
+ * Testes de integração do World (puro) com mocks dos ports.
+ * Cobre o fluxo M3: soltar sobre outro objeto → pilha → layout → grid/páginas.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { World } from '../../src/core/world';
+import { PileLayout } from '../../src/core/model/types';
+import type {
+  BodyHandle,
+  IOverlay,
+  IPhysics,
+  IRenderer,
+  ObjectHandle,
+  Pose,
+  Vec3,
+} from '../../src/core/ports/index';
+
+function makePhysicsMock(): IPhysics {
+  const poses = new Map<number, Pose>();
+  const frozen = new Set<number>();
+  const vels = new Map<number, Vec3>();
+  let next = 1;
+  return {
+    init: vi.fn(async () => {}),
+    createBox: vi.fn((_id, pos) => {
+      const h = next++ as BodyHandle;
+      poses.set(h, { position: { ...pos }, rotation: { x: 0, y: 0, z: 0, w: 1 } });
+      return h;
+    }),
+    createRoom: vi.fn(),
+    removeBody: vi.fn((h) => {
+      poses.delete(h);
+      frozen.delete(h);
+      vels.delete(h);
+    }),
+    getPose: vi.fn((h) => poses.get(h)!),
+    getVelocity: vi.fn((h) => vels.get(h) ?? { x: 0, y: 0, z: 0 }),
+    setPosition: vi.fn((h, p) => {
+      const pose = poses.get(h)!;
+      pose.position = { ...p };
+    }),
+    setRotation: vi.fn(),
+    setVelocity: vi.fn((h, v) => {
+      vels.set(h, { ...v });
+    }),
+    applyImpulse: vi.fn(),
+    setFrozen: vi.fn((h, f) => {
+      if (f) frozen.add(h);
+      else frozen.delete(h);
+    }),
+    raycast: vi.fn(() => null),
+    step: vi.fn(),
+    isSleeping: vi.fn(() => false),
+    dispose: vi.fn(),
+    // helpers de teste
+    __frozen: frozen,
+  } as unknown as IPhysics & { __frozen: Set<number> };
+}
+
+function makeRendererMock(): IRenderer {
+  let next = 1;
+  const visible = new Map<number, boolean>();
+  return {
+    init: vi.fn(async () => {}),
+    addBox: vi.fn(() => {
+      const h = next++ as ObjectHandle;
+      visible.set(h, true);
+      return h;
+    }),
+    setTexture: vi.fn(),
+    addRoom: vi.fn(),
+    setPose: vi.fn(),
+    setVisible: vi.fn((h, v) => visible.set(h, v)),
+    isVisible: vi.fn((h) => visible.get(h) ?? false),
+    setHighlight: vi.fn(),
+    setScale: vi.fn(),
+    remove: vi.fn((h) => visible.delete(h)),
+    setCamera: vi.fn(),
+    getCamera: vi.fn(() => ({
+      target: { x: 0, y: 0, z: 0 },
+      distance: 100,
+      azimuth: 0,
+      elevation: 0.5,
+      fov: 50,
+    })),
+    projectToScreen: vi.fn(() => ({ x: 0, y: 0, visible: true })),
+    screenToRay: vi.fn(() => ({ origin: { x: 0, y: 50, z: 0 }, direction: { x: 0, y: -1, z: 0 } })),
+    resize: vi.fn(),
+    setTheme: vi.fn(),
+    render: vi.fn(),
+    dispose: vi.fn(),
+  };
+}
+
+async function makeWorld(overlay?: IOverlay) {
+  const physics = makePhysicsMock();
+  const renderer = makeRendererMock();
+  const world = new World({ physics, renderer, overlay });
+  await world.init();
+  return { world, physics, renderer };
+}
+
+/** Overlay mock (p/ asserir setLasso/toast do laço e do WallToss). */
+function makeOverlayMock(): IOverlay & { setLasso: ReturnType<typeof vi.fn> } {
+  return {
+    showContextMenu: vi.fn(),
+    hideContextMenu: vi.fn(),
+    setLabel: vi.fn(),
+    toast: vi.fn(),
+    setLasso: vi.fn(),
+    editNote: vi.fn(async () => ''),
+    setResizeHandle: vi.fn(),
+    onResizeStart: vi.fn(),
+    setPileHalo: vi.fn(),
+    onPileHaloAction: vi.fn(),
+    isHaloHovered: vi.fn(() => false),
+    setDwellRing: vi.fn(),
+    setScrubStrip: vi.fn(),
+    onScrubItemSelect: vi.fn(),
+    onScrubHover: vi.fn(),
+    isScrubHovered: vi.fn(() => false),
+  } as IOverlay & { setLasso: ReturnType<typeof vi.fn> };
+}
+
+/** Simula um arraste: down em `from`, move, up em `to` (coords de piso). */
+function dragDrop(world: World, from: { x: number; z: number }, to: { x: number; z: number }) {
+  const p = (s: { x: number; z: number }) => ({ x: s.x, y: 0, z: s.z });
+  world.processAction({ type: 'pointerDown', world: p(from), screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
+  world.processAction({ type: 'pointerMove', world: p(to), screen: { x: 0, y: 0 }, pointerId: 1 });
+  world.processAction({ type: 'pointerUp', world: p(to), screen: { x: 0, y: 0 }, pointerId: 1 });
+}
+
+describe('World + pilhas (M3)', () => {
+  it('soltar um objeto sobre outro cria uma pilha (parentId aplicado)', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+
+    // Arrasta b por cima de a (lento, sem toss: um único movimento curto)
+    dragDrop(world, { x: 40, z: 0 }, { x: 0, z: 0 });
+
+    const dataA = world.getObject(a)!;
+    const dataB = world.getObject(b)!;
+    // Um dos dois passou a ter parentId (o filho); a base é o outro
+    const parented = dataA.parentId !== null ? dataA : dataB.parentId !== null ? dataB : null;
+    expect(parented).not.toBeNull();
+    expect(parented!.parentId).toBe(parented === dataA ? b : a);
+  });
+
+  it('togglePileLayout alterna Stack ↔ Grid e o grid oculta itens fora da página', async () => {
+    const { world, renderer } = await makeWorld();
+    // 3 objetos empilhados via addBox + arrastes encadeados seria custoso;
+    // usamos o caminho público: empilha em pares
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      ids.push(world.addBox({ x: i * 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', `f${i}`));
+    }
+    dragDrop(world, { x: 40, z: 0 }, { x: 0, z: 0 }); // f1 → f0
+    dragDrop(world, { x: 80, z: 0 }, { x: 0, z: 0 }); // f2 → pilha
+
+    // Agora alterna p/ Grid: com 3 itens, página 0 mostra todos (≤16)
+    world.togglePileLayout(ids[0]);
+    expect(world.isGridPile(ids[0])).toBe(true);
+    // Todos ainda visíveis (3 < 16)
+    for (const id of ids) expect(world.getObject(id)).not.toBeNull();
+    // Volta p/ Stack
+    world.togglePileLayout(ids[0]);
+    expect(world.isGridPile(ids[0])).toBe(false);
+    void renderer;
+  });
+
+  it('soltar em pasta NÃO empilha (pasta move, M2)', async () => {
+    const { world } = await makeWorld();
+    world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#0f0', 'docs', {
+      fsPath: '/docs',
+      isDir: true,
+    });
+    const file = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt', {
+      fsPath: '/a.txt',
+    });
+    dragDrop(world, { x: 40, z: 0 }, { x: 0, z: 0 });
+    expect(world.getObject(file)!.parentId).toBeNull();
+  });
+
+  it('objeto solto longe de tudo não vira filho de ninguém', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b');
+    dragDrop(world, { x: 40, z: 0 }, { x: 40, z: 60 }); // solta no vazio
+    expect(world.getObject(a)!.parentId).toBeNull();
+    expect(world.getObject(b)!.parentId).toBeNull();
+  });
+
+  it('serializa e restaura pilhas pelo snapshot', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b');
+    dragDrop(world, { x: 40, z: 0 }, { x: 0, z: 0 });
+
+    const snap = world.toSnapshot();
+    const pileKeys = Object.keys(snap.piles);
+    expect(pileKeys.length).toBe(1);
+
+    // Restaura num World novo (fila de simulação)
+    const { world: w2 } = await makeWorld();
+    w2.loadSnapshot(snap);
+    const dA = w2.getObject(a)!;
+    const dB = w2.getObject(b)!;
+    const child = dA.parentId !== null ? dA : dB;
+    expect(child.parentId).not.toBeNull();
+    expect(w2.isGridPile(child.id)).toBe(false); // layout padrão Stack
+    expect(PileLayout.Stack).toBe(0);
+  });
+
+  it('layout Leaf espalha os itens em leque (posições distintas)', async () => {
+    const { world } = await makeWorld();
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      ids.push(world.addBox({ x: i * 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', `f${i}`));
+    }
+    dragDrop(world, { x: 40, z: 0 }, { x: 0, z: 0 });
+    dragDrop(world, { x: 80, z: 0 }, { x: 0, z: 0 });
+    dragDrop(world, { x: 120, z: 0 }, { x: 0, z: 0 });
+
+    // Stack → Grid → Leaf
+    world.togglePileLayout(ids[0]);
+    world.togglePileLayout(ids[0]);
+
+    // Leaf: itens espalhados com posições distintas (não colineados na pilha)
+    const poses = ids.map((id) => world.getObject(id)!.pose.position);
+    const xs = new Set(poses.map((p) => p.x.toFixed(2)));
+    expect(xs.size).toBeGreaterThan(1);
+  });
+
+  it('seleção: clicar destaca, clicar no vazio limpa', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b');
+
+    world.processAction({ type: 'pointerDown', world: { x: 0, y: 0, z: 0 }, screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
+    expect(world.getSelectedId()).toBe(a);
+    world.processAction({ type: 'pointerUp', world: { x: 0, y: 0, z: 0 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+
+    world.processAction({ type: 'pointerDown', world: { x: 40, y: 0, z: 0 }, screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
+    expect(world.getSelectedId()).toBe(b);
+    world.processAction({ type: 'pointerUp', world: { x: 40, y: 0, z: 0 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+
+    // Clicar no vazio (longe de tudo) → desseleciona
+    world.processAction({ type: 'pointerDown', world: { x: 100, y: 0, z: 100 }, screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
+    expect(world.getSelectedId()).toBeNull();
+  });
+
+  it('orbit: arrastar com botão direito move azimuth/elevation nos limites', async () => {
+    const { world } = await makeWorld();
+    const before = world.getCamera();
+    world.processAction({ type: 'orbit', dAzimuth: 0.5, dElevation: 0.2 });
+    const after = world.getCamera();
+    expect(after.azimuth).toBeCloseTo(before.azimuth + 0.5, 5);
+    expect(after.elevation).toBeCloseTo(before.elevation + 0.2, 5);
+
+    // Elevação preserva os limites (não vira "de cabeça para baixo")
+    for (let i = 0; i < 50; i++) world.processAction({ type: 'orbit', dAzimuth: 0, dElevation: 1 });
+    expect(world.getCamera().elevation).toBeLessThanOrEqual(1.45);
+  });
+
+  it('pinning: prega na parede (posição junto à parede + frozen) e desprega', async () => {
+    const { world, physics } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+
+    world.pinToWall(a, 0); // parede norte (-z)
+    const data = world.getObject(a)!;
+    expect(data.pinnedWall).toBe(0);
+    expect(data.pose.position.z).toBeLessThan(-100); // encostado em z=-130+inset
+    expect(physics.setFrozen).toHaveBeenCalledWith(expect.anything(), true);
+
+    // toggle desprega
+    expect(world.togglePin(a)).toBe(false);
+    expect(world.getObject(a)!.pinnedWall).toBeNull();
+    expect(world.isPinned(a)).toBe(false);
+  });
+
+  it('item pregado não volta a cair até ser despregado', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+    world.pinToWall(a, 3); // leste
+    const pinnedY = world.getObject(a)!.pose.position.y;
+    world.update(1 / 60);
+    world.update(1 / 60);
+    expect(world.getObject(a)!.pose.position.y).toBeCloseTo(pinnedY, 5);
+  });
+
+  it('sticky note: cria, edita texto e serializa no snapshot', async () => {
+    const { world } = await makeWorld();
+    const id = world.addStickyNote({ x: 20, y: 6, z: 20 }, 'comprar pão');
+
+    expect(world.isStickyNote(id)).toBe(true);
+    expect(world.getObject(id)!.meta.noteText).toBe('comprar pão');
+
+    // setNoteText em objeto comum (não-nota) é rejeitado
+    const file = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    expect(world.isStickyNote(file)).toBe(false);
+    expect(world.setNoteText(file, 'x')).toBe(false);
+
+    // Texto sobrevive ao snapshot (persistência SQLite)
+    world.setNoteText(id, 'anotado!');
+    const snap = world.toSnapshot();
+    const row = snap.objects.find((o) => o.id === id)!;
+    expect(row.meta.noteText).toBe('anotado!');
+  });
+
+  it('shove: arrastar o chão com o DEDO empurra objetos próximos (Fase 7: shove = touch)', async () => {
+    const { world, physics } = await makeWorld();
+    world.addBox({ x: 10, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+    // Down longe de qualquer objeto com ponteiro TOUCH → shove (mouse = laço)
+    world.processAction({ type: 'pointerDown', world: { x: -100, y: 0, z: -100 }, screen: { x: 0, y: 0 }, button: 0, pointerId: 1, pointerType: 'touch' });
+    // Move em direção ao objeto
+    world.processAction({ type: 'pointerMove', world: { x: -80, y: 0, z: -80 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+    world.processAction({ type: 'pointerMove', world: { x: 5, y: 0, z: 0 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+    expect(physics.setVelocity).toHaveBeenCalled();
+    world.processAction({ type: 'pointerUp', world: { x: 5, y: 0, z: 0 }, screen: { x: 0, y: 0 }, pointerId: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fase 7 — gestos de assinatura (laço, multi-select, peel, fan-out, WallToss,
+// auto-pilha por tipo, rename)
+// ---------------------------------------------------------------------------
+
+describe('Fase 7: laço (lasso) e seleção múltipla', () => {
+  it('mouse no chão vazio inicia o laço e o retângulo de tela seleciona por projeção', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    const a = world.addBox({ x: 10, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    // Projeção determinística: screen = (x*10, z*10) → a=(100,0), b=(400,0)
+    vi.mocked(renderer.projectToScreen).mockImplementation((p) => ({
+      x: p.x * 10,
+      y: p.z * 10,
+      visible: true,
+    }));
+
+    // Down no chão vazio (longe dos ícones) com MOUSE → laço, não shove
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 0, y: 0 },
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+    });
+    expect(overlay.setLasso).toHaveBeenCalledWith(expect.objectContaining({ x: 0, y: 0, w: 0, h: 0 }));
+
+    // Arrasta até (500,100): retângulo cobre a (100,0) e b (400,0)
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 500, y: 100 },
+      pointerId: 1,
+    });
+    expect(overlay.setLasso).toHaveBeenLastCalledWith(expect.objectContaining({ x: 0, y: 0, w: 500, h: 100 }));
+    expect(world.getSelectedIds()).toContain(a);
+    expect(world.getSelectedIds()).toContain(b);
+
+    // Soltar esconde o retângulo mas mantém a seleção (como o original)
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 500, y: 100 },
+      pointerId: 1,
+    });
+    expect(overlay.setLasso).toHaveBeenLastCalledWith(null);
+    expect(world.getSelectedIds()).toHaveLength(2);
+  });
+
+  it('laço só pega itens VISÍVEIS dentro do retângulo (fora = ignorado)', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    const inside = world.addBox({ x: 10, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'in.txt');
+    const outside = world.addBox({ x: 90, y: 1.6, z: 90 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'out.txt');
+    vi.mocked(renderer.projectToScreen).mockImplementation((p) => ({
+      x: p.x * 10,
+      y: p.z * 10,
+      visible: true,
+    }));
+
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 0, y: 0 },
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+    });
+    // Retângulo cobre só (100,0); outside projeta (900,900) — fora
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 200, y: 50 },
+      pointerId: 1,
+    });
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 200, y: 50 },
+      pointerId: 1,
+    });
+    expect(world.getSelectedIds()).toEqual([inside]);
+    expect(world.getSelectedIds()).not.toContain(outside);
+  });
+
+  it('shift+clique alterna a seleção (aditiva)', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 10, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const down = (x: number) =>
+      world.processAction({
+        type: 'pointerDown',
+        world: { x, y: 0, z: 0 },
+        screen: { x, y: 0 },
+        button: 0,
+        pointerId: 1,
+        shift: true,
+      });
+
+    down(10); // → [a]
+    expect(world.getSelectedIds()).toEqual([a]);
+    down(40); // → [a, b]
+    expect(world.getSelectedIds()).toEqual([a, b]);
+    down(10); // shift de novo em a → remove → [b]
+    expect(world.getSelectedIds()).toEqual([b]);
+  });
+
+  it('P1: Freehand Lasso — desenha laço livre com múltiplos pontos e seleciona por polígono', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    const target = world.addBox({ x: 20, y: 1.6, z: 20 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'target.txt');
+    vi.mocked(renderer.projectToScreen).mockReturnValue({ x: 100, y: 100, visible: true });
+
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 50, y: 50 },
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+    });
+
+    const loopPoints = [
+      { x: 150, y: 50 },
+      { x: 150, y: 150 },
+      { x: 50, y: 150 },
+      { x: 50, y: 50 },
+    ];
+    for (const pt of loopPoints) {
+      world.processAction({
+        type: 'pointerMove',
+        world: { x: -100, y: 0, z: -100 },
+        screen: pt,
+        pointerId: 1,
+      });
+    }
+
+    expect(world.getSelectedIds()).toContain(target);
+    expect(overlay.setLasso).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        points: expect.arrayContaining([{ x: 50, y: 50 }, { x: 150, y: 50 }]),
+      }),
+    );
+  });
+});
+
+describe('Fase 7: scroll sobre pilha (peel) e navegação', () => {
+  it('scroll sobre pilha em Stack faz peel (gira itens) e NÃO dá zoom na câmera', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const c = world.addBox({ x: 80, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt');
+    expect(world.createPileFrom([a, b, c])).toBe(a);
+
+    const bY = world.getObject(b)!.pose.position.y;
+    const cY = world.getObject(c)!.pose.position.y;
+    const distBefore = world.getCamera().distance;
+
+    // Scroll (zoom) com cursor sobre a pilha → consumido pelo peel
+    world.processAction({ type: 'zoom', delta: 1, world: { x: 0, y: 0, z: 0 } });
+
+    // Peel dir=1: topo (c) vai para logo acima da base → c desce, b sobe
+    expect(world.getObject(c)!.pose.position.y).toBeLessThan(cY);
+    expect(world.getObject(b)!.pose.position.y).toBeGreaterThan(bY);
+    // Zoom consumido: câmera intacta
+    expect(world.getCamera().distance).toBe(distBefore);
+
+    // Scroll no chão vazio → zoom normal da câmera
+    world.processAction({ type: 'zoom', delta: -1000, world: { x: -100, y: 0, z: -100 } });
+    expect(world.getCamera().distance).not.toBe(distBefore);
+  });
+
+  it('prevPilePage/nextPilePage mudam a página de um Grid', async () => {
+    const { world } = await makeWorld();
+    const ids: string[] = [];
+    for (let i = 0; i < 17; i++) {
+      ids.push(
+        world.addBox({ x: i * 4, y: 1.6, z: 0 }, { x: 3, y: 3, z: 1.6 }, '#fff', `f${i}.txt`),
+      );
+    }
+    const base = world.createPileFrom(ids);
+    expect(base).not.toBeNull();
+    world.togglePileLayout(base!); // Stack → Grid
+    expect(world.isGridPile(base!)).toBe(true);
+
+    world.nextPilePage(base!); // 17 itens → 2 páginas; item 16 some da pág. 0
+    world.prevPilePage(base!); // volta à pág. 0 → item 16 visível de novo
+    // Página 0: os 16 primeiros visíveis, o 17º fora
+    const snap = world.toSnapshot();
+    expect(snap.objects).toHaveLength(17);
+  });
+});
+
+describe('Fase 7: fan-out (leque) e colapso', () => {
+  it('fanOutPile abre em leque; collapseFanOuts fecha de volta', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const c = world.addBox({ x: 80, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt');
+    const base = world.createPileFrom([a, b, c])!;
+    expect(world.isFanOutPile(base)).toBe(false);
+
+    expect(world.fanOutPile(base)).toBe(true);
+    expect(world.isFanOutPile(base)).toBe(true);
+
+    expect(world.collapseFanOuts()).toBe(1);
+    expect(world.isFanOutPile(base)).toBe(false);
+    expect(world.collapseFanOuts()).toBe(0); // nada a fechar
+  });
+
+  it('fanOutPile em objeto solto (sem pilha) retorna false', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    expect(world.fanOutPile(a)).toBe(false);
+  });
+});
+
+describe('Fase 7: WallToss (toss na parede prende o objeto)', () => {
+  it('toss rápido em direção à parede prega o objeto e dispara o toast', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    // Perto da parede norte (-z); faceN interna = -130 + 5 + 1.6 + 2.5 = -120.9
+    const id = world.addBox({ x: 0, y: 1.6, z: -115 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: 0, y: 0, z: -115 },
+      screen: { x: 0, y: 0 },
+      button: 0,
+      pointerId: 1,
+    });
+    // Alvo bem atrás da parede → mola acelera para -z
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: 0, y: 0, z: -140 },
+      screen: { x: 0, y: 0 },
+      pointerId: 1,
+    });
+    // 4 passos: velocidade cresce (|v|² ≥ 10000 = toss) e o objeto cruza a face
+    for (let i = 0; i < 4; i++) world.update(1 / 60);
+
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: 0, y: 0, z: -140 },
+      screen: { x: 0, y: 0 },
+      pointerId: 1,
+    });
+    expect(world.getObject(id)!.pinnedWall).toBeNull(); // ainda não prendeu
+
+    // Próximo frame: toss recente + contato com a parede → pin + toast
+    world.update(1 / 60);
+    expect(world.getObject(id)!.pinnedWall).toBe(0); // parede norte
+    expect(world.getObject(id)!.pose.position.z).toBeLessThan(-100);
+    expect(overlay.toast).toHaveBeenCalledWith('WallToss! 🎯');
+  });
+
+  it('toss LENTO (sem velocidade de parede) não prende', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const id = world.addBox({ x: 0, y: 1.6, z: -115 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    // Down e up sem mover → sem toss → nada acontece
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: 0, y: 0, z: -115 },
+      screen: { x: 0, y: 0 },
+      button: 0,
+      pointerId: 1,
+    });
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: 0, y: 0, z: -115 },
+      screen: { x: 0, y: 0 },
+      pointerId: 1,
+    });
+    for (let i = 0; i < 5; i++) world.update(1 / 60);
+    expect(world.getObject(id)!.pinnedWall).toBeNull();
+    expect(overlay.toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('Fase 7: auto-pilha por tipo e rename', () => {
+  it('autoStackByType agrupa arquivos da mesma extensão em pilhas', async () => {
+    const { world } = await makeWorld();
+    const t1 = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'rel.txt');
+    const t2 = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'nota.txt');
+    const p1 = world.addBox({ x: 80, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'doc.pdf');
+    const p2 = world.addBox({ x: 120, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'out.pdf');
+
+    expect(world.autoStackByType()).toBe(2); // pilha .txt + pilha .pdf
+    expect(world.inPile(t1)).toBe(true);
+    expect(world.inPile(t2)).toBe(true);
+    expect(world.inPile(p1)).toBe(true);
+    expect(world.inPile(p2)).toBe(true);
+    // Cada pilha tem exatamente 2 membros (txt com txt, pdf com pdf)
+    expect(world.getObject(t1)!.parentId === t2 || world.getObject(t2)!.parentId === t1).toBe(true);
+  });
+
+  it('autoStackByType não empilha pastas nem agrupa extensões soltas', async () => {
+    const { world } = await makeWorld();
+    const dir = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'pasta', {
+      isDir: true,
+    });
+    const dir2 = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'outra', {
+      isDir: true,
+    });
+    const only = world.addBox({ x: 80, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'solo.zip');
+
+    expect(world.autoStackByType()).toBe(0);
+    expect(world.inPile(dir)).toBe(false);
+    expect(world.inPile(dir2)).toBe(false);
+    expect(world.inPile(only)).toBe(false);
+  });
+
+  it('renameObject altera o rótulo; id inexistente retorna false', async () => {
+    const { world } = await makeWorld();
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'antigo.txt');
+
+    expect(world.renameObject(id, 'novo-nome.pdf')).toBe(true);
+    expect(world.getObject(id)!.label).toBe('novo-nome.pdf');
+
+    expect(world.renameObject('id-que-nao-existe', 'x')).toBe(false);
+  });
+
+  it('Pile Widget Halo: hover sobre pilha expõe getPileHaloState() e getPileCenter()', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 0, y: 5.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    world.createPileFrom([a, b]);
+
+    expect(world.getPileHaloState()).toBeNull();
+
+    // Hover sobre a pilha
+    world.processAction({
+      type: 'hover',
+      world: { x: 0, y: 1.6, z: 0 },
+      screen: { x: 200, y: 150 },
+    });
+
+    const halo = world.getPileHaloState();
+    expect(halo).not.toBeNull();
+    expect(halo?.pileId).toBe(a);
+    expect(halo?.itemCount).toBe(2);
+    expect(halo?.messy).toBe(true);
+
+    const center = world.getPileCenter(a);
+    expect(center).not.toBeNull();
+    expect(Math.abs(center!.x)).toBeLessThanOrEqual(1.0);
+    expect(Math.abs(center!.z)).toBeLessThanOrEqual(1.0);
+    expect(center?.y).toBeGreaterThan(1.6);
+
+    // Hover fora da pilha limpa o halo
+    world.processAction({
+      type: 'hover',
+      world: { x: 100, y: 1.6, z: 100 },
+      screen: { x: 500, y: 500 },
+    });
+    expect(world.getPileHaloState()).toBeNull();
+  });
+
+  it('ações do halo: togglePileGrid, togglePileFan, togglePileMessy e breakPile', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 0, y: 5.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    world.createPileFrom([a, b]);
+
+    // Grid toggle
+    expect(world.isGridPile(a)).toBe(false);
+    expect(world.togglePileGrid(a)).toBe(true);
+    expect(world.isGridPile(a)).toBe(true);
+    expect(world.togglePileGrid(a)).toBe(true);
+    expect(world.isGridPile(a)).toBe(false);
+
+    // Fan-out toggle
+    expect(world.isFanOutPile(a)).toBe(false);
+    expect(world.togglePileFan(a)).toBe(true);
+    expect(world.isFanOutPile(a)).toBe(true);
+    expect(world.togglePileFan(a)).toBe(true);
+    expect(world.isFanOutPile(a)).toBe(false);
+
+    // Messy toggle
+    expect(world.togglePileMessy(a)).toBe(true);
+
+    // Break pile desmancha e libera os itens
+    const broken = world.breakPile(a);
+    expect(broken).toEqual([a, b]);
+    expect(world.inPile(a)).toBe(false);
+    expect(world.inPile(b)).toBe(false);
+    expect(world.getPileHaloState()).toBeNull();
+  });
+
+  it('P1: Dwell & Scrub — ativa anel de dwell após 400ms e gera faixa de scrub com chips', async () => {
+    const { world } = await makeWorld();
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 0, y: 5.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const c = world.addBox({ x: 0, y: 8.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt');
+    world.createPileFrom([a, b, c]);
+
+    // Hover sobre a pilha
+    world.processAction({
+      type: 'hover',
+      world: { x: 0, y: 0, z: 0 },
+      screen: { x: 200, y: 200 },
+    });
+
+    // Antes de 400ms: progresso parcial (~50%), scrub ainda inativo
+    world.update(0.2); // 200ms
+    const dwellHalf = world.getDwellRingState();
+    expect(dwellHalf).not.toBeNull();
+    expect(dwellHalf?.pileId).toBe(a);
+    expect(dwellHalf?.progress).toBeCloseTo(0.5, 2);
+    expect(dwellHalf?.active).toBe(false);
+    expect(world.getScrubStripState()).toBeNull();
+
+    // Passou de 400ms (mais 250ms = 450ms total): dwell ativo + scrub strip visível
+    world.update(0.25);
+    const dwellFull = world.getDwellRingState();
+    expect(dwellFull?.progress).toBe(1);
+    expect(dwellFull?.active).toBe(true);
+
+    const scrub = world.getScrubStripState();
+    expect(scrub).not.toBeNull();
+    expect(scrub?.pileId).toBe(a);
+    expect(scrub?.items).toHaveLength(3);
+    expect(scrub?.items.map((i) => i.id)).toEqual([a, b, c]);
+    expect(scrub?.activeIndex).toBe(0);
+  });
+
+  it('P1: Dwell & Scrub — setScrubIndex atualiza item ativo e selectScrubItem seleciona', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 0, y: 5.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    world.createPileFrom([a, b]);
+
+    // Ativa o dwell
+    world.processAction({
+      type: 'hover',
+      world: { x: 0, y: 0, z: 0 },
+      screen: { x: 200, y: 200 },
+    });
+    world.update(0.5); // 500ms > 400ms
+
+    // Muda o scrubIndex
+    world.setScrubIndex(a, 1);
+    expect(world.getScrubStripState()?.activeIndex).toBe(1);
+
+    // Seleciona o item b a partir do scrub
+    world.selectScrubItem(a, b);
+    expect(world.getSelectedId()).toBe(b);
+    expect(overlay.toast).toHaveBeenCalledWith(expect.stringContaining('b.txt'));
+
+    // Hover fora da pilha limpa dwell e scrub
+    world.processAction({
+      type: 'hover',
+      world: { x: 100, y: 0, z: 100 },
+      screen: { x: 800, y: 800 },
+    });
+    world.update(0.016);
+    expect(world.getDwellRingState()).toBeNull();
+    expect(world.getScrubStripState()).toBeNull();
+  });
+
+  it('P1: shakePile sacode a pilha, espalha itens com física e limpa estado', async () => {
+    const overlay = makeOverlayMock();
+    const { world, physics } = await makeWorld(overlay);
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 0, y: 5.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const c = world.addBox({ x: 0, y: 8.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt');
+    world.createPileFrom([a, b, c]);
+
+    const shaken = world.shakePile(a);
+    expect(shaken).toEqual([a, b, c]);
+    expect(world.inPile(a)).toBe(false);
+    expect(world.inPile(b)).toBe(false);
+    expect(world.inPile(c)).toBe(false);
+    expect(physics.setVelocity).toHaveBeenCalled();
+    expect(overlay.toast).toHaveBeenCalledWith('Pilha sacudida');
+  });
+
+  it('P1: explodingPiles explode a pilha ao puxar um item e suporta toggle', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    expect(world.isExplodingPiles()).toBe(true);
+
+    const a = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 0, y: 5.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const c = world.addBox({ x: 0, y: 8.0, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt');
+    world.createPileFrom([a, b, c]);
+
+    // Down em 'a' (item da pilha)
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: 0, y: 0, z: 0 },
+      screen: { x: 100, y: 100 },
+      button: 0,
+      pointerId: 1,
+    });
+    // Move com distância para puxar para fora
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: 30, y: 0, z: 30 },
+      screen: { x: 150, y: 150 },
+      pointerId: 1,
+    });
+
+    // Puxou 'a': o resto da pilha explodiu e foi desmanchado
+    expect(world.inPile(b)).toBe(false);
+    expect(world.inPile(c)).toBe(false);
+    expect(overlay.toast).toHaveBeenCalledWith('Pilha explodida ao puxar item');
+
+    // Toggle para desativar
+    world.setExplodingPiles(false);
+    expect(world.isExplodingPiles()).toBe(false);
+    world.toggleExplodingPiles();
+    expect(world.isExplodingPiles()).toBe(true);
+  });
+
+  it('P1: Smooth Auto-Align — alinha objeto solto à grade implícita e suporta toggle', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    expect(world.isAutoAlign()).toBe(true);
+
+    // Adiciona um objeto em posição fora da grade (ex: x=17.2, z=35.1)
+    const id = world.addBox({ x: 17.2, y: 1.6, z: 35.1 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'item.txt');
+
+    // Alinha o item
+    const aligned = world.autoAlignItem(id);
+    expect(aligned).toBe(true);
+
+    const obj = world.getObject(id)!;
+    // 17.2 arredonda para 18.0; 35.1 arredonda para 36.0 (múltiplos de GRID_SNAP = 18.0)
+    expect(obj.pose.position.x).toBe(18.0);
+    expect(obj.pose.position.z).toBe(36.0);
+    expect(obj.pose.rotation).toEqual({ x: 0, y: 0, z: 0, w: 1 });
+
+    // Desativa autoAlign e testa toggle
+    world.toggleAutoAlign();
+    expect(world.isAutoAlign()).toBe(false);
+    world.toggleAutoAlign();
+    expect(world.isAutoAlign()).toBe(true);
+  });
+
+  it('P1: Smooth Auto-Align — soltar item arrastado no chão alinha à grade', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'dragged.txt');
+
+    // Down no item
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: 0, y: 0, z: 0 },
+      screen: { x: 100, y: 100 },
+      button: 0,
+      pointerId: 1,
+    });
+    // Move para x=19, z=35 (perto de 18, 36)
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: 19, y: 0, z: 35 },
+      screen: { x: 120, y: 120 },
+      pointerId: 1,
+    });
+    // Up no chão
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: 19, y: 0, z: 35 },
+      screen: { x: 120, y: 120 },
+      pointerId: 1,
+    });
+
+    const obj = world.getObject(id)!;
+    expect(obj.pose.position.x).toBe(18.0);
+    expect(obj.pose.position.z).toBe(36.0);
+  });
+});

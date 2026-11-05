@@ -1,0 +1,293 @@
+/**
+ * i18n — camada de tradução leve (PURO: sem DOM/window/navigator).
+ *
+ * Padrão **pt-BR** (o app é brasileiro) com **en** completo. O dicionário é um
+ * `Record<key, string>`; `t(key, params)` interpola `{param}` e cai para o
+ * pt-BR se a chave faltar no idioma ativo (e para a própria chave se não
+ * existir em lugar nenhum — ajuda a achar buracos de tradução em dev).
+ *
+ * Detecção/persistência do idioma (navigator + settings) fica na camada de
+ * aplicação (`di.ts`), porque o core não pode tocar em `window`/`navigator`
+ * (regra do lint de arquitetura).
+ */
+export type Lang = 'pt-BR' | 'en';
+
+export type Dict = Record<string, string>;
+
+const ptBR: Dict = {
+  // --- Itens do menu de contexto (rótulos) ---
+  'menu.open': 'Abrir',
+  'menu.openDir': 'Abrir pasta do sistema…',
+  'menu.editNote': 'Editar nota',
+  'menu.rename': 'Renomear…',
+  'menu.pileLayout': 'Layout da pilha (Stack → Grid → Leaf)',
+  'menu.fanOut': 'Abrir em leque (duplo-clique)',
+  'menu.pilePage': 'Próxima página do grid',
+  'menu.pin': 'Pregar na parede',
+  'menu.unpin': 'Despregar da parede',
+  'menu.delete': 'Excluir',
+  'menu.breakPile': 'Desmanchar pilha',
+  'menu.shakePile': 'Sacudir pilha',
+  'menu.toggleAutoAlign': 'Alinhamento automático',
+  'menu.toggleExplodingPiles': 'Explodir pilhas ao puxar',
+  'menu.newNote': 'Nova nota adesiva',
+  'menu.autoPile': 'Auto-pilha por tipo',
+  // P0 — seleção
+  'menu.gridView': 'Grade da seleção',
+  'menu.sortBySize': 'Ordenar por tamanho',
+  'menu.sortByType': 'Ordenar por tipo',
+  'menu.duplicate': 'Duplicar seleção',
+  'menu.scaleUp': 'Aumentar',
+  'menu.scaleDown': 'Diminuir',
+
+  // --- Dicas (tooltips pretos ao passar o mouse) ---
+  'hint.open': 'Abre o arquivo ou a pasta',
+  'hint.openDir': 'Escolhe uma pasta do computador',
+  'hint.editNote': 'Altera o texto da nota',
+  'hint.rename': 'Muda o nome exibido na cena',
+  'hint.pileLayout': 'Alterna empilhado → grade → espalhado',
+  'hint.fanOut': 'Abre a pilha como um leque',
+  'hint.pilePage': 'Mostra os próximos itens do grid',
+  'hint.pin': 'Prende o item na parede norte',
+  'hint.unpin': 'Solta o item da parede',
+  'hint.delete': 'Remove da cena (atalho: Delete)',
+  'hint.breakPile': 'Desfaz a pilha e espalha os itens',
+  'hint.shakePile': 'Sacode e espalha os itens da pilha',
+  'hint.toggleAutoAlign': 'Alinha suavemente objetos soltos a uma grade de eixos',
+  'hint.toggleExplodingPiles': 'Desmancha o restante da pilha ao arrastar um item para fora',
+  'hint.newNote': 'Cria uma nota amarela',
+  'hint.autoPile': 'Empilha arquivos da mesma extensão',
+  'hint.gridView': 'Espalha a seleção numa grade',
+  'hint.sortBySize': 'Ordena do menor para o maior',
+  'hint.sortByType': 'Agrupa por tipo/extensão',
+  'hint.duplicate': 'Cria cópias ao lado do original',
+  'hint.scaleUp': 'Deixa os itens maiores (máx. 3×)',
+  'hint.scaleDown': 'Deixa os itens menores (mín. 0,4×)',
+  // Pile Widget Halo (P1)
+  'halo.grid': 'Ver em grade (Grid)',
+  'halo.fan': 'Abrir em leque (Fan-out)',
+  'halo.leaf': 'Folhear conteúdo (Peel)',
+  'halo.messy': 'Alternar arrumado / desarranjado',
+  'halo.break': 'Desmanchar pilha',
+
+  // --- Toasts ---
+  'toast.folderImported': 'Pasta importada',
+  'toast.openFailed': 'Não foi possível abrir',
+  'toast.selectionCancelled': 'Seleção cancelada ou API indisponível',
+  'toast.dirStats': '{total} itens · {files} arquivos · {thumbs} thumbs',
+  'toast.renamed': 'Renomeado',
+  'toast.pilesCreated': '{n} pilhas criadas por tipo',
+  'toast.nothingToPile': 'Nada para empilhar',
+  'toast.pileFanned': 'Pilha aberta em leque',
+  'toast.pinned': 'Prego na parede norte',
+  'toast.unpinned': 'Despregado',
+  'toast.noteCreated': 'Nota criada',
+  'toast.noteRemoved': 'Nota removida',
+  'toast.fileMoved': 'Arquivo movido para a pasta',
+  'toast.moveFailed': 'Falha ao mover',
+  'toast.fansClosed': 'Leques fechados',
+  'toast.theme': 'Tema: {name}',
+  'toast.deleted': '{n} itens excluídos',
+  'toast.sceneRestored': 'Cena restaurada ({n} objetos) · {backend}',
+  'toast.newScene': 'Cena nova · backend {backend}',
+  'toast.folderUpdated': 'Pasta atualizada: +{added} −{removed}',
+  // P0 — seleção
+  'toast.gridApplied': 'Seleção organizada em grade',
+  'toast.nothingToGrid': 'Nada para organizar',
+  'toast.sortedBySize': 'Ordenado por tamanho',
+  'toast.sortedByType': 'Ordenado por tipo',
+  'toast.duplicated': '{n} itens duplicados',
+  'toast.nothingToDuplicate': 'Selecione itens para duplicar',
+  'toast.scaleMax': 'Não dá para aumentar mais! Não cabe na área de trabalho.',
+  'toast.scaleMin': 'Não dá para diminuir mais!',
+  'toast.scalePct': 'Escala: {pct}%',
+  'toast.nothingToScale': 'Selecione itens soltos para redimensionar',
+  'toast.pinnedToWall': 'Prego na parede',
+  'toast.scrunchPile': 'Pilha criada juntando objetos',
+  'toast.pileBroken': 'Pilha desmanchada',
+  'toast.pileExploded': 'Pilha explodida ao puxar item',
+  'toast.pileShaken': 'Pilha sacudida',
+  'toast.autoAlignOn': 'Alinhamento automático: ativado',
+  'toast.autoAlignOff': 'Alinhamento automático: desativado',
+  'toast.explodingPilesOn': 'Explodir pilhas: ativado',
+  'toast.explodingPilesOff': 'Explodir pilhas: desativado',
+  'toast.pileMessy': 'Pilha desarranjada',
+  'toast.pileTidy': 'Pilha arrumada',
+  'toast.pileGrid': 'Pilha em grade',
+  'toast.pileStack': 'Pilha empilhada',
+  'toast.scrubSelected': 'Item {name} selecionado',
+  'hint.scrubStrip': 'Deslize para folhear os itens da pilha',
+  'hint.resizeHandle': 'Arraste para redimensionar a seleção',
+
+  // --- UI geral ---
+  'ui.save': 'Salvar',
+  'ui.cancel': 'Cancelar',
+  'ui.notePlaceholder': 'Escreva sua nota…',
+  'ui.namePlaceholder': 'Novo nome…',
+  'ui.resetCamera': 'Redefinir câmera',
+
+  // --- Toast de atualização da PWA (index.html) ---
+  'pwa.update': 'Atualização disponível.',
+  'pwa.refresh': 'Atualizar',
+  'pwa.dismiss': 'Depois',
+};
+
+const en: Dict = {
+  // --- Context menu items (labels) ---
+  'menu.open': 'Open',
+  'menu.openDir': 'Open system folder…',
+  'menu.editNote': 'Edit note',
+  'menu.rename': 'Rename…',
+  'menu.pileLayout': 'Pile layout (Stack → Grid → Leaf)',
+  'menu.fanOut': 'Fan out (double-click)',
+  'menu.pilePage': 'Next grid page',
+  'menu.pin': 'Pin to wall',
+  'menu.unpin': 'Unpin from wall',
+  'menu.delete': 'Delete',
+  'menu.breakPile': 'Break pile',
+  'menu.shakePile': 'Shake pile',
+  'menu.toggleAutoAlign': 'Auto-align',
+  'menu.toggleExplodingPiles': 'Explode piles on pull',
+  'menu.newNote': 'New sticky note',
+  'menu.autoPile': 'Auto-pile by type',
+  // P0 — selection
+  'menu.gridView': 'Grid selection',
+  'menu.sortBySize': 'Sort by size',
+  'menu.sortByType': 'Sort by type',
+  'menu.duplicate': 'Duplicate selection',
+  'menu.scaleUp': 'Bigger',
+  'menu.scaleDown': 'Smaller',
+
+  // --- Hints (black tooltips on hover) ---
+  'hint.open': 'Open the file or folder',
+  'hint.openDir': 'Pick a folder from your computer',
+  'hint.editNote': 'Change the note text',
+  'hint.rename': 'Change the name shown in the scene',
+  'hint.pileLayout': 'Cycle stack → grid → fan',
+  'hint.fanOut': 'Open the pile as a fan',
+  'hint.pilePage': 'Show the next grid page',
+  'hint.pin': 'Stick the item to the north wall',
+  'hint.unpin': 'Release the item from the wall',
+  'hint.delete': 'Remove from scene (key: Delete)',
+  'hint.breakPile': 'Dissolve pile and scatter items',
+  'hint.shakePile': 'Shakes and scatters pile items',
+  'hint.toggleAutoAlign': 'Gently aligns loose items to an axis grid',
+  'hint.toggleExplodingPiles': 'Breaks apart the rest of the pile when dragging an item out',
+  'hint.newNote': 'Create a yellow note',
+  'hint.autoPile': 'Pile files with the same extension',
+  'hint.gridView': 'Spread the selection on a grid',
+  'hint.sortBySize': 'Order from smallest to largest',
+  'hint.sortByType': 'Group by type/extension',
+  'hint.duplicate': 'Make copies next to the original',
+  'hint.scaleUp': 'Make items bigger (max 3×)',
+  'hint.scaleDown': 'Make items smaller (min 0.4×)',
+  // Pile Widget Halo (P1)
+  'halo.grid': 'Grid view',
+  'halo.fan': 'Fan out',
+  'halo.leaf': 'Leaf through (Peel)',
+  'halo.messy': 'Toggle tidy / messy',
+  'halo.break': 'Break pile',
+
+  // --- Toasts ---
+  'toast.folderImported': 'Folder imported',
+  'toast.openFailed': 'Could not open',
+  'toast.selectionCancelled': 'Selection cancelled or API unavailable',
+  'toast.dirStats': '{total} items · {files} files · {thumbs} thumbs',
+  'toast.renamed': 'Renamed',
+  'toast.pilesCreated': '{n} piles created by type',
+  'toast.nothingToPile': 'Nothing to pile',
+  'toast.pileFanned': 'Pile opened as a fan',
+  'toast.pinned': 'Pinned to the north wall',
+  'toast.unpinned': 'Unpinned',
+  'toast.noteCreated': 'Note created',
+  'toast.noteRemoved': 'Note removed',
+  'toast.fileMoved': 'File moved into the folder',
+  'toast.moveFailed': 'Move failed',
+  'toast.fansClosed': 'Fans closed',
+  'toast.theme': 'Theme: {name}',
+  'toast.deleted': '{n} items deleted',
+  'toast.sceneRestored': 'Scene restored ({n} objects) · {backend}',
+  'toast.newScene': 'New scene · backend {backend}',
+  'toast.folderUpdated': 'Folder updated: +{added} −{removed}',
+  // P0 — selection
+  'toast.gridApplied': 'Selection arranged in a grid',
+  'toast.nothingToGrid': 'Nothing to arrange',
+  'toast.sortedBySize': 'Sorted by size',
+  'toast.sortedByType': 'Sorted by type',
+  'toast.duplicated': '{n} items duplicated',
+  'toast.nothingToDuplicate': 'Select items to duplicate',
+  'toast.scaleMax': "Can't get any bigger! It doesn't fit on the desktop.",
+  'toast.scaleMin': "Can't get any smaller!",
+  'toast.scalePct': 'Scale: {pct}%',
+  'toast.nothingToScale': 'Select loose items to resize',
+  'toast.pinnedToWall': 'Pinned to wall',
+  'toast.scrunchPile': 'Pile created by scrunching objects',
+  'toast.pileBroken': 'Pile broken',
+  'toast.pileExploded': 'Pile exploded when pulling item',
+  'toast.pileShaken': 'Pile shaken',
+  'toast.autoAlignOn': 'Auto-align: enabled',
+  'toast.autoAlignOff': 'Auto-align: disabled',
+  'toast.explodingPilesOn': 'Explode piles on pull: enabled',
+  'toast.explodingPilesOff': 'Explode piles on pull: disabled',
+  'toast.pileMessy': 'Messy pile',
+  'toast.pileTidy': 'Tidy pile',
+  'toast.pileGrid': 'Grid pile',
+  'toast.pileStack': 'Stacked pile',
+  'toast.scrubSelected': 'Item {name} selected',
+  'hint.scrubStrip': 'Scrub through pile items',
+  'hint.resizeHandle': 'Drag to resize selection',
+
+  // --- General UI ---
+  'ui.save': 'Save',
+  'ui.cancel': 'Cancel',
+  'ui.notePlaceholder': 'Write your note…',
+  'ui.namePlaceholder': 'New name…',
+  'ui.resetCamera': 'Reset camera',
+
+  // --- PWA update toast (index.html) ---
+  'pwa.update': 'Update available.',
+  'pwa.refresh': 'Update',
+  'pwa.dismiss': 'Later',
+};
+
+const DICTS: Record<Lang, Dict> = { 'pt-BR': ptBR, en };
+const FALLBACK: Lang = 'pt-BR';
+
+let current: Lang = FALLBACK;
+
+/** Troca o idioma ativo. Valor inválido volta ao padrão pt-BR. */
+export function setLang(lang: string): Lang {
+  current = lang in DICTS ? (lang as Lang) : FALLBACK;
+  return current;
+}
+
+export function getLang(): Lang {
+  return current;
+}
+
+/** true se `v` é um idioma suportado (p/ settings/navigator no app). */
+export function isLang(v: unknown): v is Lang {
+  return typeof v === 'string' && v in DICTS;
+}
+
+/** Lista de idiomas suportados. */
+export function langs(): Lang[] {
+  return Object.keys(DICTS) as Lang[];
+}
+
+/** Traduz `key` no idioma ativo, interpolando `{param}`. */
+export function t(key: string, params?: Record<string, string | number>): string {
+  const dict = DICTS[current];
+  let text = dict[key] ?? DICTS[FALLBACK][key] ?? key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.split(`{${k}}`).join(String(v));
+    }
+  }
+  return text;
+}
+
+/** Chaves de um idioma (ordenadas) — p/ teste de paridade dos dicionários. */
+export function keysOf(lang: Lang): string[] {
+  return Object.keys(DICTS[lang]).sort();
+}

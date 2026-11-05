@@ -1,0 +1,32 @@
+{
+  "name": "bumptop-web",
+  "version": "0.1.0",
+  "description": "BumpTop 3D Web — réplica web do desktop 3D BumpTop (piles, toss, física)",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "lint:arch": "node scripts/check-arch.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "@sqlite.org/sqlite-wasm": "^3.54.1-build1",
+    "idb": "^8.0.4",
+    "preact": "^11.1.0",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.0.5"
+  }
+}

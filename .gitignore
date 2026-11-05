@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.local
+.DS_Store
+*.log
+playwright-report/
+test-results/
+.playwright/
+*.zip

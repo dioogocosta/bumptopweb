@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["vite/client", "vite-plugin-pwa/client"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@app/*": ["./src/app/*"],
+      "@physics/*": ["./src/physics/*"],
+      "@render/*": ["./src/render/*"],
+      "@persistence/*": ["./src/persistence/*"],
+      "@fs/*": ["./src/fs/*"],
+      "@input/*": ["./src/input/*"],
+      "@overlay/*": ["./src/overlay/*"]
+    }
+  },
+  "include": ["src", "tests", "src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}
