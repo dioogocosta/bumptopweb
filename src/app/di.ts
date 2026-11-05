@@ -137,6 +137,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.toast(t('toast.dirStats', { total: r.total, files: r.files, thumbs: r.thumbs }));
         await files.savePath();
       })();
+    } else if (a === 'rotate' && ctxTargets.length > 0) {
+      const n = world.rotateSelection(Math.PI / 4, ctxTargets);
+      overlay.toast(n > 0 ? t('toast.rotated', { n }) : t('toast.nothingToGrid'));
+    } else if (a === 'makePile') {
+      const loose = ctxTargets.filter((id) => !world.inPile(id) && !world.isPinned(id));
+      const base = world.createPileFrom(loose);
+      overlay.toast(base ? t('toast.lassoPiled', { n: loose.length }) : t('toast.nothingToPile2'));
+    } else if (a === 'physicsLevel') {
+      const level = world.togglePhysicsLevel();
+      overlay.toast(t(level === 2 ? 'toast.physicsLevel2' : 'toast.physicsLevel1'));
     } else if (a === 'delete' && ctxTargets.length > 0) {
       // Multi-select: se o item clicado está na seleção, exclui a seleção
       // inteira; senão só o item clicado (Fase 7)
@@ -230,6 +240,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     ctxTargets = [];
   });
 
+  world.onLassoMenu((screen, ids) => {
+    ctxTargets = ids;
+    ctxTarget = ids[0] ?? null;
+    const items: ContextMenuItem[] = [
+      { label: t('menu.scaleUp'), action: 'scaleUp', hint: t('hint.scaleUp') },
+      { label: t('menu.duplicate'), action: 'duplicate', hint: t('hint.duplicate') },
+      { label: t('menu.rotate'), action: 'rotate', hint: t('hint.rotate') },
+      { label: t('menu.makePile'), action: 'makePile', hint: t('hint.makePile') },
+      { label: t('menu.gridView'), action: 'gridView', hint: t('hint.gridView') },
+      { label: t('menu.sortBySize'), action: 'sortBySize', hint: t('hint.sortBySize') },
+      { label: t('menu.sortByType'), action: 'sortByType', hint: t('hint.sortByType') },
+      { label: t('menu.scaleDown'), action: 'scaleDown', hint: t('hint.scaleDown') },
+      { label: t('menu.delete'), action: 'delete', danger: true, hint: t('hint.delete') },
+    ];
+    overlay.showContextMenu(screen, items);
+  });
+
   input.setListener((action: InputAction) => {
     if (action.type === 'context') {
       ctxTarget = world.pickObjectAt(action.world);
@@ -295,6 +322,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         });
         items.push({ label: t('menu.scaleUp'), action: 'scaleUp', hint: t('hint.scaleUp') });
         items.push({ label: t('menu.scaleDown'), action: 'scaleDown', hint: t('hint.scaleDown') });
+        items.push({ label: t('menu.rotate'), action: 'rotate', hint: t('hint.rotate') });
+        if (ctxTargets.length >= 2) {
+          items.push({ label: t('menu.makePile'), action: 'makePile', hint: t('hint.makePile') });
+        }
         items.push({ label: t('menu.delete'), action: 'delete', danger: true, hint: t('hint.delete') });
       }
       // Chão vazio → criar nota adesiva + auto-pilha por tipo (M6 / Fase 7) + toggles P1
@@ -311,6 +342,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           label: `${t('menu.toggleExplodingPiles')} (${world.isExplodingPiles() ? '✓' : '✗'})`,
           action: 'toggleExplodingPiles',
           hint: t('hint.toggleExplodingPiles'),
+        });
+        items.push({
+          label: t('menu.physicsLevel', { n: world.getPhysicsLevel() }),
+          action: 'physicsLevel',
+          hint: t('hint.physicsLevel'),
         });
       }
       overlay.showContextMenu(action.screen, items);

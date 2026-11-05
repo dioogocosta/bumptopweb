@@ -64,6 +64,13 @@ export interface IPhysics {
   applyImpulse(handle: BodyHandle, impulse: Vec3): void;
   /** Congela/descongela (para drag: o item segue o mouse como kinematic). */
   setFrozen(handle: BodyHandle, frozen: boolean): void;
+  /**
+   * Move um corpo kinematic até `p` no próximo passo, com velocidade implícita
+   * (empurra os itens dinâmicos no caminho). Usado no arraste.
+   */
+  moveKinematic(handle: BodyHandle, p: Vec3): void;
+  /** Liga/desliga colisão item×item (nível 2 × nível 1 de física). */
+  setItemCollisions(enabled: boolean): void;
   /** Raycast p/ picking do mouse/toque. */
   raycast(origin: Vec3, direction: Vec3, maxDistance: number): RayHit | null;
   /** Passo de simulação com timestep fixo. */
@@ -320,6 +327,14 @@ export interface LassoData {
   h: number;
   /** Pontos do laço livre desenhados pelo usuário (P1 — Laço Livre) */
   points?: Array<{ x: number; y: number }>;
+  /** Origem do traço: centro do disco azul (Lasso'n'Cross / LassoMenu). */
+  start?: { x: number; y: number };
+  /** Raio do disco azul; 0 enquanto o traço não saiu da origem. */
+  startRadius?: number;
+  /** Laço fechado (voltou ao disco): seleção congelada. */
+  closed?: boolean;
+  /** Alvo "cruze para empilhar" no centro da seleção (≥ 2 itens). */
+  crossTarget?: { x: number; y: number } | null;
 }
 
 export interface ContextMenuItem {

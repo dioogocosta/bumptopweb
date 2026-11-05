@@ -56,28 +56,60 @@ body {
 }
 
 .lasso-polygon {
-  fill: rgba(56, 189, 248, 0.12);
+  fill: rgba(37, 99, 235, 0.22);
 }
 
 .lasso-line {
   fill: none;
-  stroke: #38bdf8;
+  stroke: #0b1220;
   stroke-width: 2.5;
-  stroke-dasharray: 6 5;
-  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.65));
+  stroke-linecap: round;
+  stroke-dasharray: 1 6;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.35));
+}
+
+.lasso-start-disc {
+  fill: rgba(37, 99, 235, 0.72);
+  stroke: rgba(191, 219, 254, 0.9);
+  stroke-width: 1.5;
+}
+
+.lasso-start-disc.is-closed {
+  fill: rgba(29, 78, 216, 0.9);
+  stroke: #ffffff;
+  stroke-width: 2.5;
 }
 
 .lasso-start-ring {
   fill: none;
-  stroke: #38bdf8;
-  stroke-width: 2;
+  stroke: #0b1220;
+  stroke-width: 1.5;
 }
 
 .lasso-pen-tip {
-  fill: #38bdf8;
-  stroke: #ffffff;
+  fill: none;
+  stroke: #0b1220;
+  stroke-width: 1.5;
+}
+
+.lasso-cross-ring {
+  fill: rgba(255, 255, 255, 0.85);
+  stroke: #1d4ed8;
   stroke-width: 2;
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.95));
+}
+
+.lasso-cross-card {
+  fill: #e2e8f0;
+  stroke: #334155;
+  stroke-width: 1;
+}
+
+.lasso-cross-arrow {
+  fill: none;
+  stroke: #1d4ed8;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Handle de resize da seleção (A — arrastar o canto p/ redimensionar) */

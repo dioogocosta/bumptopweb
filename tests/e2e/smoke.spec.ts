@@ -146,9 +146,9 @@ test('menu de contexto: botão direito → criar nota → editar → excluir', a
   const box = (await page.locator('#scene-root canvas').boundingBox())!;
   const startCount = await page.evaluate(() => window.__bumptop!.world.objectCount());
 
-  // Canto superior (longe dos ícones demo) → botão direito no chão vazio
-  const fx = box.x + 60;
-  const fy = box.y + 60;
+  // Piso vazio no quadrante inferior esquerdo (dentro da sala, longe dos ícones demo)
+  const fx = box.x + box.width * 0.3;
+  const fy = box.y + box.height * 0.85;
   await page.mouse.click(fx, fy, { button: 'right' });
 
   // O menu aparece com "Nova nota adesiva"

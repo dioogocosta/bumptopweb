@@ -127,7 +127,15 @@ export interface PhysicsConfig {
   minStartTossVelocitySq: number;
   /** Fim do toss. Original: `EndTossVelocitySq = 100` (BT_Settings.cpp:52). */
   endTossVelocitySq: number;
+  /**
+   * Nível de física. 1 = interação visual (itens atravessam uns aos outros,
+   * só piso/paredes colidem — como o BumpTop comercial). 2 = física real
+   * (caixas colidem, empurram e empilham entre si — como o protótipo do vídeo).
+   */
+  level: PhysicsLevel;
 }
+
+export type PhysicsLevel = 1 | 2;
 
 export const DEFAULT_PHYSICS: PhysicsConfig = {
   gravityY: -98.1, // 10× -9.81 (mundo "rápido" do original)
@@ -135,6 +143,7 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   restitution: 0.1,
   minStartTossVelocitySq: 10000, // MinStartTossVelocitySq (BT_Settings.cpp:53)
   endTossVelocitySq: 100, // EndTossVelocitySq (BT_Settings.cpp:52)
+  level: 2,
 };
 
 /** Dimensões da sala — do `CreateWalls` (BT_Util.cpp). */

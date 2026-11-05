@@ -3,9 +3,12 @@
  *
  * Implementa a porta `IPhysics`. Espelha o modelo do BumpTop (Novodex/PhysX):
  *  - Caixas dinâmicas ("ícones") num piso plano
- *  - Ícones NÃO colidem entre si (só com piso/paredes) — via collision groups
+ *  - Nível 1: ícones NÃO colidem entre si (só piso/paredes), como o comercial
+ *  - Nível 2: ícones colidem, empurram e empilham entre si (protótipo do vídeo)
  *  - Gravidade "rápida" (10× -9.81)
- *  - Durante o drag, o corpo vira kinematic (segue a mola sem colidir)
+ *  - Durante o drag, o corpo vira kinematic e empurra os dinâmicos no caminho
+ *  - Paredes de colisão bem mais altas que as visuais + teto invisível e CCD:
+ *    nenhum arremesso sai da sala
  *  - Sleep optimization (corpos parados dormem → render condicional)
  */
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -28,8 +31,8 @@ const GROUP_WALL = 0x0004;
 const groups = (membership: number, filter: number): number =>
   ((membership & 0xffff) << 16) | (filter & 0xffff);
 
-// Dynamic colide só com floor|wall (NUNCA com outro dynamic) — regra central.
-const DYNAMIC_COLLIDES = groups(GROUP_DYNAMIC, GROUP_FLOOR | GROUP_WALL);
+const DYNAMIC_SOLO = groups(GROUP_DYNAMIC, GROUP_FLOOR | GROUP_WALL);
+const DYNAMIC_SOLID = groups(GROUP_DYNAMIC, GROUP_DYNAMIC | GROUP_FLOOR | GROUP_WALL);
 const FLOOR_COLLIDES = groups(GROUP_FLOOR, GROUP_DYNAMIC);
 const WALL_COLLIDES = groups(GROUP_WALL, GROUP_DYNAMIC);
 
@@ -38,10 +41,13 @@ export class RapierPhysics implements IPhysics {
   private bodies = new Map<BodyHandle, RAPIER.RigidBody>();
   private nextHandle = 1;
   private config!: PhysicsConfig;
+  private itemColliders = new Map<BodyHandle, RAPIER.Collider>();
+  private itemCollisions = true;
 
   async init(config: PhysicsConfig, _room: RoomConfig): Promise<void> {
     await RAPIER.init();
     this.config = config;
+    this.itemCollisions = config.level === 2;
     this.world = new RAPIER.World({ x: 0, y: config.gravityY, z: 0 });
     // Timestep fixo — o main loop chama step(dt) explicitamente
     this.world.timestep = 1 / 60;
@@ -64,12 +70,16 @@ export class RapierPhysics implements IPhysics {
       floorBody,
     );
 
-    // 4 paredes estáticas (N/S/E/O)
+    // 4 paredes de colisão (N/S/E/O) muito mais altas que as visuais e um teto
+    // invisível: arremessos fortes ricocheteiam em vez de sair da sala.
+    const h = Math.max(wallHeight * 8, 400);
+    const span = halfSize + wallThickness;
     const wallDefs: Array<{ pos: Vec3; half: Vec3 }> = [
-      { pos: { x: 0, y: wallHeight / 2, z: -halfSize }, half: { x: halfSize, y: wallHeight / 2, z: wallThickness / 2 } },
-      { pos: { x: 0, y: wallHeight / 2, z: halfSize }, half: { x: halfSize, y: wallHeight / 2, z: wallThickness / 2 } },
-      { pos: { x: -halfSize, y: wallHeight / 2, z: 0 }, half: { x: wallThickness / 2, y: wallHeight / 2, z: halfSize } },
-      { pos: { x: halfSize, y: wallHeight / 2, z: 0 }, half: { x: wallThickness / 2, y: wallHeight / 2, z: halfSize } },
+      { pos: { x: 0, y: h / 2, z: -halfSize }, half: { x: span, y: h / 2, z: wallThickness / 2 } },
+      { pos: { x: 0, y: h / 2, z: halfSize }, half: { x: span, y: h / 2, z: wallThickness / 2 } },
+      { pos: { x: -halfSize, y: h / 2, z: 0 }, half: { x: wallThickness / 2, y: h / 2, z: span } },
+      { pos: { x: halfSize, y: h / 2, z: 0 }, half: { x: wallThickness / 2, y: h / 2, z: span } },
+      { pos: { x: 0, y: h + wallThickness / 2, z: 0 }, half: { x: span, y: wallThickness / 2, z: span } },
     ];
     for (const w of wallDefs) {
       const b = this.world.createRigidBody(
@@ -91,18 +101,20 @@ export class RapierPhysics implements IPhysics {
         .setTranslation(position.x, position.y, position.z)
         .enabledRotations(false, true, false)
         .setCanSleep(true)
+        .setCcdEnabled(true)
         .setLinearDamping(0.4)
         .setAngularDamping(1.2),
     );
-    this.world.createCollider(
+    const collider = this.world.createCollider(
       RAPIER.ColliderDesc.cuboid(halfExtents.x, halfExtents.y, halfExtents.z)
         .setFriction(this.config.friction)
         .setRestitution(this.config.restitution)
-        .setCollisionGroups(DYNAMIC_COLLIDES),
+        .setCollisionGroups(this.itemCollisions ? DYNAMIC_SOLID : DYNAMIC_SOLO),
       body,
     );
     const handle = this.nextHandle++ as BodyHandle;
     this.bodies.set(handle, body);
+    this.itemColliders.set(handle, collider);
     // `id` é usado pelo core p/ correlacionar; aqui o handle basta.
     void id;
     return handle;
@@ -113,6 +125,7 @@ export class RapierPhysics implements IPhysics {
     if (b) {
       this.world.removeRigidBody(b);
       this.bodies.delete(handle);
+      this.itemColliders.delete(handle);
     }
   }
 
@@ -154,6 +167,22 @@ export class RapierPhysics implements IPhysics {
     if (!frozen) b.wakeUp();
   }
 
+  moveKinematic(handle: BodyHandle, p: Vec3): void {
+    const b = this.bodies.get(handle);
+    if (!b) return;
+    if (b.isKinematic()) b.setNextKinematicTranslation({ x: p.x, y: p.y, z: p.z });
+    else b.setTranslation({ x: p.x, y: p.y, z: p.z }, true);
+  }
+
+  setItemCollisions(enabled: boolean): void {
+    this.itemCollisions = enabled;
+    const g = enabled ? DYNAMIC_SOLID : DYNAMIC_SOLO;
+    for (const [handle, c] of this.itemColliders) {
+      c.setCollisionGroups(g);
+      this.bodies.get(handle)?.wakeUp();
+    }
+  }
+
   raycast(origin: Vec3, direction: Vec3, maxDistance: number): RayHit | null {
     const ray = new RAPIER.Ray(
       { x: origin.x, y: origin.y, z: origin.z },
@@ -182,5 +211,6 @@ export class RapierPhysics implements IPhysics {
   dispose(): void {
     this.world.free();
     this.bodies.clear();
+    this.itemColliders.clear();
   }
 }

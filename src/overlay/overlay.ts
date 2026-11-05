@@ -19,6 +19,7 @@ export class DomOverlay implements IOverlay {
   private labels = new Map<string, HTMLDivElement>();
   private lassoEl: HTMLDivElement | null = null;
   private resizeEl: HTMLDivElement | null = null;
+  private menuCleanup: (() => void) | null = null;
   private resizeCb: ((e: PointerEvent) => void) | null = null;
   private haloEl: HTMLDivElement | null = null;
   private haloHovered = false;
@@ -214,9 +215,27 @@ export class DomOverlay implements IOverlay {
 
     this.root.appendChild(menu);
     this.menuEl = menu;
+
+    const onOutside = (e: PointerEvent) => {
+      if (!menu.contains(e.target as Node)) this.hideContextMenu();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') this.hideContextMenu();
+    };
+    const timer = window.setTimeout(() => {
+      document.addEventListener('pointerdown', onOutside, true);
+      document.addEventListener('keydown', onKey);
+    }, 0);
+    this.menuCleanup = () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', onOutside, true);
+      document.removeEventListener('keydown', onKey);
+    };
   }
 
   hideContextMenu(): void {
+    this.menuCleanup?.();
+    this.menuCleanup = null;
     this.menuEl?.remove();
     this.menuEl = null;
   }
@@ -274,25 +293,39 @@ export class DomOverlay implements IOverlay {
     this.lassoEl.style.width = `${data.w}px`;
     this.lassoEl.style.height = `${data.h}px`;
 
-    // Renderiza SVG com o traço livre, elipse curva pontilhada, círculo de origem e ponta da caneta azul (P1)
     if (data.points && data.points.length >= 3) {
       const pts = data.points;
-      const origin = pts[0];
-      const pen = pts[pts.length - 1];
-
-      // Converte coordenadas absolutas de tela para coordenadas relativas ao lassoEl
-      const relPts = pts.map((p) => `${(p.x - data.x).toFixed(1)},${(p.y - data.y).toFixed(1)}`).join(' ');
-      const ox = (origin.x - data.x).toFixed(1);
-      const oy = (origin.y - data.y).toFixed(1);
-      const px = (pen.x - data.x).toFixed(1);
-      const py = (pen.y - data.y).toFixed(1);
-
+      const rel = (p: { x: number; y: number }) => ({ x: p.x - data.x, y: p.y - data.y });
+      const relPts = pts
+        .map((p) => {
+          const r = rel(p);
+          return `${r.x.toFixed(1)},${r.y.toFixed(1)}`;
+        })
+        .join(' ');
+      const origin = rel(data.start ?? pts[0]);
+      const pen = rel(pts[pts.length - 1]);
+      const discR = data.startRadius ?? 0;
+      const disc =
+        discR > 0
+          ? `<circle cx="${origin.x.toFixed(1)}" cy="${origin.y.toFixed(1)}" r="${discR}" class="lasso-start-disc${data.closed ? ' is-closed' : ''}" />`
+          : '';
+      const cross = data.crossTarget ? rel(data.crossTarget) : null;
+      const crossEl = cross
+        ? `<g class="lasso-cross" transform="translate(${cross.x.toFixed(1)} ${cross.y.toFixed(1)})">
+             <circle r="16" class="lasso-cross-ring" />
+             <rect x="-7" y="-9" width="12" height="9" rx="1.5" class="lasso-cross-card" />
+             <rect x="-5" y="-6" width="12" height="9" rx="1.5" class="lasso-cross-card" />
+             <path d="M1 12 L1 5 M-2 8 L1 5 L4 8" class="lasso-cross-arrow" />
+           </g>`
+        : '';
       this.lassoEl.innerHTML = `
-        <svg class="lasso-svg" viewBox="0 0 ${data.w} ${data.h}">
+        <svg class="lasso-svg">
           <polygon points="${relPts}" class="lasso-polygon" />
+          ${disc}
           <polyline points="${relPts}" class="lasso-line" />
-          <circle cx="${ox}" cy="${oy}" r="4" class="lasso-start-ring" />
-          <circle cx="${px}" cy="${py}" r="4.5" class="lasso-pen-tip" />
+          ${crossEl}
+          <circle cx="${origin.x.toFixed(1)}" cy="${origin.y.toFixed(1)}" r="4" class="lasso-start-ring" />
+          <circle cx="${pen.x.toFixed(1)}" cy="${pen.y.toFixed(1)}" r="5" class="lasso-pen-tip" />
         </svg>
       `;
     } else if (data.w > 2 && data.h > 2) {
@@ -662,6 +695,12 @@ function getActionIcon(action: string): string {
       return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
     case 'scaleDown':
       return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
+    case 'rotate':
+      return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`;
+    case 'makePile':
+      return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="13" width="16" height="4" rx="1"/><rect x="5" y="8" width="14" height="4" rx="1"/><rect x="6" y="3" width="12" height="4" rx="1"/><line x1="12" y1="23" x2="12" y2="19"/></svg>`;
+    case 'physicsLevel':
+      return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="12" width="8" height="8" rx="1"/><rect x="13" y="12" width="8" height="8" rx="1"/><rect x="8" y="3" width="8" height="8" rx="1"/></svg>`;
     case 'delete':
       return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`;
     default:
