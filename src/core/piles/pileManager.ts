@@ -37,7 +37,7 @@ export class PileManager {
   private piles = new Map<string, PileState>(); // key = objectId da base
 
   /** Cria uma pilha com base + sobreposto. */
-  create(baseId: string, firstChildId: string, origin: Vec3, halfZ = 1.6, messy = true): void {
+  create(baseId: string, firstChildId: string, origin: Vec3, halfZ = 0.35, messy = true): void {
     this.piles.set(baseId, {
       children: [baseId, firstChildId],
       layout: PileLayout.Stack,
@@ -49,7 +49,7 @@ export class PileManager {
   }
 
   /** Adiciona um item no topo de uma pilha existente (ou cria na base). */
-  add(baseOrChildId: string, childId: string, origin: Vec3, halfZ = 1.6): boolean {
+  add(baseOrChildId: string, childId: string, origin: Vec3, halfZ = 0.35): boolean {
     const key = this.findKey(baseOrChildId);
     if (key === null) {
       this.create(baseOrChildId, childId, origin, halfZ);

@@ -129,7 +129,7 @@ describe('P0: Grid View da seleção', () => {
     const keys = new Set(poses.map((p) => `${p.x.toFixed(2)},${p.z.toFixed(2)}`));
     expect(keys.size).toBe(3);
     // Encostadas no chão (y = meia-altura do ícone deitado)
-    for (const p of poses) expect(p.y).toBeCloseTo(1.6, 5);
+    for (const p of poses) expect(p.y).toBeCloseTo(0.35, 5);
     // Caixa da grade centrada onde estava o conjunto original (centroide 40,0)
     const xs = poses.map((p) => p.x);
     const zs = poses.map((p) => p.z);
@@ -191,7 +191,7 @@ describe('P0: Sort by Size / Sort by Type', () => {
     // Todos na mesma linha (mesmo z) e no chão
     const zs = new Set([small, medium, big].map((id) => world.getObject(id)!.pose.position.z.toFixed(3)));
     expect(zs.size).toBe(1);
-    expect(world.getObject(small)!.pose.position.y).toBeCloseTo(1, 5);
+    expect(world.getObject(small)!.pose.position.y).toBeCloseTo(0.2, 5);
   });
 
   it('sortByType agrupa por extensão (mesma extensão fica junto)', async () => {
@@ -262,7 +262,7 @@ describe('P0: Duplicar seleção', () => {
     expect(world.duplicateSelection()).toBe(1);
     const copy = world.getObject(world.getSelectedIds()[0])!;
     expect(copy.scale).toBe(1.25);
-    expect(copy.meta.halfExtents).toEqual({ x: 7, y: 1.6, z: 7 }); // base, não escalada
+    expect(copy.meta.halfExtents).toEqual({ x: 7, y: 0.35, z: 7 }); // base, não escalada
   });
 });
 
@@ -281,7 +281,7 @@ describe('P0: Escala com feedback de limite', () => {
     const lastBox = vi.mocked(physics.createBox).mock.calls.at(-1)!;
     expect(lastBox[0]).toBe(id);
     expect(lastBox[2].x).toBeCloseTo(8.75, 5);
-    expect(lastBox[2].y).toBeCloseTo(2, 5);
+    expect(lastBox[2].y).toBeCloseTo(0.4375, 5);
     expect(lastBox[2].z).toBeCloseTo(8.75, 5);
   });
 
@@ -349,7 +349,7 @@ describe('P0: Escala com feedback de limite', () => {
 
     world.pinToWall(id, 0); // parede norte (-z)
     // inset = he.y(1.6)×2 + t/2(10/2) + 0.5 = 3.2 + 5 + 0.5 = 8.7
-    expect(world.getObject(id)!.pose.position.z).toBeCloseTo(-130 + 8.7, 5);
+    expect(world.getObject(id)!.pose.position.z).toBeCloseTo(-123.8, 5);
   });
 
   it('snapshot de item sem scale (dado antigo) é normalizado para 1', async () => {

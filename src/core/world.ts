@@ -46,6 +46,13 @@ export const SCALE_MAX = 3.0;
 const SCALE_STEP = 0.25;
 const FLICK_SPEED_PX = 1100; // px/s — limiar p/ flick folhear pilha (C)
 export const LASSO_START_RADIUS = 22;
+export const SHEET_HALF_THICKNESS = 0.35;
+
+/** Itens são folhas (como no BumpTop original), não caixas: espessura ~5% da largura. */
+export function asSheet(he: Vec3): Vec3 {
+  const thin = Math.round(Math.max(0.2, Math.max(he.x, he.z) * 0.05) * 1000) / 1000;
+  return { x: he.x, y: Math.min(he.y, thin), z: he.z };
+}
 export const LASSO_CROSS_RADIUS = 20;
 const GROUP_CLICK_PX = 3;
 const ESCAPE_MARGIN = 1;
@@ -162,6 +169,7 @@ export class World {
     opts?: { fsPath?: string; isDir?: boolean; thumb?: string | null },
   ): string {
     const id = newId();
+    halfExtents = asSheet(halfExtents);
     const inner = this.innerWall();
     const mx = Math.max(0, inner - halfExtents.x);
     const mz = Math.max(0, inner - halfExtents.z);
@@ -1069,7 +1077,7 @@ export class World {
     const baseEntry = this.entries.get(base);
     if (!baseEntry) return null;
     const count = state.children.length;
-    const height = (state.halfZ ?? 1.6) * 2 * Math.min(count, 5);
+    const height = (state.halfZ ?? SHEET_HALF_THICKNESS) * 2 * Math.min(count, 5);
     const p = baseEntry.data.pose.position;
     return { x: p.x, y: p.y + height + 2, z: p.z };
   }
@@ -1473,7 +1481,7 @@ export class World {
 
   /** Meia-extensão ESCALADA do item (base × escala atual). */
   private scaledHalf(e: Entry): Vec3 {
-    const b = e.data.meta.halfExtents ?? vec3(7, 1.6, 7);
+    const b = e.data.meta.halfExtents ?? vec3(7, SHEET_HALF_THICKNESS, 7);
     const s = e.data.scale > 0 ? e.data.scale : 1;
     return { x: b.x * s, y: b.y * s, z: b.z * s };
   }
@@ -1690,7 +1698,7 @@ export class World {
     const created: string[] = [];
     for (const id of src) {
       const s = this.entries.get(id)!;
-      const base = s.data.meta.halfExtents ?? vec3(7, 1.6, 7);
+      const base = s.data.meta.halfExtents ?? vec3(7, SHEET_HALF_THICKNESS, 7);
       const scale = s.data.scale > 0 ? s.data.scale : 1;
       const scaled = { x: base.x * scale, y: base.y * scale, z: base.z * scale };
       const pos: Vec3 = {
@@ -1808,7 +1816,7 @@ export class World {
 
   /** Aplica a escala num item: recria o corpo físico e atualiza render/modelo. */
   private applyScale(e: Entry, next: number): void {
-    const base = e.data.meta.halfExtents ?? vec3(7, 1.6, 7);
+    const base = e.data.meta.halfExtents ?? vec3(7, SHEET_HALF_THICKNESS, 7);
     const pose = this.deps.physics.getPose(e.body);
     const vel = this.deps.physics.getVelocity(e.body);
     this.deps.physics.removeBody(e.body);
@@ -2201,7 +2209,7 @@ export class World {
     for (const id of [...this.entries.keys()]) this.removeObject(id);
     for (const o of snap.objects) {
       // Normaliza metadados de snapshots antigos (sem halfExtents/scale)
-      if (!o.meta.halfExtents) o.meta.halfExtents = vec3(3, 0.6, 3);
+      o.meta.halfExtents = asSheet(o.meta.halfExtents ?? vec3(3, 0.6, 3));
       if (!(o.scale > 0)) o.scale = 1;
       const halfExtents = o.meta.halfExtents;
       const scale = o.scale;

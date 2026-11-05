@@ -57,7 +57,7 @@ export interface ItemForSort {
  * `scale` inválido (0/NaN/−) é tratado como 1.
  */
 export function volumeOf(halfExtents: Vec3 | undefined, scale: number): number {
-  const h = halfExtents ?? { x: 7, y: 1.6, z: 7 };
+  const h = halfExtents ?? { x: 7, y: 0.35, z: 7 };
   const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
   return h.x * h.y * h.z * s * s * s;
 }

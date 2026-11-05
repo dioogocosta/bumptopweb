@@ -925,7 +925,7 @@ describe('Paredes: nada sai da sala', () => {
     physics.setPosition(1 as BodyHandle, { x: 500, y: -40, z: -300 });
     world.update(1 / 60);
     const pos = world.getObject(id)!.pose.position;
-    expect(pos).toEqual({ x: 118, y: 1.6, z: -118 });
+    expect(pos).toEqual({ x: 118, y: 0.35, z: -118 });
     expect(world.isInsideRoom(id)).toBe(true);
   });
 });
@@ -1060,7 +1060,7 @@ describe('Girar, paredes e níveis de física', () => {
     world.pinToWall(id, 0);
     let o = world.getObject(id)!;
     expect(o.pose.rotation.x).toBeCloseTo(Math.SQRT1_2, 5);
-    expect(o.pose.position.z).toBeCloseTo(-125 + 1.6 + 0.5, 5);
+    expect(o.pose.position.z).toBeCloseTo(-125 + 0.35 + 0.5, 5);
     expect(o.pose.position.y).toBeGreaterThanOrEqual(7 + 2);
     world.pinToWall(id, null);
     o = world.getObject(id)!;
