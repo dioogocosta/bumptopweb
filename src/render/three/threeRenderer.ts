@@ -319,9 +319,8 @@ export class ThreeRenderer implements IRenderer {
     this.height = height;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(width, height, false);
-    this.renderer.domElement.width = width;
-    this.renderer.domElement.height = height;
   }
 
   render(): void {
