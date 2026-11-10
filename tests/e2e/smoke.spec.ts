@@ -435,3 +435,39 @@ test('P1: Exploding Piles & Auto-Align toggles no menu de contexto e Sacudir pil
   }, pileInfo);
   expect(inPileAfter).toBe(false);
 });
+
+test('P1: duplo-clique na parede foca a câmera na vista frontal (item 4)', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+  // Aguarda os itens da cena demo assentarem no chão com a física
+  await page.waitForFunction(() => {
+    const w = window.__bumptop?.world;
+    if (!w) return false;
+    const objs = w.listObjects();
+    return objs.length >= 3 && objs.slice(0, 3).every((o: any) => o.pose.position.y <= 2.0);
+  }, { timeout: 15000 });
+
+  const antes = await page.evaluate(() => window.__bumptop!.world.getCamera());
+
+  // Projeta um ponto no MEIO da parede norte (face interna em z=-125): o ray
+  // da tela até ele cruza a parede e o resolveFloor cai fora da sala.
+  const pt = await page.evaluate(() => {
+    const s = window.__bumptop!.renderer.projectToScreen({ x: 0, y: 10, z: -130 });
+    return { ...s };
+  });
+  expect(pt.visible).toBe(true);
+
+  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  await page.mouse.dblclick(box.x + pt.x, box.y + pt.y);
+  await page.waitForTimeout(1500); // animação da câmera ~0.8 s
+
+  const depois = await page.evaluate(() => window.__bumptop!.world.getCamera());
+  // Vista frontal da parede norte: elevação baixa, distância 240, pivot (0,14,0)
+  expect(depois.elevation).toBeCloseTo(0.45, 1);
+  expect(depois.distance).toBeCloseTo(240, 0);
+  expect(depois.target.y).toBeCloseTo(14, 0);
+  expect(depois.azimuth).toBeCloseTo(0, 1);
+  // A câmera de fato animou (não era esse o estado antes)
+  expect(depois.elevation).not.toBeCloseTo(antes.elevation, 1);
+});

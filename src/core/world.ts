@@ -119,6 +119,8 @@ export class World {
   private groupStartScreen: { x: number; y: number } | null = null;
   private groupMoved = false;
   private groupPiles: GroupPile[] = [];
+  /** Animação de foco de parede (item 4 — duplo-clique na parede). */
+  private wallFocus: { azimuth: number; elevation: number; distance: number; target: Vec3 } | null = null;
   private physicsLevel: PhysicsLevel;
   /** Prender automaticamente na parede ao arremessar/arrastar até ela (desligado: o item bate e volta). */
   private autoWallPin = false;
@@ -1475,6 +1477,44 @@ export class World {
   }
 
   /**
+   * Parede sob um ponto do chão projetado (item 4 — duplo-clique na parede).
+   * O raio de um clique visualmente NA parede cruza a face interna e a
+   * interseção com y=0 cai FORA da sala; dentro → null. Índices iguais aos
+   * de `wallContact`: 0=norte, 1=sul, 2=oeste, 3=leste.
+   */
+  pickWall(p: Vec3): number | null {
+    const inner = this.innerWall();
+    if (p.z <= -inner) return 0;
+    if (p.z >= inner) return 1;
+    if (p.x <= -inner) return 2;
+    if (p.x >= inner) return 3;
+    return null;
+  }
+
+  /**
+   * Anima a câmera para encarar a parede `wall` frontalmente (item 4).
+   * Mesmo estilo dos presets de parede (3/4): elevação baixa (0.45),
+   * distância 240, pivot no centro — só o azimuth muda por parede.
+   * O azimuth alvo é ajustado perto do atual para girar pelo caminho curto.
+   */
+  focusWall(wall: number): void {
+    const azimuths = [0, Math.PI, Math.PI / 2, -Math.PI / 2];
+    const desired = azimuths[wall];
+    if (desired === undefined) return;
+    const cur = this.camera.getState().azimuth;
+    let azimuth = desired;
+    while (azimuth - cur > Math.PI) azimuth -= 2 * Math.PI;
+    while (azimuth - cur < -Math.PI) azimuth += 2 * Math.PI;
+    this.wallFocus = {
+      azimuth,
+      elevation: 0.45,
+      distance: 240,
+      target: { x: 0, y: 14, z: 0 },
+    };
+    this.dirty = true;
+  }
+
+  /**
    * C (flick): navega a pilha (peel no Stack, pagina no Grid) sem abrir leque.
    * `dir` > 0 = próxima / folhear frente; < 0 = anterior / folhear trás.
    */
@@ -2127,6 +2167,22 @@ export class World {
           this.deps.physics.moveKinematic(f.body, fp);
         }
       }
+    }
+
+    // Foco de parede (item 4): interpola suave até a vista frontal
+    if (this.wallFocus) {
+      const f = this.wallFocus;
+      const t = 1 - Math.exp(-6 * dt); // converge em ~0.8 s
+      this.camera.moveTo(f.target, f.distance, f.azimuth, f.elevation, t);
+      const s = this.camera.getState();
+      const converged =
+        Math.abs(s.distance - f.distance) < 0.5 &&
+        Math.abs(s.elevation - f.elevation) < 0.002 &&
+        Math.abs(s.azimuth - f.azimuth) < 0.002 &&
+        Math.hypot(s.target.x - f.target.x, s.target.y - f.target.y, s.target.z - f.target.z) < 0.5;
+      if (converged) this.wallFocus = null;
+      this.deps.renderer.setCamera(s);
+      this.dirty = true;
     }
 
     const preStep = new Map<string, Vec3>();
