@@ -1041,6 +1041,55 @@ describe('Arraste em grupo com pilha na seleção (item 5)', () => {
   });
 });
 
+describe('Duplo-clique na parede foca a câmera (item 4)', () => {
+  it('pickWall devolve a parede correta fora da sala e null no chão interno', async () => {
+    const { world } = await makeWorld();
+    expect(world.pickWall({ x: 0, y: 0, z: -200 })).toBe(0); // norte
+    expect(world.pickWall({ x: 0, y: 0, z: 200 })).toBe(1); // sul
+    expect(world.pickWall({ x: -200, y: 0, z: 0 })).toBe(2); // oeste
+    expect(world.pickWall({ x: 200, y: 0, z: 0 })).toBe(3); // leste
+    expect(world.pickWall({ x: 0, y: 0, z: 0 })).toBeNull();
+    expect(world.pickWall({ x: 60, y: 0, z: -60 })).toBeNull();
+  });
+
+  it('focusWall anima a câmera até a vista frontal da parede', async () => {
+    const { world } = await makeWorld();
+    world.focusWall(1); // sul → azimuth π, elev 0.45, dist 240, pivot (0,14,0)
+    for (let i = 0; i < 150; i++) world.update(1 / 60);
+    const cam = world.getCamera();
+    expect(cam.azimuth).toBeCloseTo(Math.PI, 2);
+    expect(cam.elevation).toBeCloseTo(0.45, 2);
+    expect(cam.distance).toBeCloseTo(240, 1);
+    expect(cam.target.x).toBeCloseTo(0, 1);
+    expect(cam.target.y).toBeCloseTo(14, 1);
+    expect(cam.target.z).toBeCloseTo(0, 1);
+  });
+
+  it('focusWall cobre as demais paredes (norte, oeste, leste)', async () => {
+    const { world } = await makeWorld();
+    world.focusWall(3); // leste → az -π/2
+    for (let i = 0; i < 150; i++) world.update(1 / 60);
+    expect(world.getCamera().azimuth).toBeCloseTo(-Math.PI / 2, 2);
+
+    world.focusWall(2); // oeste → az π/2
+    for (let i = 0; i < 150; i++) world.update(1 / 60);
+    expect(world.getCamera().azimuth).toBeCloseTo(Math.PI / 2, 2);
+
+    world.focusWall(0); // norte → az 0
+    for (let i = 0; i < 150; i++) world.update(1 / 60);
+    expect(world.getCamera().azimuth).toBeCloseTo(0, 2);
+    expect(world.getCamera().elevation).toBeCloseTo(0.45, 2);
+  });
+
+  it('focar uma parede desconhecida é um no-op', async () => {
+    const { world } = await makeWorld();
+    const antes = world.getCamera();
+    world.focusWall(9);
+    for (let i = 0; i < 30; i++) world.update(1 / 60);
+    expect(world.getCamera()).toEqual(antes);
+  });
+});
+
 describe("Laço do vídeo: Lasso'n'Cross e LassoMenu", () => {
   async function lassoWorld() {
     const overlay = makeOverlayMock();

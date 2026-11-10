@@ -462,9 +462,20 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // no chão vazio: fecha leques; senão: abre o objeto (M2/Fase 7)
   const onDblClick = (e: MouseEvent) => {
     const rect = renderer.getCanvas().getBoundingClientRect();
-    const worldPt = resolveFloor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    const target = world.pickObjectAt(worldPt);
+    const screen = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const { direction } = renderer.screenToRay(screen);
+    const worldPt = resolveFloor(screen);
+    const target = world.pickObjectAt(worldPt, screen);
     if (!target) {
+      // Parede (item 4): clique projetado fora da sala → foca a câmera nela
+      // (direction.y >= 0 = raio não atinge o chão — "céu", não é parede)
+      if (direction.y < -1e-4) {
+        const wall = world.pickWall(worldPt);
+        if (wall !== null) {
+          world.focusWall(wall);
+          return;
+        }
+      }
       // Chão vazio → fecha leques (Fase 7: duplo-clique no chão recolhe)
       if (world.collapseFanOuts() > 0) overlay.toast(t('toast.fansClosed'));
       return;
