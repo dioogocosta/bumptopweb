@@ -85,6 +85,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   const themeIdx = await repo.getSetting<number>('themeIndex', 0);
   world.setTheme(THEMES[themeIdx % THEMES.length]);
 
+  // Nomes dos arquivos (rótulos) — preferência persistida no menu do chão
+  const showNames = await repo.getSetting<boolean>('showNames', true);
+  world.setShowNames(showNames);
+
   // Filesystem (M2): Modo A (FS Access) com fallback Modo B (OPFS)
   const fs: IFileSystem = new FsAccessFileSystem(new OpfsFileSystem());
   await fs.requestDirectory().catch(() => false);
@@ -116,6 +120,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     else if (r.changed > 0 && r.scale != null)
       overlay.toast(t('toast.scalePct', { pct: Math.round(r.scale * 100) }));
     else overlay.toast(t('toast.nothingToScale'));
+  };
+
+  /** Persistência imediata de um objeto (notas e nomes): não espera o flush de 2 s. */
+  const persistObject = (id: string) => {
+    const o = world.getObject(id);
+    if (o) repo.upsertObject(o).catch((e) => console.warn('save do objeto falhou', e));
+  };
+  /** Remove o objeto do banco logo após apagá-lo do mundo (ex.: nota esvaziada). */
+  const forgetObject = (id: string) => {
+    repo.deleteObject(id).catch(() => {});
   };
 
   overlayRoot.addEventListener('ctxaction', (e) => {
@@ -150,6 +164,44 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     } else if (a === 'physicsLevel') {
       const level = world.togglePhysicsLevel();
       overlay.toast(t(level === 2 ? 'toast.physicsLevel2' : 'toast.physicsLevel1'));
+    } else if (a === 'toggleShowNames') {
+      const on = world.toggleShowNames();
+      repo.setSetting('showNames', on).catch(() => {});
+      overlay.toast(t(on ? 'toast.showNamesOn' : 'toast.showNamesOff'));
+    } else if (a === 'exportScene') {
+      // Backup manual da cena (itens + pilhas + notas) em JSON
+      const json = JSON.stringify(world.toSnapshot());
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `bumptop-cena-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      overlay.toast(t('toast.sceneExported'));
+    } else if (a === 'importScene') {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = () => {
+        const f = input.files?.[0];
+        if (!f) return;
+        void f
+          .text()
+          .then((txt) => {
+            const snap: unknown = JSON.parse(txt);
+            const objs = (snap as { objects?: unknown[] } | null)?.objects;
+            if (!Array.isArray(objs)) throw new Error('formato inválido');
+            world.loadSnapshot(snap as Parameters<typeof world.loadSnapshot>[0]);
+            const n = objs.length;
+            return repo.saveScene(world.toSnapshot()).then(() => n);
+          })
+          .then((n) => overlay.toast(t('toast.sceneImported', { n })))
+          .catch((e) => {
+            console.warn('import falhou', e);
+            overlay.toast(t('toast.sceneImportFailed'));
+          });
+      };
+      input.click();
     } else if (a === 'delete' && ctxTargets.length > 0) {
       // Multi-select: se o item clicado está na seleção, exclui a seleção
       // inteira; senão só o item clicado (Fase 7)
@@ -167,6 +219,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           const next = text.trim();
           if (next !== '' && next !== current) {
             world.renameObject(id, next);
+            persistObject(id);
             overlay.toast(t('toast.renamed'));
           }
         });
@@ -221,8 +274,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, '').then((text) => {
         if (text === '') {
           world.removeObject(id); // cancelou sem escrever
+          forgetObject(id);
         } else {
           world.setNoteText(id, text);
+          persistObject(id);
           overlay.toast(t('toast.noteCreated'));
         }
       });
@@ -233,9 +288,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, current).then((text) => {
         if (text === '') {
           world.removeObject(id); // esvaziou = apaga a nota
+          forgetObject(id);
           overlay.toast(t('toast.noteRemoved'));
         } else {
           world.setNoteText(id, text);
+          persistObject(id);
         }
       });
     }
@@ -356,6 +413,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           action: 'physicsLevel',
           hint: t('hint.physicsLevel'),
         });
+        items.push({
+          label: `${t('menu.toggleShowNames')} (${world.isShowNames() ? '✓' : '✗'})`,
+          action: 'toggleShowNames',
+          hint: t('hint.toggleShowNames'),
+        });
+        items.push({ label: t('menu.exportScene'), action: 'exportScene', hint: t('hint.exportScene') });
+        items.push({ label: t('menu.importScene'), action: 'importScene', hint: t('hint.importScene') });
       }
       overlay.showContextMenu(action.screen, items);
       return;
@@ -417,9 +481,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, current).then((text) => {
         if (text === '') {
           world.removeObject(target);
+          forgetObject(target);
           overlay.toast(t('toast.noteRemoved'));
         } else {
           world.setNoteText(target, text);
+          persistObject(target);
         }
       });
       return;
@@ -477,6 +543,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           const next = text.trim();
           if (next !== '' && next !== current) {
             world.renameObject(id, next);
+            persistObject(id);
             overlay.toast(t('toast.renamed'));
           }
         });
@@ -581,6 +648,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   overlay.onScrubHover?.((pileId, index) => {
     world.setScrubIndex(pileId, index);
   });
+
+  // Flush imediato de persistência: o rAF do loop morre com a aba oculta,
+  // então salvamos na hora em que ela esconde/recarrega (fecha a janela de perda
+  // de até 2 s do SAVE_INTERVAL — cobre notas, pose, pilhas e câmera).
+  const flushNow = () => {
+    repo.saveScene(world.toSnapshot()).catch((e) => console.warn('save falhou', e));
+  };
+  const onVisibilityFlush = () => {
+    if (document.visibilityState === 'hidden') flushNow();
+  };
 
   // Main loop com flush de persistência + handle de resize + halo de pilha
   const loop = new MainLoop({
@@ -692,11 +769,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.setScrubStrip(null);
       }
     },
-    onFlush: () => {
-      repo.saveScene(world.toSnapshot()).catch((e) => console.warn('save falhou', e));
-    },
+    onFlush: flushNow,
   });
   loop.start();
+
+  // Persistência (item A): salva ao esconder a aba e ao descarregar a página
+  document.addEventListener('visibilitychange', onVisibilityFlush);
+  window.addEventListener('pagehide', flushNow);
 
   // Watcher de pasta (M2): polling + diff, pausado com a aba oculta
   const WATCH_MS = 5000;
@@ -722,6 +801,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       input.detach();
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVisibilityFlush);
+      window.removeEventListener('pagehide', flushNow);
       overlayRoot.removeEventListener('resetcamera', onResetCamera);
       renderer.getCanvas().removeEventListener('dblclick', onDblClick);
       renderer.dispose();

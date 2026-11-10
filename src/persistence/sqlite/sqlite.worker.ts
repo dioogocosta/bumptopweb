@@ -30,7 +30,7 @@ interface SqliteDb {
   export(): Uint8Array;
 }
 interface SqliteModule {
-  oo1: { DB: new (name?: string, opts?: unknown) => SqliteDb };
+  oo1: { DB: new (name?: string, flags?: string, vfs?: string) => SqliteDb };
   installOpfsSAHPoolVfs(opts?: unknown): Promise<unknown>;
   OpfsSAHPoolDb?: new (name?: string) => SqliteDb;
 }
@@ -131,7 +131,9 @@ async function initDb(): Promise<string> {
   sqlite3 = (await (sqlite3init as unknown as { default: (o?: unknown) => Promise<SqliteModule> }).default()) as SqliteModule;
   try {
     await sqlite3.installOpfsSAHPoolVfs();
-    db = new sqlite3.oo1.DB('/bumptop.db', 'c');
+    // 3º parâmetro = VFS: sem ele o DB cai no VFS default (memória) e nada
+    // persiste entre recargas (confirmado em produção: Netlify perdia settings e cena)
+    db = new sqlite3.oo1.DB('/bumptop.db', 'c', 'opfs-sahpool');
     backend = 'opfs-sqlite';
   } catch {
     // Fallback: memória + IndexedDB
