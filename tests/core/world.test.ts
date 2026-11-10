@@ -1112,3 +1112,36 @@ describe('Parede: prender é opcional e item preso pode ser puxado', () => {
     expect(world.getObject(id)!.pinnedWall).toBeNull();
   });
 });
+
+describe('Nomes dos arquivos (toggle do menu — item 1)', () => {
+  it('desligar remove os labels; religar volta a exibir o nome', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'relatorio.pdf');
+
+    // Padrão: nomes visíveis
+    expect(world.isShowNames()).toBe(true);
+    world.update(1 / 60);
+    expect(overlay.setLabel).toHaveBeenCalledWith(id, 'relatorio.pdf', expect.anything());
+
+    // Desligado: labels removidos
+    expect(world.toggleShowNames()).toBe(false);
+    world.update(1 / 60);
+    expect(overlay.setLabel).toHaveBeenLastCalledWith(id, null, null);
+    expect(world.isShowNames()).toBe(false);
+
+    // Religado: volta a exibir
+    expect(world.toggleShowNames()).toBe(true);
+    world.update(1 / 60);
+    expect(overlay.setLabel).toHaveBeenLastCalledWith(id, 'relatorio.pdf', expect.anything());
+  });
+
+  it('com nomes ocultos, objeto novo não ganha label', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    world.setShowNames(false);
+    const id = world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'foto.jpg');
+    world.update(1 / 60);
+    expect(overlay.setLabel).toHaveBeenCalledWith(id, null, null);
+  });
+});

@@ -136,6 +136,8 @@ export class World {
   private explodingPiles = true;
   /** Auto-align suave (P1 - Item 12): alinha itens soltos à grade implícita de eixos. */
   private autoAlign = true;
+  /** Mostrar o nome (rótulo) dos arquivos abaixo dos ícones (toggle do menu do chão). */
+  private showNames = true;
 
   constructor(deps: WorldDeps, opts?: { room?: RoomConfig; physics?: PhysicsConfig; spring?: Partial<SpringConfig> }) {
     this.deps = deps;
@@ -1184,6 +1186,23 @@ export class World {
     return this.autoAlign;
   }
 
+  /** Habilita/desabilita a exibição dos nomes dos arquivos (rótulos). */
+  setShowNames(enabled: boolean): void {
+    this.showNames = enabled;
+    this.dirty = true; // re-sincroniza (cria/remove) os labels no overlay
+  }
+
+  /** Os nomes dos arquivos estão visíveis? */
+  isShowNames(): boolean {
+    return this.showNames;
+  }
+
+  /** Alterna a exibição dos nomes dos arquivos (toggle). */
+  toggleShowNames(): boolean {
+    this.setShowNames(!this.showNames);
+    return this.showNames;
+  }
+
   /**
    * Auto-Align (P1 - Item 12): alinha suavemente o objeto solto à grade implícita
    * de eixos no chão (mesa arrumada), se a célula alvo estiver desocupada.
@@ -2142,6 +2161,11 @@ export class World {
   private syncLabels(): void {
     const overlay = this.deps.overlay;
     if (!overlay) return;
+    // Nomes ocultos (toggle do menu): remove os labels existentes e não recria
+    if (!this.showNames) {
+      for (const e of this.entries.values()) overlay.setLabel(e.data.id, null, null);
+      return;
+    }
     for (const e of this.entries.values()) {
       // Nota adesiva: o label é o conteúdo (truncado), não "Nota"
       const text =
