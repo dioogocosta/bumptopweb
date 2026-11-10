@@ -973,6 +973,74 @@ describe('Seleção em grupo: arrastar vários objetos juntos', () => {
   });
 });
 
+describe('Arraste em grupo com pilha na seleção (item 5)', () => {
+  const p = (x: number, z: number) => ({ x, y: 0, z });
+
+  /** Pilha de 3 (a = base) + 2 itens soltos (d, e). */
+  async function pileAndLoose() {
+    const ctx = await makeWorld();
+    const a = ctx.world.addBox({ x: 0, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = ctx.world.addBox({ x: 30, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    const c = ctx.world.addBox({ x: 0, y: 1.6, z: 30 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'c.txt');
+    ctx.world.createPileFrom([a, b, c]);
+    const d = ctx.world.addBox({ x: 60, y: 1.6, z: 10 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'd.txt');
+    const e = ctx.world.addBox({ x: 60, y: 1.6, z: -10 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'e.txt');
+    return { ...ctx, a, b, c, d, e };
+  }
+
+  it('seleção com pilha + solto: arrastar move a pilha inteira junto (sem voltar ao lugar antigo)', async () => {
+    const { world, a, b, c, d } = await pileAndLoose();
+    // Seleciona um MEMBRO da pilha (não a base) + o item solto
+    world.select(b);
+    world.toggleSelect(d);
+    const before = new Map([a, b, c, d].map((id) => [id, { ...world.getObject(id)!.pose.position }]));
+    const centerBefore = world.getPileCenter(a)!;
+    const leaderStart = { ...world.getObject(b)!.pose.position };
+
+    // Clica sobre a pilha e arrasta até (-40, 20)
+    world.processAction({ type: 'pointerDown', world: p(leaderStart.x, leaderStart.z), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerMove', world: p(-40, 20), screen: { x: 60, y: 120 }, pointerId: 1 });
+    for (let i = 0; i < 120; i++) world.update(1 / 60);
+    world.processAction({ type: 'pointerUp', world: p(-40, 20), screen: { x: 60, y: 120 }, pointerId: 1 });
+
+    // A pilha continua formada
+    for (const id of [a, b, c]) expect(world.inPile(id)).toBe(true);
+    // O solto acompanha o alvo...
+    const dx = -40 - leaderStart.x;
+    const dz = 20 - leaderStart.z;
+    const after = (id: string) => world.getObject(id)!.pose.position;
+    expect(after(d).x - before.get(d)!.x).toBeCloseTo(dx, 0);
+    expect(after(d).z - before.get(d)!.z).toBeCloseTo(dz, 0);
+    // ...e TODOS os membros da pilha se movem com o mesmo delta (rigidamente)
+    for (const id of [a, b, c]) {
+      expect(after(id).x - before.get(id)!.x).toBeCloseTo(after(d).x - before.get(d)!.x, 5);
+      expect(after(id).z - before.get(id)!.z).toBeCloseTo(after(d).z - before.get(d)!.z, 5);
+    }
+    // A origem da pilha foi atualizada (o centro acompanha o arrasto)
+    const centerAfter = world.getPileCenter(a)!;
+    expect(centerAfter.x - centerBefore.x).toBeCloseTo(dx, 0);
+    expect(centerAfter.z - centerBefore.z).toBeCloseTo(dz, 0);
+  });
+
+  it('clique simples em item de pilha sem seleção múltipla ainda arranca o item', async () => {
+    const { world, a } = await pileAndLoose();
+    const pa = { ...world.getObject(a)!.pose.position };
+    world.processAction({ type: 'pointerDown', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerUp', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, pointerId: 1 });
+    expect(world.inPile(a)).toBe(false);
+  });
+
+  it('seleção de itens soltos não sequestra o clique na pilha (item ainda é arrancado)', async () => {
+    const { world, a, d, e } = await pileAndLoose();
+    world.select(d);
+    world.toggleSelect(e);
+    const pa = { ...world.getObject(a)!.pose.position };
+    world.processAction({ type: 'pointerDown', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
+    world.processAction({ type: 'pointerUp', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, pointerId: 1 });
+    expect(world.inPile(a)).toBe(false);
+  });
+});
+
 describe("Laço do vídeo: Lasso'n'Cross e LassoMenu", () => {
   async function lassoWorld() {
     const overlay = makeOverlayMock();

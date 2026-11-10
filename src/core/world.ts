@@ -64,6 +64,14 @@ interface GroupMember {
   y: number;
 }
 
+/** Pilha arrastada em grupo: origem no início + referência p/ medir o delta. */
+interface GroupPile {
+  baseId: string;
+  origin: Vec3;
+  refId: string;
+  refStart: Vec3;
+}
+
 export type LassoMenuListener = (screen: { x: number; y: number }, ids: string[]) => void;
 
 interface Entry {
@@ -110,6 +118,7 @@ export class World {
   private group: GroupMember[] = [];
   private groupStartScreen: { x: number; y: number } | null = null;
   private groupMoved = false;
+  private groupPiles: GroupPile[] = [];
   private physicsLevel: PhysicsLevel;
   /** Prender automaticamente na parede ao arremessar/arrastar até ela (desligado: o item bate e volta). */
   private autoWallPin = false;
@@ -475,10 +484,32 @@ export class World {
 
   /** Clicar num item que já faz parte de uma seleção múltipla arrasta o grupo. */
   private canGroupDrag(hit: string): boolean {
-    if (!this.selectedIds.has(hit) || this.selectedIds.size < 2) return false;
-    if (this.piles.contains(hit)) return false;
+    if (this.selectedIds.size < 2) return false;
+    // Membro de pilha: a pilha conta como selecionada se QUALQUER membro
+    // estiver na seleção (item 5 — arrastar a pilha junto com o grupo).
+    const base = this.piles.baseOf(hit);
+    if (base) {
+      const st = this.piles.getState(base);
+      if (!st || !st.children.some((c) => this.selectedIds.has(c))) return false;
+    } else if (!this.selectedIds.has(hit)) return false;
     if (this.entries.get(hit)?.data.pinnedWall != null) return false;
-    return this.layoutTargets().length >= 2;
+    return this.groupTargets().length >= 2;
+  }
+
+  /**
+   * Alvos do arraste em grupo (item 5): `layoutTargets` (itens soltos) mais as
+   * pilhas representadas na seleção com TODOS os seus membros — a pilha move
+   * como unidade. Diferente de `layoutTargets` (grid/sort/rotate), que segue
+   * ignorando pilha.
+   */
+  private groupTargets(): string[] {
+    const out = new Set(this.layoutTargets());
+    for (const [baseId, state] of this.piles.allStates()) {
+      if (!state.children.some((c) => this.selectedIds.has(c))) continue;
+      out.add(baseId);
+      for (const c of state.children) out.add(c);
+    }
+    return [...out];
   }
 
   /**
@@ -496,12 +527,31 @@ export class World {
     const leader = this.entries.get(hit)!;
     const lp = leader.data.pose.position;
     this.group = [];
-    for (const id of this.layoutTargets()) {
+    const targets = this.groupTargets();
+    for (const id of targets) {
       if (id === hit) continue;
       const e = this.entries.get(id)!;
       const p = e.data.pose.position;
       this.group.push({ id, dx: p.x - lp.x, dz: p.z - lp.z, y: p.y });
       this.deps.physics.setFrozen(e.body, true);
+    }
+    // Pilhas representadas na seleção: a origem é atualizada no release para
+    // os membros não voltarem às posições antigas (item 5).
+    this.groupPiles = [];
+    const seenPiles = new Set<string>();
+    for (const id of targets) {
+      const base = this.piles.baseOf(id);
+      if (!base || seenPiles.has(base)) continue;
+      seenPiles.add(base);
+      const st = this.piles.getState(base);
+      const ref = this.entries.get(id);
+      if (!st || !ref) continue;
+      this.groupPiles.push({
+        baseId: base,
+        origin: { ...st.origin },
+        refId: id,
+        refStart: { ...ref.data.pose.position },
+      });
     }
     this.groupStartScreen = { ...screen };
     this.groupMoved = false;
@@ -517,12 +567,30 @@ export class World {
     for (const m of this.group) {
       const e = this.entries.get(m.id);
       if (!e) continue;
+      // Membro de pilha permanece congelado — a pilha é gerenciada pelo layout.
+      if (this.piles.contains(m.id)) continue;
       this.deps.physics.setFrozen(e.body, false);
       if (velocity) {
         this.deps.physics.setVelocity(e.body, velocity);
         if (this.autoWallPin) this.recentToss.set(m.id, 3);
       }
     }
+    // Item 5: atualiza a origem das pilhas arrastadas e reaplica o layout —
+    // sem isso os membros voltariam às posições antigas no release.
+    if (this.groupPiles.length > 0) {
+      for (const gp of this.groupPiles) {
+        const ref = this.entries.get(gp.refId);
+        if (!ref) continue;
+        const cur = ref.data.pose.position;
+        this.piles.setOrigin(gp.baseId, {
+          x: gp.origin.x + (cur.x - gp.refStart.x),
+          y: gp.origin.y,
+          z: gp.origin.z + (cur.z - gp.refStart.z),
+        });
+      }
+      this.applyPileLayout();
+    }
+    this.groupPiles = [];
     this.group = [];
     this.groupStartScreen = null;
   }
@@ -663,10 +731,14 @@ export class World {
     if (this.groupStartScreen) {
       const { velocity, toss } = this.drag.end();
       const clicked = !this.groupMoved;
-      this.deps.physics.setFrozen(e.body, false);
-      if (toss) {
-        this.deps.physics.setVelocity(e.body, velocity);
-        if (this.autoWallPin) this.recentToss.set(e.data.id, 3);
+      // Líder dentro de pilha permanece congelado (o layout o reposiciona).
+      const leaderInPile = this.piles.contains(e.data.id);
+      if (!leaderInPile) {
+        this.deps.physics.setFrozen(e.body, false);
+        if (toss) {
+          this.deps.physics.setVelocity(e.body, velocity);
+          if (this.autoWallPin) this.recentToss.set(e.data.id, 3);
+        }
       }
       this.releaseGroup(toss ? velocity : null);
       if (clicked) this.select(e.data.id);

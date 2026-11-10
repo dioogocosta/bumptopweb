@@ -86,6 +86,16 @@ export class PileManager {
     return this.findKey(objectId);
   }
 
+  /**
+   * Move a pilha inteira para uma nova origem (arraste em grupo — item 5).
+   * Os membros são re-posicionados pelo próximo `applyPileLayout`.
+   */
+  setOrigin(baseId: string, origin: Vec3): void {
+    const p = this.piles.get(baseId);
+    if (!p) return;
+    p.origin = { ...origin };
+  }
+
   getState(baseId: string): PileState | null {
     return this.piles.get(baseId) ?? null;
   }
