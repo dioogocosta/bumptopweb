@@ -23,6 +23,7 @@ npm test             # unit (Vitest)  — 114 testes
 npm run test:e2e     # E2E (Playwright) — 29 passam, 3 são pulados de propósito
 npm run lint:arch    # garante que src/core/** continua puro
 npm run build
+node scripts/validate-sheets.mjs   # validação das folhas finas (BASE_URL=http://localhost:5174 se a porta padrão estiver ocupada)
 ```
 
 O app fica exposto em `window.__bumptop` = `{ world, repo, loop, files, renderer, overlay }`. É muito útil para testes no navegador. Exemplos: `world.listObjects()`, `renderer.projectToScreen(pos)`, `world.isInsideRoom(id)`, `world.getLassoState()`.
@@ -58,11 +59,11 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 | PR #1 | **Girar 45°** (`rotateSelection`). O menu radial fecha com Esc e clique fora. Itens pregados ficam **de pé** na parede (quaternions por parede em `pinToWall`). |
 | PR #2 | **Halo da pilha clicável:** a âncora agora fica no centro da pilha. Antes, os botões ficavam a ~70 px e sumiam no caminho até eles. |
 | PR #2 | **Prender na parede é opcional e vem desligado** (`autoWallPin`, toggle "Prender ao jogar na parede" no menu do chão). Itens presos são escolhidos pela posição na tela (`pickPinnedOnScreen`), então dá para puxá-los de volta. |
-| `124b6a8` | **Itens finos como folhas:** `asSheet()` deixa a meia-espessura em 5% da largura (0,35 num item de 14; antes era 1,6). Vale para itens novos e para cenas carregadas. **Não foi verificado visualmente no navegador.** |
+| `124b6a8` | **Itens finos como folhas:** `asSheet()` deixa a meia-espessura em 5% da largura (0,35 num item de 14; antes era 1,6). Vale para itens novos e para cenas carregadas. **Verificado no navegador em 10/11/2026** (ver §5.1). |
 
 ## 5. Pendências conhecidas (por prioridade)
 
-1. **Verificar no navegador a mudança para folhas finas** (`124b6a8`): aparência, z-fighting com o piso, estabilidade da física, altura das pilhas e labels. Se tremer, considere `SHEET_HALF_THICKNESS` um pouco maior (por exemplo 0,5) ou aumentar o amortecimento.
+1. ~~Verificar no navegador a mudança para folhas finas~~ — **RESOLVIDO em 10/11/2026**: validado com `node scripts/validate-sheets.mjs` (9/9): 7/7 itens a 5% de espessura, zero flicker entre frames (sem z-fighting com o piso), drift 0 após assentar e após arremesso, pilha de 4 folhas com altura 2,55 (= 3 x 0,85, empilhamento exato), 7/7 labels dentro da tela e zero erros de console. `SHEET_HALF_THICKNESS = 0,35` mantido — nada tremeu, não precisou do plano B (0,5).
 2. **Itens só giram no eixo Y** (`enabledRotations(false, true, false)`). Um item apoiado na quina de outro não tomba e fica "flutuando". No vídeo, os itens inclinam nas pilhas bagunçadas. Uma opção é liberar a rotação X/Z só no nível 2, com amortecimento angular alto, e endireitar o item quando ele parar.
 3. **Câmera padrão corta a parede norte:** um item pregado nela fica fora da tela. Ajustar o preset em `core/camera/orbitCameraController.ts` ou a altura dos itens pregados.
 4. **Lista do dono a validar ou implementar:**
