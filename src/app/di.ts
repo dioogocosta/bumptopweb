@@ -108,6 +108,17 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   let ctxFloorPoint: { x: number; y: number; z: number } | null = null;
   // Rastreio de arraste p/ detectar "soltar em pasta" (moveInto, M2)
   let dragSourceId: string | null = null;
+  /**
+   * Última pasta sob o cursor durante o arraste (excluindo o arrastado).
+   * A pasta é empurrada pelo corpo cinemático do arrastado e pode deslizar
+   * para fora do raio de captura antes do soltar — o cursor ainda conta
+   * como "sobre a pasta" se estiver perto de onde ela foi vista por último.
+   */
+  let dropCandidate: { id: string; world: { x: number; y: number; z: number } } | null = null;
+  /** Mesmo raio de captura do pickAt (unidades de mundo). */
+  const DROP_RADIUS = 13;
+  const distXZ = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) =>
+    Math.hypot(a.x - b.x, a.z - b.z);
 
   /** Feedback de escala (P0): limite ("não dá para mais!") ou % atual. */
   const toastScale = (r: {
@@ -216,7 +227,14 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       // Multi-select: se o item clicado está na seleção, exclui a seleção
       // inteira; senão só o item clicado (Fase 7)
       const ids = ctxTargets;
-      for (const id of ids) world.removeObject(id);
+      // Objetos de FS (pasta/arquivo com fsPath): o ícone sai da cena E o
+      // conteúdo é apagado do sandbox (OPFS) — e o caminho é "tombado" p/ o
+      // watcher de 5 s não recriar o ícone (bug: pasta excluída ressuscitava).
+      // Objetos demo (sem fsPath): só o ícone sai, como antes.
+      for (const id of ids) {
+        if (typeof world.getObject(id)?.meta.fsPath === 'string') void files.deleteFsObject(id);
+        else world.removeObject(id);
+      }
       if (ids.length > 1) overlay.toast(t('toast.deleted', { n: ids.length }));
     } else if (a === 'rename' && ctxTarget) {
       const id = ctxTarget;
@@ -453,10 +471,32 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     // Soltar em pasta → move o arquivo (M2)
     if (action.type === 'pointerDown') {
       dragSourceId = world.pickObjectAt(action.world, action.screen);
+      dropCandidate = null;
+    }
+    // Durante o arraste: lembra a ÚLTIMA pasta sob o cursor (excluindo o
+    // arrastado). A pasta é empurrada pelo corpo cinemático do arrastado e
+    // pode ter deslizado para fora do raio de captura no momento do soltar.
+    if (action.type === 'pointerMove' && dragSourceId) {
+      const hover = world.pickObjectAt(action.world, action.screen, dragSourceId);
+      if (hover && world.getObject(hover)?.meta.isDir === true) {
+        dropCandidate = { id: hover, world: { ...action.world } };
+      }
     }
     world.processAction(action);
     if (action.type === 'pointerUp' && dragSourceId) {
-      const dropTarget = world.pickObjectAt(action.world);
+      // Exclui o próprio arrastado: ele está sob o cursor (d≈0) e sem o
+      // exclude ele sempre "ganha" o pick → dropTarget === dragSourceId →
+      // o moveInto nunca dispara (bug: itens não entram nas pastas).
+      let dropTarget = world.pickObjectAt(action.world, action.screen, dragSourceId);
+      // A pasta empurrada: se durante a aproximação ela esteve sob o cursor e
+      // o cursor ainda está perto de onde ela estava, aceita como alvo.
+      if (
+        dropCandidate &&
+        (dropTarget === null || world.getObject(dropTarget)?.meta.isDir !== true) &&
+        distXZ(action.world, dropCandidate.world) <= DROP_RADIUS
+      ) {
+        dropTarget = dropCandidate.id;
+      }
       const src = world.getObject(dragSourceId);
       if (
         dropTarget &&
@@ -469,6 +509,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           overlay.toast(ok ? t('toast.fileMoved') : t('toast.moveFailed'));
         });
       }
+      dropCandidate = null;
       dragSourceId = null;
     }
   });

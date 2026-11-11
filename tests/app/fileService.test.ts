@@ -28,7 +28,11 @@ function makeWorld(objs: Record<string, unknown>[]): World {
   return {
     getObject: vi.fn((id: string) => byId.get(id) ?? null),
     listObjects: vi.fn(() => [...byId.values()]),
-    removeObject: vi.fn(),
+    // Remove DE FATO do mapa (o world real remove; necessário p/ testar o
+    // tombstone: depois de excluir, o syncDirectory não pode ver o objeto)
+    removeObject: vi.fn((id: string) => {
+      byId.delete(id);
+    }),
     addBox: vi.fn(() => 'novo'),
     setObjectThumb: vi.fn(),
   } as unknown as World;
@@ -209,6 +213,20 @@ describe('FileService.moveInto (arrastar arquivo para pasta)', () => {
     expect(files['/foto.png']).toBeUndefined();
   });
 
+  it('usa o NOME do arquivo do caminho (não o label) no destino', async () => {
+    const files = { '/doc.txt': bytes('x') };
+    const world = makeWorld([
+      { id: 'obj1', label: 'renomeado', meta: { fsPath: '/doc.txt', isDir: false } },
+      { id: 'dir1', label: 'p', meta: { fsPath: '/p', isDir: true } },
+    ]);
+    const fs = makeFs(files);
+    const svc = new FileService(world, fs, makeRepo());
+
+    await svc.moveInto('obj1', 'dir1');
+    expect(fs.write).toHaveBeenCalledWith('/p/doc.txt', expect.anything());
+    expect(files['/p/doc.txt' as keyof typeof files]).toBeDefined();
+  });
+
   it('upsertFsEntry falhando NÃO quebra o move: removeObject acontece e retorna true', async () => {
     const world = makeWorld([
       objeto(),
@@ -233,6 +251,77 @@ describe('FileService.moveInto (arrastar arquivo para pasta)', () => {
     const svc = new FileService(world, makeFs({}), makeRepo());
     expect(await svc.moveInto('obj1', 'n1')).toBe(false);
     expect(await svc.moveInto('obj1', 'obj1')).toBe(false);
+  });
+});
+
+describe('FileService.deleteFsObject (excluir pasta/arquivo)', () => {
+  it('apaga o diretório no OPFS, remove o ícone e o tombstone impede re-spawn', async () => {
+    const world = makeWorld([objeto({ label: 'Nova pasta', meta: { isDir: true } })]);
+    const fs = makeFs({});
+    const svc = new FileService(world, fs, makeRepo());
+
+    expect(await svc.deleteFsObject('obj1')).toBe(true);
+    expect(world.removeObject).toHaveBeenCalledWith('obj1');
+    expect(fs.remove).toHaveBeenCalledWith('/foto.png');
+    // O objeto saiu da cena; mesmo com o caminho ainda no FS (corrida com o
+    // watcher), o tombstone impede a recriação do ícone
+    (fs.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { path: '/foto.png', name: 'Nova pasta', isDir: true, size: 0, mtime: 0 },
+    ]);
+    const d = await svc.syncDirectory();
+    expect(d.added).toBe(0);
+  });
+
+  it('tomba filhos: excluir a pasta protege os caminhos dentro dela', async () => {
+    const world = makeWorld([
+      objeto({ label: 'docs', meta: { fsPath: '/docs', isDir: true } }),
+      { id: 'filho', label: 'a.txt', meta: { fsPath: '/docs/a.txt', isDir: false } },
+    ]);
+    const fs = makeFs({});
+    const svc = new FileService(world, fs, makeRepo());
+
+    await svc.deleteFsObject('obj1');
+    expect(fs.remove).toHaveBeenCalledWith('/docs');
+    (fs.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { path: '/docs/a.txt', name: 'a.txt', isDir: false, size: 3, mtime: 0 },
+    ]);
+    const d = await svc.syncDirectory();
+    expect(d.added).toBe(0); // filho tombado não renasce
+  });
+
+  it('modo fs-access: NÃO apaga o arquivo real do usuário (só tomba)', async () => {
+    const world = makeWorld([objeto()]);
+    const fs = makeFs({});
+    (fs.mode as ReturnType<typeof vi.fn>).mockReturnValue('fs-access');
+    const svc = new FileService(world, fs, makeRepo());
+
+    await svc.deleteFsObject('obj1');
+    expect(world.removeObject).toHaveBeenCalledWith('obj1');
+    expect(fs.remove).not.toHaveBeenCalled();
+  });
+
+  it('objeto demo (sem fsPath): só o ícone sai', async () => {
+    const world = makeWorld([{ id: 'obj1', label: 'demo', meta: {} }]);
+    const fs = makeFs({});
+    const svc = new FileService(world, fs, makeRepo());
+
+    await svc.deleteFsObject('obj1');
+    expect(world.removeObject).toHaveBeenCalledWith('obj1');
+    expect(fs.remove).not.toHaveBeenCalled();
+  });
+
+  it('importDirectory limpa os tombstones (nova intenção do usuário)', async () => {
+    const world = makeWorld([objeto()]);
+    const fs = makeFs({ '/foto.png': bytes('dados') });
+    const svc = new FileService(world, fs, makeRepo());
+
+    await svc.deleteFsObject('obj1'); // tomba /foto.png
+    (fs.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { path: '/foto.png', name: 'foto.png', isDir: false, size: 4, mtime: 0 },
+    ]);
+    await svc.importDirectory();
+    // Re-import explícito: o tombstone foi limpo e o ícone volta
+    expect(world.addBox).toHaveBeenCalled();
   });
 });
 

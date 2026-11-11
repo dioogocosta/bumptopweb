@@ -1263,3 +1263,37 @@ describe('Nomes dos arquivos (toggle do menu — item 1)', () => {
     expect(overlay.setLabel).toHaveBeenCalledWith(id, null, null);
   });
 });
+
+describe('pickObjectAt com excludeId (drop em pasta — arrastado sob o cursor)', () => {
+  it('sem exclude o arrastado (d≈0) ganha; com exclude a pasta embaixo é detectada', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const pasta = world.addBox(
+      { x: 0, y: 1.7, z: 0 },
+      { x: 7, y: 1.6, z: 7 },
+      '#fff',
+      'pasta',
+      { fsPath: '/pasta', isDir: true },
+    );
+    // O arquivo solto exatamente sobre a pasta (posição do cursor = do arquivo)
+    const arquivo = world.addBox(
+      { x: 0.5, y: 1.7, z: 0.5 },
+      { x: 7, y: 1.6, z: 7 },
+      '#fff',
+      'a.txt',
+      { fsPath: '/a.txt', isDir: false },
+    );
+
+    // Sem exclude (comportamento antigo): o arrastado está sob o cursor → ele
+    // mesmo "ganha" o pick → dropTarget === dragSourceId → moveInto nunca roda
+    expect(world.pickObjectAt({ x: 0.5, y: 0, z: 0.5 })).toBe(arquivo);
+    // Com exclude (o fix): a pasta embaixo do arquivo é o alvo do drop
+    expect(world.pickObjectAt({ x: 0.5, y: 0, z: 0.5 }, undefined, arquivo)).toBe(pasta);
+  });
+
+  it('exclude de objeto que não está ali não muda o resultado', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const a = world.addBox({ x: 0, y: 1.7, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');
+    world.addBox({ x: 50, y: 1.7, z: 50 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b');
+    expect(world.pickObjectAt({ x: 1, y: 0, z: 1 }, undefined, 'inexistente')).toBe(a);
+  });
+});

@@ -98,6 +98,13 @@ export class FileService {
   /** Caminho da última pasta aberta (persistido). */
   private currentPath = '/';
 
+  /**
+   * Caminhos "tombados": excluídos pelo usuário nesta sessão. O watcher NÃO
+   * recria o ícone deles (sem isso, excluir pasta/arquivo ressuscita o ícone
+   * 5 s depois — o listing do FS ainda contém o caminho).
+   */
+  private tombs = new Set<string>();
+
   constructor(world: World, fs: IFileSystem, repo: IRepo) {
     this.world = world;
     this.fs = fs;
@@ -121,6 +128,10 @@ export class FileService {
     const entries = await this.fs.list(path);
     const result: ImportResult = { total: entries.length, dirs: 0, files: 0, thumbs: 0 };
     if (entries.length === 0) return result;
+
+    // Import explícito = nova intenção: limpa tombstones (o que o usuário
+    // excluiu nesta sessão volta a aparecer se ainda existir no FS)
+    this.tombs.clear();
 
     // Remove ícones de FS antigos (mantém a cena demo/objetos soltos)
     for (const o of this.world.listObjects()) {
@@ -271,7 +282,10 @@ export class FileService {
     try {
       const data = await this.fs.read(srcPath);
       const base = dirPath === '/' ? '' : dirPath;
-      const newPath = `${base}/${src.label ?? 'arquivo'}`;
+      // Nome REAL do arquivo (do caminho), não o label — o label pode ter sido
+      // renomeado/sem extensão e o arquivo precisaria do nome correto na pasta.
+      const nome = srcPath.split('/').pop() || src.label || 'arquivo';
+      const newPath = `${base}/${nome}`;
       await this.fs.write(newPath, data);
       await this.fs.remove(srcPath);
       // O ícone SAI da cena AGORA: o arquivo fisicamente já mudou de lugar, e
@@ -287,7 +301,7 @@ export class FileService {
           objectId: srcId,
           mode: this.fs.mode() === 'fs-access' ? 1 : 2,
           path: newPath,
-          name: src.label ?? 'arquivo',
+          name: nome,
           isDir: false,
           size: data.byteLength,
           mtime: Date.now(),
@@ -343,6 +357,36 @@ export class FileService {
   }
 
   /**
+   * Exclui um objeto de FS da cena (pasta ou arquivo):
+   *  1. remove o ícone;
+   *  2. tomba o caminho (e filhos `path/...`) p/ o watcher não recriar;
+   *  3. em modo SANDBOX (opfs/virtual) apaga o arquivo/diretório de verdade
+   *     (`remove` já é recursivo p/ pastas); em fs-access NÃO toca no disco
+   *     real do usuário — só o ícone sai (o tombstone evita o re-spawn).
+   */
+  async deleteFsObject(id: string): Promise<boolean> {
+    const o = this.world.getObject(id);
+    const path = o?.meta.fsPath as string | undefined;
+    this.world.removeObject(id);
+    if (path === undefined) return true;
+    // Tumba o caminho e tudo que está dentro dele (ícones de filhos na cena)
+    this.tombs.add(path);
+    const prefix = path.endsWith('/') ? path : `${path}/`;
+    for (const other of this.world.listObjects()) {
+      const p = other.meta.fsPath as string | undefined;
+      if (typeof p === 'string' && p.startsWith(prefix)) this.tombs.add(p);
+    }
+    if (this.fs.mode() !== 'fs-access') {
+      try {
+        await this.fs.remove(path);
+      } catch {
+        // Melhor esforço: o ícone já saiu e o tombstone evita re-spawn
+      }
+    }
+    return true;
+  }
+
+  /**
    * Watcher leve (polling + diff): detecta arquivos novos/removidos na pasta
    * atual e sincroniza os ícones. Chamado periodicamente e ao voltar à aba.
    */
@@ -357,9 +401,10 @@ export class FileService {
     let added = 0;
     let removed = 0;
 
-    // Novos → cria ícone
+    // Novos → cria ícone (exceto os tombados pelo usuário nesta sessão)
     entries.forEach((entry, i) => {
       if (existing.has(entry.path)) return;
+      if (this.tombs.has(entry.path)) return;
       this.spawnIcon(entry, i);
       added++;
     });

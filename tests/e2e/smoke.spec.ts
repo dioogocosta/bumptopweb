@@ -17,6 +17,11 @@ declare global {
       files: {
         mode(): string;
         importDirectory(path?: string): Promise<{ total: number; files: number; thumbs: number }>;
+        createFolder(
+          name: string,
+          at?: { x: number; y: number; z: number },
+        ): Promise<{ id: string; name: string } | null>;
+        deleteFsObject(id: string): Promise<boolean>;
       };
     };
   }
@@ -564,4 +569,148 @@ test('P1: Nova pasta no menu do chão cria pasta virtual na cena (item 6)', asyn
     await navigator.storage.getDirectory().then((r) => r.removeEntry('Nova pasta', { recursive: true }));
   }, pasta!.id);
   await page.waitForTimeout(300);
+});
+
+test('P1: soltar arquivo sobre a pasta no MEIO da sala move o arquivo (fix do drop)', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+  await page.waitForFunction(() => {
+    const w = window.__bumptop?.world;
+    if (!w) return false;
+    const objs = w.listObjects();
+    return objs.length >= 3 && objs.slice(0, 3).every((o: any) => o.pose.position.y <= 2.0);
+  }, { timeout: 15000 });
+
+  // Cena limpa: pasta no CENTRO da sala (longe das paredes e dos objetos
+  // demo) + arquivo REAL no OPFS solto ao lado — o cenário que falhava: o
+  // arrastado está sob o cursor (d≈0) e "ganhava" o pick no pointerUp,
+  // impedindo de detectar a pasta embaixo.
+  const ids = await page.evaluate(async () => {
+    const w = window.__bumptop!.world;
+    for (const o of w.listObjects()) w.removeObject(o.id);
+    const root = await navigator.storage.getDirectory();
+    for (const n of ['__drop_pasta__', '__drop_arq__.txt']) {
+      await root.removeEntry(n, { recursive: true }).catch(() => {});
+    }
+    await root
+      .getFileHandle('__drop_arq__.txt', { create: true })
+      .then((h) => h.createWritable())
+      .then((s) => s.write('conteudo e2e drop').then(() => s.close()));
+    const pasta = (await window.__bumptop!.files.createFolder('__drop_pasta__'))!.id;
+    const arq = w.addBox(
+      { x: 40, y: 1.7, z: 20 },
+      { x: 7, y: 1.6, z: 7 },
+      '#4f9cff',
+      '__drop_arq__',
+      { fsPath: '/__drop_arq__.txt', isDir: false },
+    );
+    return { pasta, arq };
+  });
+
+  // Assenta a física e confere que os dois estão visíveis na tela
+  await page.waitForFunction(() => {
+    const w = window.__bumptop!.world;
+    return w.listObjects().length === 2 && w.listObjects().every((o: any) => o.pose.position.y <= 2.2);
+  }, { timeout: 10000 });
+  const tela = await page.evaluate((ids) => {
+    const p1 = window.__bumptop!.renderer.projectToScreen(window.__bumptop!.world.getObject(ids.pasta)!.pose.position);
+    const p2 = window.__bumptop!.renderer.projectToScreen(window.__bumptop!.world.getObject(ids.arq)!.pose.position);
+    return { pasta: p1, arq: p2 };
+  }, ids);
+  expect(tela.pasta.visible).toBe(true);
+  expect(tela.arq.visible).toBe(true);
+
+  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  // Drag REAL: down no arquivo → move até a pasta → espera a mola → up
+  await page.mouse.move(box.x + tela.arq.x, box.y + tela.arq.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) {
+    await page.mouse.move(
+      box.x + tela.arq.x + ((tela.pasta.x - tela.arq.x) * i) / 12,
+      box.y + tela.arq.y + ((tela.pasta.y - tela.arq.y) * i) / 12,
+    );
+    await page.waitForTimeout(40);
+  }
+  await page.waitForTimeout(2200); // mola converge
+  await page.mouse.up();
+
+  // O ícone do arquivo sai da cena E o arquivo entra na pasta no OPFS —
+  // as DUAS provas (o ícone sumir sozinho pode ser o watcher removendo um
+  // fsPath sem listing; o arquivo dentro da pasta só acontece com moveInto)
+  await page.waitForFunction(
+    (id) => window.__bumptop!.world.getObject(id) === null,
+    ids.arq,
+    { timeout: 8000 },
+  );
+  const dentro = await page.evaluate(async () =>
+    navigator.storage
+      .getDirectory()
+      .then((r) => r.getDirectoryHandle('__drop_pasta__'))
+      .then((d) => d.getFileHandle('__drop_arq__.txt'))
+      .then(() => true)
+      .catch(() => false),
+  );
+  expect(dentro).toBe(true);
+
+  // Cleanup
+  await page.evaluate(async (ids) => {
+    window.__bumptop!.world.removeObject(ids.pasta);
+    const root = await navigator.storage.getDirectory();
+    for (const n of ['__drop_pasta__', '__drop_arq__.txt']) {
+      await root.removeEntry(n, { recursive: true }).catch(() => {});
+    }
+  }, ids);
+});
+
+test('P1: excluir pasta remove ícone + diretório OPFS e o watcher não recria', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+  await page.waitForFunction(() => {
+    const w = window.__bumptop?.world;
+    if (!w) return false;
+    const objs = w.listObjects();
+    return objs.length >= 3 && objs.slice(0, 3).every((o: any) => o.pose.position.y <= 2.0);
+  }, { timeout: 15000 });
+
+  // Cria a pasta pelo FileService (mesmo caminho do menu)
+  const id = await page.evaluate(async () => {
+    window.__bumptop!.world
+      .listObjects()
+      .filter((o: any) => o.label === '__del_pasta__')
+      .forEach((o: any) => window.__bumptop!.world.removeObject(o.id));
+    await navigator.storage.getDirectory().then((r) => r.removeEntry('__del_pasta__', { recursive: true }).catch(() => {}));
+    const r = await window.__bumptop!.files.createFolder('__del_pasta__');
+    return r!.id;
+  });
+  await page.waitForTimeout(700);
+
+  // Exclui pelo MENU REAL do objeto (botão direito → Excluir)
+  const tela = await page.evaluate((oid) => {
+    const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+    return window.__bumptop!.renderer.projectToScreen(pos);
+  }, id);
+  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  await page.mouse.click(box.x + tela.x, box.y + tela.y, { button: 'right' });
+  const menu = page.locator('.ctx-menu');
+  await expect(menu).toBeVisible();
+  const excluir = menu.locator('.radial-btn-label, .ctx-item').filter({ hasText: 'Excluir' }).first();
+  await expect(excluir).toBeVisible();
+  await excluir.click();
+
+  // Ícone fora da cena
+  await expect.poll(async () => page.evaluate((oid) => window.__bumptop!.world.getObject(oid) === null, id)).toBe(true);
+
+  // Diretório apagado do OPFS (modo sandbox) — o delete é fire-and-forget
+  // no handler (removeObject é sync, fs.remove é async): espera com folga
+  await expect.poll(
+    async () =>
+      page.evaluate(async () =>
+        navigator.storage.getDirectory().then((r) => r.getDirectoryHandle('__del_pasta__')).then(() => true).catch(() => false),
+      ),
+    { timeout: 8000 },
+  ).toBe(false);
+
+  // O watcher (5 s) NÃO recria o ícone — antes, a pasta "ressuscitava"
+  await page.waitForTimeout(6200);
+  expect(await page.evaluate((oid) => window.__bumptop!.world.getObject(oid) === null, id)).toBe(true);
 });
