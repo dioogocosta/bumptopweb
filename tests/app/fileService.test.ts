@@ -35,7 +35,7 @@ function makeWorld(objs: Record<string, unknown>[]): World {
 }
 
 function makeFs(files: Record<string, Uint8Array>): IFileSystem {
-  return {
+  const fs = {
     mode: vi.fn(() => 'opfs'),
     requestDirectory: vi.fn(async () => true),
     read: vi.fn(async (p: string) => {
@@ -44,7 +44,14 @@ function makeFs(files: Record<string, Uint8Array>): IFileSystem {
     }),
     list: vi.fn(async () => []),
     mkdir: vi.fn(async () => {}),
-  } as unknown as IFileSystem;
+    write: vi.fn(async (p: string, data: Uint8Array) => {
+      files[p] = data;
+    }),
+    remove: vi.fn(async (p: string) => {
+      delete files[p];
+    }),
+  };
+  return fs as unknown as IFileSystem & Record<string, ReturnType<typeof vi.fn>>;
 }
 
 function makeRepo(): IRepo {
@@ -180,6 +187,52 @@ describe('FileService.openObject (item 3)', () => {
     const world = makeWorld([objeto()]);
     const svc = new FileService(world, makeFs({}), makeRepo()); // read lança
     expect(await svc.openObject('obj1')).toEqual({ kind: 'error' });
+  });
+});
+
+describe('FileService.moveInto (arrastar arquivo para pasta)', () => {
+  it('escreve na pasta, apaga o original e REMOVE o ícone da cena', async () => {
+    const files = { '/foto.png': bytes('dados') };
+    const world = makeWorld([
+      objeto(),
+      { id: 'dir1', label: 'Nova pasta', meta: { fsPath: '/Nova pasta', isDir: true } },
+    ]);
+    const fs = makeFs(files);
+    const svc = new FileService(world, fs, makeRepo());
+
+    const ok = await svc.moveInto('obj1', 'dir1');
+    expect(ok).toBe(true);
+    expect(fs.write).toHaveBeenCalledWith('/Nova pasta/foto.png', expect.anything());
+    expect(fs.remove).toHaveBeenCalledWith('/foto.png');
+    expect(world.removeObject).toHaveBeenCalledWith('obj1');
+    expect(files['/Nova pasta/foto.png' as keyof typeof files]).toBeDefined();
+    expect(files['/foto.png']).toBeUndefined();
+  });
+
+  it('upsertFsEntry falhando NÃO quebra o move: removeObject acontece e retorna true', async () => {
+    const world = makeWorld([
+      objeto(),
+      { id: 'dir1', label: 'Nova pasta', meta: { fsPath: '/Nova pasta', isDir: true } },
+    ]);
+    const fs = makeFs({ '/foto.png': bytes('dados') });
+    const repo = makeRepo();
+    (repo.upsertFsEntry as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('P.export is not a function'));
+    const svc = new FileService(world, fs, repo);
+
+    const ok = await svc.moveInto('obj1', 'dir1');
+    expect(ok).toBe(true);
+    // O ícone sai da cena MESMO com o repo falhando (bug do fallback idb-sqlite)
+    expect(world.removeObject).toHaveBeenCalledWith('obj1');
+  });
+
+  it('destino não é pasta / sem fsPath → false', async () => {
+    const world = makeWorld([
+      objeto(),
+      { id: 'n1', label: 'nota', meta: {} },
+    ]);
+    const svc = new FileService(world, makeFs({}), makeRepo());
+    expect(await svc.moveInto('obj1', 'n1')).toBe(false);
+    expect(await svc.moveInto('obj1', 'obj1')).toBe(false);
   });
 });
 

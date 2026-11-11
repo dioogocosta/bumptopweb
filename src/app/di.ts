@@ -132,11 +132,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     repo.deleteObject(id).catch(() => {});
   };
 
-  /** Abre um objeto: preview in-app (item 3) / importado / erro com toast. */
+  /** Abre um objeto: preview in-app (item 3) / importado / download / toasts. */
   const openAndShow = (id: string) => {
     void files.openObject(id).then((r) => {
       if (r.kind === 'preview') overlay.showPreview(r);
       else if (r.kind === 'imported') overlay.toast(t('toast.folderImported'));
+      else if (r.kind === 'downloaded') overlay.toast(t('toast.downloading'));
+      else if (r.kind === 'unsupported')
+        // Objeto demo ou sem arquivo real atrás (ex.: cena inicial) — antes era
+        // silencioso e parecia "duplo-clique não funciona".
+        overlay.toast(t('toast.unsupportedFile'));
       else if (r.kind === 'error') overlay.toast(t('toast.openFailed'));
     });
   };
@@ -670,8 +675,17 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // Flush imediato de persistência: o rAF do loop morre com a aba oculta,
   // então salvamos na hora em que ela esconde/recarrega (fecha a janela de perda
   // de até 2 s do SAVE_INTERVAL — cobre notas, pose, pilhas e câmera).
+  // A PRIMEIRA falha de save vira toast: antes era só console.warn e o usuário
+  // só descobria a perda quando o F5 zerava a cena (bug do fallback idb-sqlite).
+  let saveFailToastShown = false;
   const flushNow = () => {
-    repo.saveScene(world.toSnapshot()).catch((e) => console.warn('save falhou', e));
+    repo.saveScene(world.toSnapshot()).catch((e) => {
+      console.warn('save falhou', e);
+      if (!saveFailToastShown) {
+        saveFailToastShown = true;
+        overlay.toast(t('toast.saveFailed'));
+      }
+    });
   };
   const onVisibilityFlush = () => {
     if (document.visibilityState === 'hidden') flushNow();

@@ -27,12 +27,29 @@ interface SqliteDb {
   exec(sql: string): void;
   prepare(sql: string): SqliteStmt;
   close(): void;
-  export(): Uint8Array;
+  /** Ponteiro C do handle sqlite3* (p/ sqlite3_deserialize). */
+  pointer: number;
 }
 interface SqliteModule {
   oo1: { DB: new (name?: string, flags?: string, vfs?: string) => SqliteDb };
   installOpfsSAHPoolVfs(opts?: unknown): Promise<unknown>;
   OpfsSAHPoolDb?: new (name?: string) => SqliteDb;
+  capi: {
+    /** Única forma de exportar um DB neste build (db.export() NÃO existe). */
+    sqlite3_js_db_export(pDb: SqliteDb | number, schema?: string | 0): Uint8Array;
+    sqlite3_deserialize(
+      pDb: number,
+      schema: string,
+      pData: number,
+      szDb: number,
+      szBuf: number,
+      flags: number,
+    ): number;
+    SQLITE_DESERIALIZE_RESIZEABLE: number;
+  };
+  wasm: {
+    allocFromTypedArray(src: Uint8Array): number;
+  };
 }
 
 let sqlite3: SqliteModule;
@@ -104,7 +121,8 @@ async function persistMemToIdb(): Promise<void> {
         database.createObjectStore(IDB_STORE);
       },
     });
-  const blob = db.export();
+  /** sqlite-wasm 3.54: db.export() NÃO existe — usar o wrapper da capi. */
+  const blob = sqlite3.capi.sqlite3_js_db_export(db);
   await idb.put(IDB_STORE, blob, IDB_KEY);
 }
 
@@ -118,8 +136,23 @@ async function loadMemFromIdb(): Promise<void> {
   const blob = (await idb.get(IDB_STORE, IDB_KEY)) as Uint8Array | undefined;
   if (blob) {
     db = new sqlite3.oo1.DB();
-    // Restaura bytes do IndexedDB p/ o DB em memória
-    (db as unknown as { deserialize(d: Uint8Array): void }).deserialize(blob);
+    // Restaura bytes do IndexedDB p/ o DB em memória.
+    // ⚠️ Este build do sqlite-wasm (3.54) NÃO tem db.deserialize() — a chamada
+    // direta lança. APIs corretas: aloca os bytes na heap WASM e chama a capi.
+    // Flags: 1 = FREEAFTERUSE (SQLite libera o buffer ao fechar o DB) |
+    // RESIZEABLE (DB pode crescer). Sem RESIZEABLE toda escrita pós-load
+    // falharia com SQLITE_FULL/readonly.
+    const capi = sqlite3.capi;
+    const p = sqlite3.wasm.allocFromTypedArray(blob);
+    const rc = capi.sqlite3_deserialize(
+      db.pointer,
+      'main',
+      p,
+      blob.byteLength,
+      blob.byteLength,
+      1 /* FREEAFTERUSE */ | capi.SQLITE_DESERIALIZE_RESIZEABLE,
+    );
+    if (rc !== 0) throw new Error(`sqlite3_deserialize falhou (rc=${rc})`);
   }
 }
 
@@ -321,7 +354,7 @@ async function handle(method: string, params: unknown[]): Promise<unknown> {
     }
 
     case 'export':
-      return db.export();
+      return sqlite3.capi.sqlite3_js_db_export(db);
 
     case 'close':
       if (backend === 'idb-sqlite') await persistMemToIdb();

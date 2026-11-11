@@ -274,19 +274,26 @@ export class FileService {
       const newPath = `${base}/${src.label ?? 'arquivo'}`;
       await this.fs.write(newPath, data);
       await this.fs.remove(srcPath);
-      // Atualiza metadados e remove o ícone da cena
-      const thumb = src.meta.thumb as string | undefined;
-      await this.repo.upsertFsEntry({
-        objectId: srcId,
-        mode: this.fs.mode() === 'fs-access' ? 1 : 2,
-        path: newPath,
-        name: src.label ?? 'arquivo',
-        isDir: false,
-        size: data.byteLength,
-        mtime: Date.now(),
-        thumb,
-      });
+      // O ícone SAI da cena AGORA: o arquivo fisicamente já mudou de lugar, e
+      // o upsertFsEntry (worker SQLite) pode falhar/rejeitar sem estragar a UX
+      // (antes: await upsertFsEntry rejeitando → catch → false → toast de erro
+      // mesmo com o move OK; e o ícone antigo continuava na cena).
       this.world.removeObject(srcId);
+      const thumb = src.meta.thumb as string | undefined;
+      // Best-effort: reflete o novo caminho no repo; se falhar, o sync do
+      // watcher corrige depois.
+      this.repo
+        .upsertFsEntry({
+          objectId: srcId,
+          mode: this.fs.mode() === 'fs-access' ? 1 : 2,
+          path: newPath,
+          name: src.label ?? 'arquivo',
+          isDir: false,
+          size: data.byteLength,
+          mtime: Date.now(),
+          thumb,
+        })
+        .catch(() => {});
       return true;
     } catch {
       return false;
