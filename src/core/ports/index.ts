@@ -176,6 +176,8 @@ export interface IFileSystem {
   read(path: string): Promise<Uint8Array>;
   write(path: string, data: Uint8Array): Promise<void>;
   remove(path: string): Promise<void>;
+  /** Cria um diretório (e os pais se preciso). Item 6 — pasta virtual na cena. */
+  mkdir(path: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

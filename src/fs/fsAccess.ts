@@ -143,4 +143,13 @@ export class FsAccessFileSystem implements IFileSystem {
     for (const s of segs) dir = (await dir.getDirectoryHandle(s)) as DirHandle;
     await dir.removeEntry(name, { recursive: true });
   }
+
+  /** Cria o diretório (e os pais se preciso). Item 6 — pasta virtual na cena. */
+  async mkdir(path: string): Promise<void> {
+    if (!this.root) return this.fallback!.mkdir(path);
+    const segs = path.split('/').filter(Boolean);
+    if (segs.length === 0) throw new Error('Caminho inválido');
+    let dir: DirHandle = this.root;
+    for (const s of segs) dir = (await dir.getDirectoryHandle(s, { create: true })) as DirHandle;
+  }
 }
