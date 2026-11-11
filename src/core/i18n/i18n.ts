@@ -92,6 +92,9 @@ const ptBR: Dict = {
   // --- Toasts ---
   'toast.folderImported': 'Pasta importada',
   'toast.openFailed': 'Não foi possível abrir',
+  'toast.unsupportedFile': 'Este objeto é da cena demo — não há arquivo real para abrir. Importe uma pasta pelo menu "Abrir pasta".',
+  'toast.downloading': 'Baixando arquivo…',
+  'toast.saveFailed': 'Falha ao salvar a cena — recarregar pode perder mudanças',
   'toast.selectionCancelled': 'Seleção cancelada ou API indisponível',
   'toast.dirStats': '{total} itens · {files} arquivos · {thumbs} thumbs',
   'toast.renamed': 'Renomeado',
@@ -242,6 +245,9 @@ const en: Dict = {
   // --- Toasts ---
   'toast.folderImported': 'Folder imported',
   'toast.openFailed': 'Could not open',
+  'toast.unsupportedFile': "This object is part of the demo scene — there is no real file to open. Import a folder via 'Open folder'.",
+  'toast.downloading': 'Downloading file…',
+  'toast.saveFailed': 'Failed to save the scene — reloading may lose changes',
   'toast.selectionCancelled': 'Selection cancelled or API unavailable',
   'toast.dirStats': '{total} items · {files} files · {thumbs} thumbs',
   'toast.renamed': 'Renamed',
