@@ -516,3 +516,52 @@ test('P1: modal de preview in-app abre imagem/texto/pdf e fecha (item 3)', async
   await page.mouse.click(10, 300); // fora do modal (centro em 720, ~450)
   await expect(modal).toHaveCount(0);
 });
+
+test('P1: Nova pasta no menu do chão cria pasta virtual na cena (item 6)', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+  // Aguarda os itens assentarem
+  await page.waitForFunction(() => {
+    const w = window.__bumptop?.world;
+    if (!w) return false;
+    const objs = w.listObjects();
+    return objs.length >= 3 && objs.slice(0, 3).every((o: any) => o.pose.position.y <= 2.0);
+  }, { timeout: 15000 });
+
+  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  // Ponto do chão livre (canto inferior direito do canvas)
+  const floorPoint = { x: box.x + 60, y: box.y + 60 };
+  await page.mouse.click(floorPoint.x, floorPoint.y, { button: 'right' });
+  const menu = page.locator('.ctx-menu');
+  await expect(menu).toBeVisible();
+
+  const pastaItem = menu.locator('.radial-btn-label, .ctx-item').filter({ hasText: 'Nova pasta' }).first();
+  await expect(pastaItem).toBeVisible();
+  await pastaItem.click();
+
+  await expect(page.locator('.toast').filter({ hasText: 'criada' })).toBeVisible();
+
+  // A pasta está na cena com isDir + fsPath e o diretório existe no OPFS
+  const pasta = await page.evaluate(async () => {
+    const w = window.__bumptop!.world;
+    const obj = w.listObjects().find((o: any) => o.meta.isDir === true);
+    if (!obj) return null;
+    const dirExiste = await navigator.storage
+      .getDirectory()
+      .then((r) => r.getDirectoryHandle('Nova pasta'))
+      .then(() => true)
+      .catch(() => false);
+    return { id: obj.id, fsPath: obj.meta.fsPath, dirExiste };
+  });
+  expect(pasta).not.toBeNull();
+  expect(pasta!.fsPath).toBe('/Nova pasta');
+  expect(pasta!.dirExiste).toBe(true);
+
+  // Cleanup: remove o objeto e a pasta do OPFS
+  await page.evaluate(async (id) => {
+    window.__bumptop!.world.removeObject(id!);
+    await navigator.storage.getDirectory().then((r) => r.removeEntry('Nova pasta', { recursive: true }));
+  }, pasta!.id);
+  await page.waitForTimeout(300);
+});

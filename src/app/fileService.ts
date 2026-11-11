@@ -294,6 +294,48 @@ export class FileService {
   }
 
   /**
+   * Pasta virtual na cena (item 6): cria o diretório no FS e o ícone na cena.
+   * Dedup do nome com sufixo " (2)", " (3)"... se já existir. `at` = ponto do
+   * piso onde soltar o ícone (default: centro). Retorna null se falhar.
+   */
+  async createFolder(
+    name: string,
+    at?: { x: number; y: number; z: number },
+  ): Promise<{ id: string; name: string } | null> {
+    try {
+      // Normaliza: trim, sem '/' e sem vazio
+      let base = name.trim().replace(/\//g, '') || 'Nova pasta';
+      // Dedup: "Nova pasta (2)" se "Nova pasta" já existe na raiz
+      const raiz = await this.fs.list('/');
+      const nomes = new Set(raiz.map((e) => e.name));
+      let final = base;
+      for (let n = 2; nomes.has(final); n++) final = `${base} (${n})`;
+      const path = `/${final}`;
+      await this.fs.mkdir(path);
+      const pos = at ?? { x: 0, y: ICON_HALF.y + 0.1, z: 0 };
+      const id = this.world.addBox(
+        { x: pos.x, y: ICON_HALF.y + 0.1, z: pos.z },
+        ICON_HALF,
+        colorForFile(final),
+        final,
+        { fsPath: path, isDir: true },
+      );
+      await this.repo.upsertFsEntry({
+        objectId: id,
+        mode: this.fs.mode() === 'fs-access' ? 1 : this.fs.mode() === 'opfs' ? 2 : 0,
+        path,
+        name: final,
+        isDir: true,
+        size: 0,
+        mtime: Date.now(),
+      });
+      return { id, name: final };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Watcher leve (polling + diff): detecta arquivos novos/removidos na pasta
    * atual e sincroniza os ícones. Chamado periodicamente e ao voltar à aba.
    */

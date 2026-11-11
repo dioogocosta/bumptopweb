@@ -286,6 +286,15 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           overlay.toast(t('toast.noteCreated'));
         }
       });
+    } else if (a === 'newFolder' && ctxFloorPoint) {
+      // Pasta virtual na cena (item 6): diretório no FS + ícone de pasta
+      void files.createFolder(t('menu.newFolderName'), ctxFloorPoint).then((r) => {
+        if (!r) overlay.toast(t('toast.folderCreateFailed'));
+        else {
+          persistObject(r.id);
+          overlay.toast(t('toast.folderCreated', { name: r.name }));
+        }
+      });
     } else if (a === 'editNote' && ctxTarget && world.isStickyNote(ctxTarget)) {
       const id = ctxTarget;
       const current = (world.getObject(id)?.meta.noteText as string) ?? '';
@@ -397,6 +406,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       if (!ctxTarget) {
         ctxFloorPoint = { ...action.world };
         items.push({ label: t('menu.newNote'), action: 'newNote', hint: t('hint.newNote') });
+        items.push({ label: t('menu.newFolder'), action: 'newFolder', hint: t('hint.newFolder') });
         items.push({ label: t('menu.autoPile'), action: 'autoPile', hint: t('hint.autoPile') });
         items.push({
           label: `${t('menu.toggleAutoAlign')} (${world.isAutoAlign() ? '✓' : '✗'})`,

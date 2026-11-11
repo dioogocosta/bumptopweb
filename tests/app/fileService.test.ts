@@ -43,6 +43,7 @@ function makeFs(files: Record<string, Uint8Array>): IFileSystem {
       return files[p];
     }),
     list: vi.fn(async () => []),
+    mkdir: vi.fn(async () => {}),
   } as unknown as IFileSystem;
 }
 
@@ -179,6 +180,60 @@ describe('FileService.openObject (item 3)', () => {
     const world = makeWorld([objeto()]);
     const svc = new FileService(world, makeFs({}), makeRepo()); // read lança
     expect(await svc.openObject('obj1')).toEqual({ kind: 'error' });
+  });
+});
+
+describe('FileService.createFolder (item 6 — pasta virtual na cena)', () => {
+  it('cria o diretório no FS + objeto pasta (isDir) na cena + persiste', async () => {
+    const world = makeWorld([]);
+    const fs = makeFs({});
+    const repo = makeRepo();
+    const svc = new FileService(world, fs, repo);
+
+    const r = await svc.createFolder('Minha pasta', { x: 10, y: 0, z: 20 });
+    expect(r).toEqual({ id: 'novo', name: 'Minha pasta' });
+    expect(fs.mkdir).toHaveBeenCalledWith('/Minha pasta');
+    expect(world.addBox).toHaveBeenCalledWith(
+      { x: 10, y: 1.6 + 0.1, z: 20 },
+      { x: 7, y: 1.6, z: 7 },
+      expect.any(String),
+      'Minha pasta',
+      { fsPath: '/Minha pasta', isDir: true },
+    );
+    expect(repo.upsertFsEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ objectId: 'novo', path: '/Minha pasta', isDir: true }),
+    );
+  });
+
+  it('dedup: nome já existente ganha sufixo " (2)"', async () => {
+    const world = makeWorld([]);
+    const fs = makeFs({});
+    (fs.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { path: '/Nova pasta', name: 'Nova pasta', isDir: true, size: 0, mtime: 0 },
+    ]);
+    const svc = new FileService(world, fs, makeRepo());
+
+    const r = await svc.createFolder('Nova pasta');
+    expect(r?.name).toBe('Nova pasta (2)');
+    expect(fs.mkdir).toHaveBeenCalledWith('/Nova pasta (2)');
+  });
+
+  it('nome com "/" ou vazio → normalizado', async () => {
+    const world = makeWorld([]);
+    const fs = makeFs({});
+    const svc = new FileService(world, fs, makeRepo());
+
+    const r = await svc.createFolder('a/b/c');
+    expect(r?.name).toBe('abc');
+    const r2 = await svc.createFolder('   ');
+    expect(r2?.name).toBe('Nova pasta');
+  });
+
+  it('falha do fs.mkdir → null', async () => {
+    const fs = makeFs({});
+    (fs.mkdir as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('cheio'));
+    const svc = new FileService(makeWorld([]), fs, makeRepo());
+    expect(await svc.createFolder('x')).toBeNull();
   });
 });
 
