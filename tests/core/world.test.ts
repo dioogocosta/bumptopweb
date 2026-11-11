@@ -314,6 +314,22 @@ describe('World + pilhas (M3)', () => {
     expect(row.meta.noteText).toBe('anotado!');
   });
 
+  it('PR8: label da nota recebe o TEXTO COMPLETO + opts.note (o CSS trunca)', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const longo = 'x'.repeat(200);
+    const id = world.addStickyNote({ x: 20, y: 6, z: 20 }, longo);
+    world.update(1 / 60);
+
+    const chamadas = (overlay.setLabel as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === id,
+    );
+    expect(chamadas.length).toBeGreaterThan(0);
+    const [, text, , opts] = chamadas[chamadas.length - 1];
+    expect(text).toBe(longo); // sem .slice(0,40) — o line-clamp CSS trunca
+    expect(opts).toEqual({ note: true });
+  });
+
   it('shove: arrastar o chão com o DEDO empurra objetos próximos (Fase 7: shove = touch)', async () => {
     const { world, physics } = await makeWorld();
     world.addBox({ x: 10, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a');

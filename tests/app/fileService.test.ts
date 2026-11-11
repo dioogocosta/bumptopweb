@@ -325,6 +325,102 @@ describe('FileService.deleteFsObject (excluir pasta/arquivo)', () => {
   });
 });
 
+describe('FileService.importFiles (PR8 — arrastar arquivo do SO para a cena)', () => {
+  it('escreve cada arquivo no FS atual e cria os ícones com fsPath', async () => {
+    const files: Record<string, Uint8Array> = {};
+    const world = makeWorld([]);
+    const fs = makeFs(files);
+    const svc = new FileService(world, fs, makeRepo());
+
+    const r = await svc.importFiles(
+      [new File([bytes('ola')], 'nota.txt'), new File([bytes('img')], 'foto.png')],
+      { x: 10, y: 0, z: 5 },
+    );
+    expect(r.total).toBe(2);
+    expect(r.files).toBe(2);
+    expect(files['/nota.txt']).toBeDefined();
+    expect(files['/foto.png']).toBeDefined();
+    expect(world.addBox).toHaveBeenCalledTimes(2);
+    // Ícones nascem a partir do ponto solto, lado a lado
+    const calls = (world.addBox as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0][0]).toMatchObject({ x: 10, z: 5 });
+    expect(calls[1][0].x).toBeGreaterThan(10);
+  });
+
+  it('nome duplicado ganha sufixo " (2)" mantendo a extensão', async () => {
+    const files: Record<string, Uint8Array> = {};
+    const world = makeWorld([]);
+    const fs = makeFs(files);
+    // "a.txt" já existe no destino
+    files['/a.txt'] = bytes('velho');
+    (fs.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { path: '/a.txt', name: 'a.txt', isDir: false, size: 5, mtime: 0 },
+    ]);
+    const svc = new FileService(world, fs, makeRepo());
+
+    const r = await svc.importFiles([new File([bytes('novo')], 'a.txt')]);
+    expect(r.files).toBe(1);
+    expect(files['/a.txt']).toEqual(bytes('velho'));
+    expect(files['/a (2).txt']).toEqual(bytes('novo'));
+  });
+
+  it('arquivo grande demais é ignorado (skipped) sem quebrar o lote', async () => {
+    const files: Record<string, Uint8Array> = {};
+    const world = makeWorld([]);
+    const fs = makeFs(files);
+    const svc = new FileService(world, fs, makeRepo());
+
+    const enorme = new File([new Uint8Array(1)], 'grande.bin');
+    Object.defineProperty(enorme, 'size', { value: 200 * 1024 * 1024 });
+    const r = await svc.importFiles([enorme, new File([bytes('ok')], 'ok.txt')]);
+    expect(r.files).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(files['/ok.txt']).toBeDefined();
+  });
+});
+
+describe('FileService.downloadObject (PR8 — salvar no computador)', () => {
+  let clicks: Array<{ download?: string; href?: string }>;
+  beforeEach(() => {
+    clicks = [];
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => {
+        const a: { click: () => void; href?: string; download?: string } = {
+          click: () => clicks.push(a),
+        };
+        return a;
+      }),
+    });
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:mock-url'),
+      revokeObjectURL: vi.fn(),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('baixa o arquivo com o NOME REAL (do fsPath, não o label)', async () => {
+    const svc = new FileService(
+      makeWorld([{ id: 'obj1', label: 'renomeado', meta: { fsPath: '/doc.txt', isDir: false } }]),
+      makeFs({ '/doc.txt': bytes('conteudo') }),
+      makeRepo(),
+    );
+    const r = await svc.downloadObject('obj1');
+    expect(r).toEqual({ kind: 'downloaded', name: 'doc.txt' });
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0].download).toBe('doc.txt');
+  });
+
+  it('pasta e objeto sem fsPath → unsupported', async () => {
+    const svc = new FileService(
+      makeWorld([{ id: 'dir1', label: 'p', meta: { fsPath: '/p', isDir: true } }]),
+      makeFs({}),
+      makeRepo(),
+    );
+    expect((await svc.downloadObject('dir1')).kind).toBe('unsupported');
+  });
+});
+
 describe('FileService.createFolder (item 6 — pasta virtual na cena)', () => {
   it('cria o diretório no FS + objeto pasta (isDir) na cena + persiste', async () => {
     const world = makeWorld([]);

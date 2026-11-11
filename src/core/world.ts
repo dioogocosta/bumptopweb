@@ -2305,13 +2305,23 @@ export class World {
       return;
     }
     for (const e of this.entries.values()) {
-      // Nota adesiva: o label é o conteúdo (truncado), não "Nota"
-      const text =
-        (e.data.typeFlags & TypeFlags.StickyNote) !== 0
-          ? ((e.data.meta.noteText as string) || '—').slice(0, 40)
-          : e.data.label;
-      if (!text) continue;
       const he = this.scaledHalf(e); // label acompanha a escala (P0)
+      if ((e.data.typeFlags & TypeFlags.StickyNote) !== 0) {
+        // Nota adesiva: o label É o conteúdo — texto completo, truncado pelo
+        // CSS até preencher o card (com "…" quando não cabe — PR8). O label é
+        // pintado sobre a face do card, não abaixo dele.
+        const text = (e.data.meta.noteText as string) || '—';
+        const p: Vec3 = {
+          x: e.data.pose.position.x,
+          y: e.data.pose.position.y + he.y + 0.2,
+          z: e.data.pose.position.z + he.z * 0.5,
+        };
+        const s = this.deps.renderer.projectToScreen(p);
+        overlay.setLabel(e.data.id, s.visible ? text : null, s.visible ? s : null, { note: true });
+        continue;
+      }
+      const text = e.data.label;
+      if (!text) continue;
       const p: Vec3 = {
         x: e.data.pose.position.x,
         y: e.data.pose.position.y - he.y - 3,

@@ -17,6 +17,7 @@ export type Dict = Record<string, string>;
 const ptBR: Dict = {
   // --- Itens do menu de contexto (rótulos) ---
   'menu.open': 'Abrir',
+  'menu.saveFile': 'Salvar no computador…',
   'menu.openDir': 'Abrir pasta do sistema…',
   'menu.editNote': 'Editar nota',
   'menu.rename': 'Renomear…',
@@ -54,6 +55,7 @@ const ptBR: Dict = {
 
   // --- Dicas (tooltips pretos ao passar o mouse) ---
   'hint.open': 'Abre o arquivo ou a pasta',
+  'hint.saveFile': 'Baixa uma cópia p/ a pasta Downloads do sistema',
   'hint.openDir': 'Escolhe uma pasta do computador',
   'hint.editNote': 'Altera o texto da nota',
   'hint.rename': 'Muda o nome exibido na cena',
@@ -113,6 +115,9 @@ const ptBR: Dict = {
   'toast.folderCreateFailed': 'Não foi possível criar a pasta',
   'toast.noteRemoved': 'Nota removida',
   'toast.fileMoved': 'Arquivo movido para a pasta',
+  'toast.filesAdded': '{n} arquivo(s) adicionado(s) à cena',
+  'toast.filesSkipped': '{n} ignorado(s) — arquivo(s) grande(s) demais',
+  'toast.saved': '"{name}" salvo na pasta Downloads',
   'toast.moveFailed': 'Falha ao mover',
   'toast.fansClosed': 'Leques fechados',
   'toast.theme': 'Tema: {name}',
@@ -159,6 +164,8 @@ const ptBR: Dict = {
   'ui.previewClose': 'Fechar',
   'ui.notePlaceholder': 'Escreva sua nota…',
   'ui.namePlaceholder': 'Novo nome…',
+  'ui.noteTitle': 'Nota',
+  'ui.noteEmpty': '(nota vazia)',
   'ui.resetCamera': 'Redefinir câmera',
 
   // --- Toast de atualização da PWA (index.html) ---
@@ -170,6 +177,7 @@ const ptBR: Dict = {
 const en: Dict = {
   // --- Context menu items (labels) ---
   'menu.open': 'Open',
+  'menu.saveFile': 'Save to computer…',
   'menu.openDir': 'Open system folder…',
   'menu.editNote': 'Edit note',
   'menu.rename': 'Rename…',
@@ -207,6 +215,7 @@ const en: Dict = {
 
   // --- Hints (black tooltips on hover) ---
   'hint.open': 'Open the file or folder',
+  'hint.saveFile': 'Downloads a copy to the system Downloads folder',
   'hint.openDir': 'Pick a folder from your computer',
   'hint.editNote': 'Change the note text',
   'hint.rename': 'Change the name shown in the scene',
@@ -266,6 +275,9 @@ const en: Dict = {
   'toast.folderCreateFailed': 'Could not create the folder',
   'toast.noteRemoved': 'Note removed',
   'toast.fileMoved': 'File moved into the folder',
+  'toast.filesAdded': '{n} file(s) added to the scene',
+  'toast.filesSkipped': '{n} skipped — file(s) too large',
+  'toast.saved': '"{name}" saved to the Downloads folder',
   'toast.moveFailed': 'Move failed',
   'toast.fansClosed': 'Fans closed',
   'toast.theme': 'Theme: {name}',
@@ -312,6 +324,8 @@ const en: Dict = {
   'ui.previewClose': 'Close',
   'ui.notePlaceholder': 'Write your note…',
   'ui.namePlaceholder': 'New name…',
+  'ui.noteTitle': 'Note',
+  'ui.noteEmpty': '(empty note)',
   'ui.resetCamera': 'Reset camera',
 
   // --- PWA update toast (index.html) ---
