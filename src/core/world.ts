@@ -1553,8 +1553,18 @@ export class World {
   }
 
   /** Objeto sob um ponto de mundo (p/ duplo-clique → abrir, M2). */
-  pickObjectAt(worldPoint: Vec3, screen?: { x: number; y: number }): string | null {
-    return this.pickAt(worldPoint, undefined, screen);
+  /**
+   * Objeto mais próximo de `worldPoint` (raio ~13). `screen` prioriza itens
+   * pregados na parede. `excludeId` ignora um objeto — usado no drop: o
+   * arrastado está exatamente sob o cursor (d≈0) e "ganha" o pick, impedindo
+   * de detectar a pasta embaixo dele.
+   */
+  pickObjectAt(
+    worldPoint: Vec3,
+    screen?: { x: number; y: number },
+    excludeId?: string,
+  ): string | null {
+    return this.pickAt(worldPoint, excludeId, screen);
   }
 
   // -------------------------------------------------------------------------
