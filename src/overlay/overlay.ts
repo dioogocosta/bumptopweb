@@ -32,6 +32,8 @@ export class DomOverlay implements IOverlay {
   private scrubSelectCb: ((pileId: string, itemId: string) => void) | null = null;
   private scrubHoverCb: ((pileId: string, index: number) => void) | null = null;
   private scrubCurrentPileId: string | null = null;
+  private previewEl: HTMLDivElement | null = null;
+  private previewCleanup: (() => void) | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -425,6 +427,86 @@ export class DomOverlay implements IOverlay {
       this.root.appendChild(wrap);
       ta.focus();
     });
+  }
+
+  /**
+   * Modal de pré-visualização in-app (item 3): imagem, PDF ou texto.
+   * Fecha com ✕, Esc ou clique no fundo; revoga a `url` (blob) ao fechar.
+   */
+  showPreview(spec: { name: string; mime: string; url?: string; text?: string }): void {
+    this.hidePreview();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'file-preview-backdrop';
+    backdrop.style.pointerEvents = 'auto';
+
+    const modal = document.createElement('div');
+    modal.className = 'file-preview';
+    modal.dataset.testid = 'file-preview';
+
+    const head = document.createElement('div');
+    head.className = 'file-preview-head';
+    const title = document.createElement('span');
+    title.className = 'file-preview-name';
+    title.textContent = spec.name;
+    const close = document.createElement('button');
+    close.className = 'file-preview-close';
+    close.textContent = '✕';
+    close.setAttribute('aria-label', t('ui.previewClose'));
+    close.title = t('ui.previewClose');
+    head.appendChild(title);
+    head.appendChild(close);
+
+    const body = document.createElement('div');
+    body.className = 'file-preview-body';
+    if (spec.url && spec.mime.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.className = 'file-preview-image';
+      img.src = spec.url;
+      img.alt = spec.name;
+      body.appendChild(img);
+    } else if (spec.url && spec.mime === 'application/pdf') {
+      const frame = document.createElement('iframe');
+      frame.className = 'file-preview-pdf';
+      frame.src = spec.url;
+      frame.title = spec.name;
+      body.appendChild(frame);
+    } else {
+      const pre = document.createElement('pre');
+      pre.className = 'file-preview-text';
+      pre.textContent = spec.text ?? '';
+      body.appendChild(pre);
+    }
+
+    modal.appendChild(head);
+    modal.appendChild(body);
+    backdrop.appendChild(modal);
+    this.root.appendChild(backdrop);
+
+    const hide = () => this.hidePreview();
+    close.onclick = hide;
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) hide();
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') hide();
+    };
+    document.addEventListener('keydown', onKey);
+
+    this.previewEl = backdrop;
+    this.previewCleanup = () => {
+      document.removeEventListener('keydown', onKey);
+      if (spec.url) URL.revokeObjectURL(spec.url);
+    };
+  }
+
+  /** Esconde o modal de pré-visualização e revoga a url (blob). */
+  hidePreview(): void {
+    if (!this.previewEl) return;
+    this.previewEl.remove();
+    this.previewEl = null;
+    this.previewCleanup?.();
+    this.previewCleanup = null;
   }
 
   /** Indica se o cursor está sobre o Pile Widget Halo no overlay. */

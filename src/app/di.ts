@@ -132,14 +132,19 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     repo.deleteObject(id).catch(() => {});
   };
 
+  /** Abre um objeto: preview in-app (item 3) / importado / erro com toast. */
+  const openAndShow = (id: string) => {
+    void files.openObject(id).then((r) => {
+      if (r.kind === 'preview') overlay.showPreview(r);
+      else if (r.kind === 'imported') overlay.toast(t('toast.folderImported'));
+      else if (r.kind === 'error') overlay.toast(t('toast.openFailed'));
+    });
+  };
+
   overlayRoot.addEventListener('ctxaction', (e) => {
     const a = (e as CustomEvent<string>).detail;
     if (a === 'open' && ctxTarget) {
-      const id = ctxTarget;
-      void files.openObject(id).then((r) => {
-        if (r === 'imported') overlay.toast(t('toast.folderImported'));
-        else if (r === 'error') overlay.toast(t('toast.openFailed'));
-      });
+      openAndShow(ctxTarget);
     } else if (a === 'openDir') {
       void (async () => {
         const ok = await files.requestDirectory();
@@ -426,12 +431,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     }
     if (action.type === 'doubleTap') {
       const target = world.pickObjectAt(action.world);
-      if (target) {
-        void files.openObject(target).then((r) => {
-          if (r === 'imported') overlay.toast(t('toast.folderImported'));
-          else if (r === 'error') overlay.toast(t('toast.openFailed'));
-        });
-      }
+      if (target) openAndShow(target);
       return;
     }
 
@@ -501,10 +501,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       });
       return;
     }
-    void files.openObject(target).then((r) => {
-      if (r === 'imported') overlay.toast(t('toast.folderImported'));
-      else if (r === 'error') overlay.toast(t('toast.openFailed'));
-    });
+    openAndShow(target);
   };
   renderer.getCanvas().addEventListener('dblclick', onDblClick);
 
