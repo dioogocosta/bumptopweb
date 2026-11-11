@@ -242,7 +242,12 @@ export class DomOverlay implements IOverlay {
     this.menuEl = null;
   }
 
-  setLabel(id: string, text: string | null, screen: { x: number; y: number } | null): void {
+  setLabel(
+    id: string,
+    text: string | null,
+    screen: { x: number; y: number } | null,
+    opts?: { note?: boolean },
+  ): void {
     let el = this.labels.get(id);
     if (text === null || screen === null) {
       el?.remove();
@@ -255,6 +260,9 @@ export class DomOverlay implements IOverlay {
       this.root.appendChild(el);
       this.labels.set(id, el);
     }
+    // Nota adesiva: bloco amarelo sobre o card, multi-linha, truncado pelo
+    // CSS (line-clamp) até preencher o tamanho do card — com "…" se não couber.
+    el.classList.toggle('note', opts?.note === true);
     el.textContent = text;
     // Garante que o label nunca ultrapasse as bordas da tela (mobile ou desktop).
     // O label tem transform: translate(-50%, 0) → a borda esquerda fica em left - width/2.

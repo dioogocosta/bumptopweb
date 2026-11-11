@@ -244,7 +244,12 @@ export interface IOverlay {
   showContextMenu(screen: { x: number; y: number }, items: ContextMenuItem[]): void;
   hideContextMenu(): void;
   /** Label flutuante sobre um objeto (nome de arquivo). */
-  setLabel(id: string, text: string | null, screen: { x: number; y: number } | null): void;
+  setLabel(
+    id: string,
+    text: string | null,
+    screen: { x: number; y: number } | null,
+    opts?: { note?: boolean },
+  ): void;
   toast(message: string): void;
 
   /**

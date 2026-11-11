@@ -161,6 +161,14 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     const a = (e as CustomEvent<string>).detail;
     if (a === 'open' && ctxTarget) {
       openAndShow(ctxTarget);
+    } else if (a === 'saveFile' && ctxTarget) {
+      // PR8: baixa uma cópia p/ a pasta Downloads (o navegador não abre o
+      // Explorer num caminho — isso só num app desktop empacotado)
+      void files.downloadObject(ctxTarget).then((r) => {
+        if (r.kind === 'downloaded') overlay.toast(t('toast.saved', { name: r.name }));
+        else if (r.kind === 'error') overlay.toast(t('toast.saveFailed'));
+        else overlay.toast(t('toast.unsupportedFile'));
+      });
     } else if (a === 'openDir') {
       void (async () => {
         const ok = await files.requestDirectory();
@@ -366,6 +374,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         : [];
       const items: ContextMenuItem[] = [];
       if (ctxTarget) items.push({ label: t('menu.open'), action: 'open', hint: t('hint.open') });
+      if (
+        ctxTarget &&
+        typeof world.getObject(ctxTarget)?.meta.fsPath === 'string' &&
+        world.getObject(ctxTarget)?.meta.isDir !== true
+      ) {
+        items.push({ label: t('menu.saveFile'), action: 'saveFile', hint: t('hint.saveFile') });
+      }
       items.push({ label: t('menu.openDir'), action: 'openDir', hint: t('hint.openDir') });
       if (ctxTarget) {
         if (world.isStickyNote(ctxTarget)) {
@@ -514,6 +529,66 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     }
   });
 
+  // -------------------------------------------------------------------------
+  // PR8 — arrastar arquivo DO SISTEMA (Explorer/Finder) para a cena
+  // -------------------------------------------------------------------------
+  const canvas = renderer.getCanvas();
+  const acceptsFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  canvas.addEventListener('dragover', (e) => {
+    if (!acceptsFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer!.dropEffect = 'copy';
+    canvas.classList.add('drop-file');
+  });
+  canvas.addEventListener('dragleave', () => canvas.classList.remove('drop-file'));
+  canvas.addEventListener('drop', (e) => {
+    canvas.classList.remove('drop-file');
+    if (!acceptsFiles(e)) return;
+    e.preventDefault();
+    const list = [...e.dataTransfer!.files];
+    if (list.length === 0) return;
+    // resolveFloor espera coordenada LOCAL do canvas (client − rect)
+    const r = canvas.getBoundingClientRect();
+    const at = resolveFloor({ x: e.clientX - r.left, y: e.clientY - r.top });
+    void files.importFiles(list, at).then((res) => {
+      const msg = t('toast.filesAdded', { n: res.files });
+      overlay.toast(
+        res.skipped ? `${msg} · ${t('toast.filesSkipped', { n: res.skipped ?? 0 })}` : msg,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // PR8 — clique numa nota adesiva lê o conteúdo completo (modal de texto).
+  // Clique vs. arrastar (moveu >6 px) vs. duplo-clique (abre o editor —
+  // 260 ms de espera, cancelado pelo dblclick).
+  // -------------------------------------------------------------------------
+  let noteClickTimer: number | null = null;
+  let downScreen: { x: number; y: number } | null = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button === 0) downScreen = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('click', (e) => {
+    const down = downScreen;
+    downScreen = null;
+    // Foi arrasto, não clique
+    if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
+    const rect = canvas.getBoundingClientRect();
+    const s = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const target = world.pickObjectAt(resolveFloor(s), s);
+    if (!target || !world.isStickyNote(target)) return;
+    if (noteClickTimer !== null) window.clearTimeout(noteClickTimer);
+    noteClickTimer = window.setTimeout(() => {
+      noteClickTimer = null;
+      const texto = (world.getObject(target)?.meta.noteText as string) || '';
+      overlay.showPreview({
+        name: t('ui.noteTitle'),
+        mime: 'text/plain',
+        text: texto === '' ? t('ui.noteEmpty') : texto,
+      });
+    }, 260);
+  });
+
   // Duplo-clique (desktop) → em pilha: abre em leque; em nota: edita texto;
   // no chão vazio: fecha leques; senão: abre o objeto (M2/Fase 7)
   const onDblClick = (e: MouseEvent) => {
@@ -543,6 +618,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       return;
     }
     if (world.isStickyNote(target)) {
+      // O clique simples abre o leitor (com atraso p/ desambiguar do
+      // duplo-clique); o duplo-clique abre o EDITOR — cancela o leitor.
+      if (noteClickTimer !== null) {
+        window.clearTimeout(noteClickTimer);
+        noteClickTimer = null;
+      }
       const current = (world.getObject(target)?.meta.noteText as string) ?? '';
       const screen = renderer.projectToScreen(world.getObject(target)!.pose.position);
       void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, current).then((text) => {

@@ -22,6 +22,8 @@ export interface ImportResult {
   dirs: number;
   files: number;
   thumbs: number;
+  /** Ignorados (ex.: arquivos grandes demais p/ o navegador ler em memória). */
+  skipped?: number;
 }
 
 /** Resultado discriminado de `openObject` (item 3). */
@@ -254,6 +256,78 @@ export class FileService {
     }
   }
 
+  /**
+   * Importa arquivos ARRASTADOS DO SO para a cena (PR8): escreve cada um no
+   * filesystem atual (OPFS/virtual ou a pasta real em fs-access), cria os
+   * ícones lado a lado a partir do ponto solto (`at`) e gera thumbnails.
+   * Nomes duplicados ganham sufixo " (2)", " (3)"...
+   */
+  async importFiles(
+    files: File[],
+    at?: { x: number; y: number; z: number },
+  ): Promise<ImportResult> {
+    const MAX_BYTES = 100 * 1024 * 1024; // 100 MB — navegador lê em memória
+    const dir = this.currentPath === '/' ? '' : this.currentPath;
+    const result: ImportResult = { total: files.length, dirs: 0, files: 0, thumbs: 0, skipped: 0 };
+    if (files.length === 0) return result;
+
+    // Nomes já usados no destino (p/ dedup, inclusive dentro do próprio lote)
+    const listing = await this.fs.list(this.currentPath);
+    const usados = new Set(listing.map((e) => e.name));
+
+    let i = 0;
+    for (const file of files) {
+      // Nome real do arquivo (sem qualquer caminho que venha no File.name)
+      const base = file.name.split(/[\\/]/).pop() || 'arquivo';
+      if (file.size > MAX_BYTES) {
+        result.skipped = (result.skipped ?? 0) + 1;
+        continue;
+      }
+      let nome = base;
+      for (let n = 2; usados.has(nome); n++) nome = base.replace(/(\.[^.]*)?$/, ` (${n})$1`);
+      usados.add(nome);
+      const path = `${dir}/${nome}`;
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        await this.fs.write(path, bytes);
+        this.spawnIcon(
+          { path, name: nome, isDir: false, size: file.size, mtime: file.lastModified || Date.now() },
+          i++,
+          at,
+        );
+        result.files++;
+      } catch {
+        result.skipped = (result.skipped ?? 0) + 1;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Baixa uma cópia do arquivo para o computador (menu "Salvar no
+   * computador" — PR8). No navegador não há API para abrir o Explorer num
+   * caminho específico; a cópia cai na pasta Downloads do sistema.
+   */
+  async downloadObject(objectId: string): Promise<OpenOutcome> {
+    const o = this.world.getObject(objectId);
+    const fsPath = o?.meta.fsPath as string | undefined;
+    if (!o || fsPath === undefined || o.meta.isDir) return { kind: 'unsupported' };
+    const name = (fsPath.split('/').pop() || 'arquivo').trim();
+    try {
+      const bytes = await this.fs.read(fsPath);
+      const blob = new Blob([bytes as BlobPart], { type: mimeFromName(name) });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return { kind: 'downloaded', name };
+    } catch {
+      return { kind: 'error' };
+    }
+  }
+
   /** Persiste o caminho atual nas settings. */
   async savePath(): Promise<void> {
     await this.repo.setSetting('fsPath', this.currentPath);
@@ -423,11 +497,20 @@ export class FileService {
   private spawnIcon(
     entry: { path: string; name: string; isDir: boolean; size: number; mtime: number },
     index: number,
+    at?: { x: number; y: number; z: number },
   ): string {
     const col = index % GRID_COLS;
     const row = Math.floor(index / GRID_COLS);
+    // Com `at` (arraste do SO): lado a lado a partir do ponto solto na cena
+    const pos = at
+      ? { x: at.x + index * (CELL * 0.55), y: ICON_HALF.y + 0.1, z: at.z }
+      : {
+          x: (col - (GRID_COLS - 1) / 2) * CELL,
+          y: ICON_HALF.y + 0.1,
+          z: (row - 1.5) * CELL,
+        };
     const id = this.world.addBox(
-      { x: (col - (GRID_COLS - 1) / 2) * CELL, y: ICON_HALF.y + 0.1, z: (row - 1.5) * CELL },
+      { x: pos.x, y: ICON_HALF.y + 0.1, z: pos.z },
       ICON_HALF,
       colorForFile(entry.name),
       entry.name,

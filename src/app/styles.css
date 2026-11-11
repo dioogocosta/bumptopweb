@@ -648,6 +648,34 @@ body {
   letter-spacing: 0.2px;
 }
 
+/* Label de NOTA ADESIVA (PR8): o texto É o conteúdo do card — amarelo de
+ * post-it, multi-linha, pintado sobre a face da nota. O CSS trunca quando
+ * o texto não cabe (line-clamp): preenche o tamanho do card e coloca "…"
+ * nas últimas linhas. Clicar na nota abre o conteúdo completo. */
+.obj-label.note {
+  max-width: 210px;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  background: #fff3bf;
+  color: #1f2933;
+  text-shadow: none;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  text-align: left;
+  padding: 4px 8px;
+  border-radius: 2px;
+  line-height: 1.35;
+}
+
+/* Arraste de arquivo do SO sobre a cena (PR8): realce azul tracejado */
+#scene-root canvas.drop-file {
+  outline: 3px dashed #4f9cff;
+  outline-offset: -4px;
+}
+
 /* Toast */
 .toast {
   position: fixed;

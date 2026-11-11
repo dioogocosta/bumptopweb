@@ -714,3 +714,124 @@ test('P1: excluir pasta remove ícone + diretório OPFS e o watcher não recria'
   await page.waitForTimeout(6200);
   expect(await page.evaluate((oid) => window.__bumptop!.world.getObject(oid) === null, id)).toBe(true);
 });
+
+test.describe('PR8', () => {
+  test('arrastar arquivo DO SO para a cena cria o objeto com conteúdo real', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    // Simula o drop do SO: DataTransfer com um File real + coords do centro-baixo
+    await page.evaluate(async () => {
+      const w = window.__bumptop!.world;
+      // limpa restos de execuções anteriores
+      for (const o of w.listObjects()) {
+        if (o.label === '__drop_os__.txt') w.removeObject(o.id);
+      }
+      await navigator.storage
+        .getDirectory()
+        .then((r) => r.removeEntry('__drop_os__.txt', { recursive: true }).catch(() => {}));
+      const canvas = document.querySelector('#scene-root canvas')!;
+      const rect = canvas.getBoundingClientRect();
+      const dt = new DataTransfer();
+      dt.items.add(new File(['conteudo via arraste'], '__drop_os__.txt', { type: 'text/plain' }));
+      const cx = rect.left + rect.width * 0.55;
+      const cy = rect.top + rect.height * 0.6;
+      canvas.dispatchEvent(
+        new DragEvent('dragover', { dataTransfer: dt, clientX: cx, clientY: cy, bubbles: true }),
+      );
+      if (!canvas.classList.contains('drop-file')) throw new Error('sem realce de arraste');
+      canvas.dispatchEvent(
+        new DragEvent('drop', { dataTransfer: dt, clientX: cx, clientY: cy, bubbles: true }),
+      );
+      if (canvas.classList.contains('drop-file')) throw new Error('realce não saiu');
+    });
+
+    // Objeto criado com fsPath do arquivo
+    await page.waitForFunction(
+      () => {
+        const w = window.__bumptop!.world;
+        return w.listObjects().some((o: any) => o.meta.fsPath === '/__drop_os__.txt');
+      },
+      { timeout: 8000 },
+    );
+
+    // Conteúdo REAL no OPFS (prova de que não é só ícone)
+    const existe = await page.evaluate(async () =>
+      navigator.storage
+        .getDirectory()
+        .then((r) => r.getFileHandle('__drop_os__.txt'))
+        .then((h) => h.getFile())
+        .then((f) => f.text())
+        .catch(() => null),
+    );
+    expect(existe).toBe('conteudo via arraste');
+
+    // Cleanup
+    await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if (o.meta.fsPath === '/__drop_os__.txt') w.removeObject(o.id);
+      }
+    });
+    await page.evaluate(async () => {
+      await navigator.storage
+        .getDirectory()
+        .then((r) => r.removeEntry('__drop_os__.txt', { recursive: true }).catch(() => {}));
+    });
+  });
+
+  test('clique na nota lê o conteúdo completo; card mostra texto truncado', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    // Nota com texto LONGO (> 40 chars — antes era cortado em 40 sem "…")
+    const textoLongo =
+      'Primeira linha da nota com bastante texto para estourar o tamanho do card. ' +
+      'Segunda linha continua o conteudo para garantir o truncamento visual. ' +
+      'Terceira linha fecha o teste com mais caracteres ainda.';
+    const id = await page.evaluate((txt) => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if (w.isStickyNote(o.id) && (o.meta.noteText as string)?.startsWith('Primeira linha')) {
+          w.removeObject(o.id);
+        }
+      }
+      return w.addStickyNote({ x: 30, y: 6, z: 30 }, txt);
+    }, textoLongo);
+    await page.waitForTimeout(500);
+
+    // Label do card: texto completo no DOM, truncado pelo CSS (classe note)
+    const labelInfo = await page.evaluate(() => {
+      const el = document.querySelector<HTMLElement>('.obj-label.note');
+      return { tem: !!el, chars: el?.textContent?.length ?? 0, texto: el?.textContent ?? '' };
+    });
+    expect(labelInfo.tem).toBe(true);
+    expect(labelInfo.texto.startsWith('Primeira linha')).toBe(true);
+    expect(labelInfo.chars).toBeGreaterThan(100); // SEM corte em 40
+
+    // Clique simples (sem arrasto) → modal com o conteúdo COMPLETO
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, id);
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    await page.mouse.click(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="file-preview"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+    const mostrado = await modal.locator('.file-preview-text').textContent();
+    expect(mostrado).toBe(textoLongo); // conteúdo COMPLETO, não truncado
+
+    // Fecha (Esc) e limpa
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), id);
+  });
+});
