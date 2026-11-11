@@ -114,6 +114,7 @@ function makeOverlayMock(): IOverlay & { setLasso: ReturnType<typeof vi.fn> } {
     toast: vi.fn(),
     setLasso: vi.fn(),
     editNote: vi.fn(async () => ''),
+    showPreview: vi.fn(),
     setResizeHandle: vi.fn(),
     onResizeStart: vi.fn(),
     setPileHalo: vi.fn(),

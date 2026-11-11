@@ -471,3 +471,48 @@ test('P1: duplo-clique na parede foca a câmera na vista frontal (item 4)', asyn
   // A câmera de fato animou (não era esse o estado antes)
   expect(depois.elevation).not.toBeCloseTo(antes.elevation, 1);
 });
+
+test('P1: modal de preview in-app abre imagem/texto/pdf e fecha (item 3)', async ({ page }) => {
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+  const modal = page.locator('[data-testid="file-preview"]');
+
+  // 1. Imagem (PNG 1×1 vermelho, data URL) → <img> carrega
+  const dataUrl =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  await page.evaluate((url) => {
+    window.__bumptop!.overlay.showPreview({ name: 'teste.png', mime: 'image/png', url });
+  }, dataUrl);
+  await expect(modal).toBeVisible();
+  const img = modal.locator('.file-preview-image');
+  await expect(img).toBeVisible();
+  await expect(img).toHaveJSProperty('naturalWidth', 1);
+  await expect(modal.locator('.file-preview-name')).toHaveText('teste.png');
+
+  // Fecha com Esc
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0);
+
+  // 2. Texto → <pre> com o conteúdo
+  await page.evaluate(() => {
+    window.__bumptop!.overlay.showPreview({ name: 'nota.txt', mime: 'text/plain', text: 'linha um\nlinha dois' });
+  });
+  await expect(modal).toBeVisible();
+  await expect(modal.locator('.file-preview-text')).toHaveText('linha um\nlinha dois');
+
+  // Fecha com ✕
+  await modal.locator('.file-preview-close').click();
+  await expect(modal).toHaveCount(0);
+
+  // 3. PDF → iframe do visualizador
+  await page.evaluate(() => {
+    window.__bumptop!.overlay.showPreview({ name: 'doc.pdf', mime: 'application/pdf', url: 'data:application/pdf,' });
+  });
+  await expect(modal).toBeVisible();
+  await expect(modal.locator('.file-preview-pdf')).toBeVisible();
+
+  // Fecha com clique no fundo (backdrop)
+  await page.mouse.click(10, 300); // fora do modal (centro em 720, ~450)
+  await expect(modal).toHaveCount(0);
+});

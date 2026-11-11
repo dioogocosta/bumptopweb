@@ -269,6 +269,12 @@ export interface IOverlay {
     placeholder?: string,
   ): Promise<string>;
 
+  /**
+   * Modal de pré-visualização in-app (item 3): imagem, PDF ou texto.
+   * O overlay revoga `url` ao fechar; `text` renderiza em <pre>.
+   */
+  showPreview(spec: { name: string; mime: string; url?: string; text?: string }): void;
+
   /** Anel de widgets flutuante ao redor da pilha (Pile Widget Halo). null esconde. */
   setPileHalo(halo: PileHaloData | null): void;
   /** Registra o callback de clique em ação do halo de pilha. */

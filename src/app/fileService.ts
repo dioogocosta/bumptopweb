@@ -24,6 +24,73 @@ export interface ImportResult {
   thumbs: number;
 }
 
+/** Resultado discriminado de `openObject` (item 3). */
+export type OpenOutcome =
+  | { kind: 'imported' }
+  | { kind: 'downloaded'; name: string }
+  | { kind: 'preview'; name: string; mime: string; url?: string; text?: string }
+  | { kind: 'unsupported' }
+  | { kind: 'error' };
+
+/** Extensão → MIME (mapa manual, sem dependências). Padrão: octet-stream. */
+const MIME_BY_EXT: Record<string, string> = {
+  // imagem
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  avif: 'image/avif',
+  // pdf
+  pdf: 'application/pdf',
+  // texto
+  txt: 'text/plain',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  csv: 'text/csv',
+  xml: 'text/xml',
+  html: 'text/html',
+  htm: 'text/html',
+  css: 'text/css',
+  js: 'text/javascript',
+  mjs: 'text/javascript',
+  ts: 'text/typescript',
+  json: 'application/json',
+  log: 'text/plain',
+  ini: 'text/plain',
+  yml: 'text/yaml',
+  yaml: 'text/yaml',
+  // outros (vão para download)
+  zip: 'application/zip',
+  gz: 'application/gzip',
+  tar: 'application/x-tar',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  exe: 'application/octet-stream',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+};
+
+/** MIME de um arquivo pelo nome/extensão (lowercase, sem query). */
+export function mimeFromName(name: string): string {
+  const clean = name.split('?')[0].split('#')[0];
+  const ext = clean.includes('.') ? clean.split('.').pop()!.toLowerCase() : '';
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream';
+}
+
 export class FileService {
   private world: World;
   private fs: IFileSystem;
@@ -131,37 +198,48 @@ export class FileService {
   }
 
   /**
-   * Abre um arquivo da cena: imagens/blob em nova aba; diretórios importam.
-   * Retorna 'opened' | 'imported' | 'unsupported' | 'error'.
+   * Abre um arquivo da cena (item 3):
+   *  - imagem/PDF/texto → modal de pré-visualização in-app (`preview`)
+   *  - demais tipos → download via `<a download>` (`downloaded`)
+   *  - diretórios importam (`imported`); sem fsPath → `unsupported`.
    */
-  async openObject(objectId: string): Promise<'opened' | 'imported' | 'unsupported' | 'error'> {
+  async openObject(objectId: string): Promise<OpenOutcome> {
     const o = this.world.getObject(objectId);
-    if (!o) return 'error';
+    if (!o) return { kind: 'error' };
     const fsPath = o.meta.fsPath as string | undefined;
-    if (fsPath === undefined) return 'unsupported';
+    if (fsPath === undefined) return { kind: 'unsupported' };
+    const name = o.label ?? fsPath.split('/').pop() ?? 'arquivo';
 
     if (o.meta.isDir) {
       await this.importDirectory(fsPath);
-      return 'imported';
+      return { kind: 'imported' };
     }
 
     try {
       const bytes = await this.fs.read(fsPath);
-      const blob = new Blob([bytes as BlobPart]);
-      const url = URL.createObjectURL(blob);
-      const w = window.open(url, '_blank');
-      if (!w) {
-        // Pop-up bloqueado → download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = o.label ?? 'arquivo';
-        a.click();
+      const mime = mimeFromName(name);
+
+      // Pré-visualização in-app: imagem, PDF (blob url) e texto/json (decodificado)
+      if (mime.startsWith('image/') || mime === 'application/pdf') {
+        const blob = new Blob([bytes as BlobPart], { type: mime });
+        return { kind: 'preview', name, mime, url: URL.createObjectURL(blob) };
       }
-      // Revoga após a navegaar consumir (delay generoso p/ downloads grandes)
+      if (mime.startsWith('text/') || mime === 'application/json') {
+        const text = new TextDecoder().decode(bytes);
+        return { kind: 'preview', name, mime, text };
+      }
+
+      // Qualquer outro tipo → download (sem pop-up, funciona em todos os browsers)
+      const blob = new Blob([bytes as BlobPart], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      return 'opened';
+      return { kind: 'downloaded', name };
     } catch {
-      return 'error';
+      return { kind: 'error' };
     }
   }
 

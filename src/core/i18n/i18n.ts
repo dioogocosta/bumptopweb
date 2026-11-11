@@ -148,6 +148,7 @@ const ptBR: Dict = {
   // --- UI geral ---
   'ui.save': 'Salvar',
   'ui.cancel': 'Cancelar',
+  'ui.previewClose': 'Fechar',
   'ui.notePlaceholder': 'Escreva sua nota…',
   'ui.namePlaceholder': 'Novo nome…',
   'ui.resetCamera': 'Redefinir câmera',
@@ -292,6 +293,7 @@ const en: Dict = {
   // --- General UI ---
   'ui.save': 'Save',
   'ui.cancel': 'Cancel',
+  'ui.previewClose': 'Close',
   'ui.notePlaceholder': 'Write your note…',
   'ui.namePlaceholder': 'New name…',
   'ui.resetCamera': 'Reset camera',
