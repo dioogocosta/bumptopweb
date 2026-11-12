@@ -14,6 +14,7 @@ import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { makeNoteTexture } from './noteTexture';
+import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
 import { DEFAULT_ROOM } from '@core/model/types';
 import { THEMES } from '@core/theme/theme';
@@ -109,6 +110,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   let ctxTargets: string[] = [];
   // Ponto de chão onde o menu foi aberto (p/ criar nota adesiva)
   let ctxFloorPoint: { x: number; y: number; z: number } | null = null;
+  /** PR10 — alvo e tela do menu secundário "Configurações da imagem". */
+  let ctxPhotoId: string | null = null;
+  let ctxScreen: { x: number; y: number } = { x: 0, y: 0 };
   // Rastreio de arraste p/ detectar "soltar em pasta" (moveInto, M2)
   let dragSourceId: string | null = null;
   /**
@@ -174,6 +178,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
    * Item-pasta navega (re-render do modal); item-arquivo abre.
    */
   const showFolderContents = (path: string, fallbackName: string) => {
+    // PR10 — id do ícone da pasta (para extrair perto dela e repintar o contador)
+    const dirId =
+      world.listObjects().find((o) => o.meta.fsPath === path)?.id ?? undefined;
     void files.listFolder(path).then((items) => {
       overlay.showFolderModal({
         name: fallbackName,
@@ -183,6 +190,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           else openPathAndShow(p);
         },
         onClose: () => {},
+        // PR10 — excluir o arquivo de dentro da pasta (tomba + apaga)
+        onDelete: (p) => {
+          void files.deletePath(p).then(() => {
+            if (dirId) void files.updateFolderCount(dirId);
+            overlay.toast(t('toast.fileDeleted'));
+            showFolderContents(path, fallbackName); // reabre atualizado
+          });
+        },
+        // PR10 — tirar da pasta: move p/ a raiz e devolve o ícone à mesa
+        onExtract: (p) => {
+          void files.extractFromFolder(p, dirId).then((id) => {
+            if (dirId) void files.updateFolderCount(dirId);
+            if (id) persistObject(id);
+            overlay.toast(t(id ? 'toast.itemExtracted' : 'toast.openFailed'));
+            showFolderContents(path, fallbackName); // reabre atualizado
+          });
+        },
       });
     });
   };
@@ -191,6 +215,34 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     const a = (e as CustomEvent<string>).detail;
     if (a === 'open' && ctxTarget) {
       openAndShow(ctxTarget);
+    } else if (a === 'photoConfig' && ctxTarget) {
+      // PR10 — menu SECUNDÁRIO de configurações da imagem: abre outro menu
+      // de contexto com as opções da foto. O alvo fica guardado em ctxPhotoId
+      // (ctxTarget é limpo ao fim deste handler).
+      ctxPhotoId = ctxTarget;
+      const framed = world.getObject(ctxPhotoId)?.meta.photoFrame !== false;
+      overlay.showContextMenu(ctxScreen, [
+        {
+          label: `${t('menu.photoFrame')} (${framed ? '✓' : '✗'})`,
+          action: 'photoFrame',
+        },
+        { label: t('menu.scaleUp'), action: 'photoScaleUp' },
+        { label: t('menu.scaleDown'), action: 'photoScaleDown' },
+        { label: t('menu.rotate'), action: 'photoRotate' },
+      ]);
+      return; // mantém ctxPhotoId para as ações do menu secundário
+    } else if (a === 'photoFrame' && ctxPhotoId) {
+      const cur = world.getObject(ctxPhotoId)?.meta.photoFrame !== false;
+      void files.applyPhotoFrame(ctxPhotoId, !cur).then((ok) => {
+        overlay.toast(t(ok ? (cur ? 'toast.frameOff' : 'toast.frameOn') : 'toast.openFailed'));
+      });
+      ctxPhotoId = null;
+    } else if ((a === 'photoScaleUp' || a === 'photoScaleDown') && ctxPhotoId) {
+      toastScale(world.scaleSelection(a === 'photoScaleUp' ? 1 : -1, [ctxPhotoId]));
+      ctxPhotoId = null;
+    } else if (a === 'photoRotate' && ctxPhotoId) {
+      world.rotateSelection(Math.PI / 4, [ctxPhotoId]);
+      ctxPhotoId = null;
     } else if (a === 'saveFile' && ctxTarget) {
       // PR8: baixa uma cópia p/ a pasta Downloads (o navegador não abre o
       // Explorer num caminho — isso só num app desktop empacotado)
@@ -395,6 +447,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   input.setListener((action: InputAction) => {
     if (action.type === 'context') {
       ctxTarget = world.pickObjectAt(action.world, action.screen);
+      ctxScreen = { ...action.screen };
       // Alvos: seleção inteira se o item clicado está selecionado, senão só ele
       const selected = world.getSelectedIds();
       ctxTargets = ctxTarget
@@ -415,6 +468,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       if (ctxTarget) {
         if (world.isStickyNote(ctxTarget)) {
           items.push({ label: t('menu.editNote'), action: 'editNote', hint: t('hint.editNote') });
+        }
+        // PR10 — imagens ganham o menu secundário de configurações (moldura…)
+        const ctxObj = world.getObject(ctxTarget);
+        const fsPathCtx = ctxObj?.meta.fsPath;
+        if (
+          typeof fsPathCtx === 'string' &&
+          ctxObj?.meta.isDir !== true &&
+          isImagePath(fsPathCtx)
+        ) {
+          items.push({ label: t('menu.photoConfig'), action: 'photoConfig' });
         }
         items.push({ label: t('menu.rename'), action: 'rename', hint: t('hint.rename') });
         items.push({

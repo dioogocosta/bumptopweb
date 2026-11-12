@@ -782,6 +782,42 @@ body {
   padding: 26px 0;
 }
 
+/* PR10 — ações por item no modal da pasta: tirar (⇪) e excluir (✕) */
+.folder-item-acts {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  gap: 4px;
+}
+.folder-item {
+  position: relative;
+}
+.folder-item:hover .folder-item-acts,
+.folder-item:focus-within .folder-item-acts {
+  display: flex;
+}
+.folder-item-act {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.folder-item-act:hover {
+  background: rgba(30, 41, 59, 0.95);
+}
+.folder-item-act-danger:hover {
+  background: rgba(220, 38, 38, 0.95);
+}
+
 /* Toast */
 .toast {
   position: fixed;

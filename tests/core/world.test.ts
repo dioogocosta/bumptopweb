@@ -1262,7 +1262,39 @@ describe('Parede: prender é opcional e item preso pode ser puxado', () => {
     expect(world.getObject(id)!.pinnedWall).toBeNull();
   });
 
-  it('item preso é pego pela posição na tela e arrastar o solta da parede', async () => {
+  it('PR10: item preso desliza ao longo da parede e permanece pregado', async () => {
+    const { world, renderer } = await makeWorld();
+    (renderer.projectToScreen as ReturnType<typeof vi.fn>).mockImplementation((v: Vec3) => ({
+      x: v.x + 300,
+      y: v.z + 300 - v.y * 2,
+      visible: true,
+    }));
+    const id = world.addBox({ x: 0, y: 1.6, z: -100 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    world.pinToWall(id, 0);
+    const p0 = world.getObject(id)!.pose.position;
+    const screen = { x: p0.x + 300, y: p0.z + 300 - p0.y * 2 };
+    // Raio que cruza o plano da parede num ponto deslocado ao longo dela
+    const planeZ = p0.z;
+    const alvo = { x: 40, y: 60, z: planeZ };
+    (renderer.screenToRay as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      const origin = { x: alvo.x, y: alvo.y + 80, z: planeZ + 100 };
+      const dir = { x: alvo.x - origin.x, y: alvo.y - origin.y, z: alvo.z - origin.z };
+      return { origin, direction: dir };
+    });
+    world.processAction({ type: 'pointerDown', world: { x: 0, y: 0, z: -400 }, screen, button: 0, pointerId: 1 });
+    // Down sozinho NÃO desprega (PR10): o item continua na parede
+    expect(world.getObject(id)!.pinnedWall).toBe(0);
+    world.processAction({ type: 'pointerMove', world: { x: 0, y: 0, z: -400 }, screen: { x: 300, y: 300 }, pointerId: 1 });
+    const p1 = world.getObject(id)!.pose.position;
+    expect(p1.x).toBeCloseTo(40, 0); // deslizou ao longo da parede
+    expect(p1.z).toBeCloseTo(planeZ, 3); // mesma profundidade
+    expect(world.getObject(id)!.pinnedWall).toBe(0); // ainda pregado
+    world.processAction({ type: 'pointerUp', world: { x: 0, y: 0, z: -400 }, screen: { x: 300, y: 300 }, pointerId: 1 });
+    expect(world.getObject(id)!.pinnedWall).toBe(0); // soltou e CONTINUA pregado
+    expect(world.getObject(id)!.pose.position.x).toBeCloseTo(40, 0);
+  });
+
+  it('PR10: arrastar o item preso apontando para o chão o desprega', async () => {
     const { world, renderer } = await makeWorld();
     (renderer.projectToScreen as ReturnType<typeof vi.fn>).mockImplementation((v: Vec3) => ({
       x: v.x + 300,
@@ -1274,8 +1306,14 @@ describe('Parede: prender é opcional e item preso pode ser puxado', () => {
     const p = world.getObject(id)!.pose.position;
     const screen = { x: p.x + 300, y: p.z + 300 - p.y * 2 };
     world.processAction({ type: 'pointerDown', world: { x: 0, y: 0, z: -400 }, screen, button: 0, pointerId: 1 });
-    expect(world.getObject(id)!.pinnedWall).toBeNull();
+    expect(world.getObject(id)!.pinnedWall).toBe(0);
+    // Raio aponta para o chão: a interseção com o plano cai abaixo da faixa
+    (renderer.screenToRay as ReturnType<typeof vi.fn>).mockReturnValue({
+      origin: { x: 0, y: 60, z: 0 },
+      direction: { x: 0, y: -1, z: p.z / 246.5 },
+    });
     world.processAction({ type: 'pointerMove', world: { x: 0, y: 0, z: 0 }, screen: { x: 300, y: 300 }, pointerId: 1 });
+    expect(world.getObject(id)!.pinnedWall).toBeNull(); // despregou
     for (let i = 0; i < 90; i++) world.update(1 / 60);
     world.processAction({ type: 'pointerUp', world: { x: 0, y: 0, z: 0 }, screen: { x: 300, y: 300 }, pointerId: 1 });
     expect(world.getObject(id)!.pose.position.z).toBeGreaterThan(-20);

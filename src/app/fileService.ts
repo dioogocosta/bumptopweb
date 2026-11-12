@@ -10,7 +10,9 @@
  */
 import type { IFileSystem, IRepo } from '@core/ports/index';
 import type { World } from '@core/world';
-import { colorForFile, makeThumbnail } from '../fs/thumbnails';
+import { colorForFile, isImagePath, makeThumbnail } from '../fs/thumbnails';
+import { makePhotoTexture } from './photoTexture';
+import { makeFolderTexture } from './folderTexture';
 
 /** Layout em grade simples p/ importação (fica no piso, em espiral). */
 const GRID_COLS = 6;
@@ -100,6 +102,9 @@ export class FileService {
   /** Caminho da última pasta aberta (persistido). */
   private currentPath = '/';
 
+  /** PR10 — sequência de extrações da pasta (espacial os ícones devolvidos). */
+  private extractSeq = 0;
+
   /**
    * Caminhos "tombados": excluídos pelo usuário nesta sessão. O watcher NÃO
    * recria o ícone deles (sem isso, excluir pasta/arquivo ressuscita o ícone
@@ -187,7 +192,13 @@ export class FileService {
             const thumb = await makeThumbnail(file); // sempre retorna string (bitmap ou SVG)
             const objId = idsByPath.get(entry.path);
             if (objId) {
-              this.world.setObjectThumb(objId, thumb);
+              // PR10 — imagens viram quadro (borda branca + sombra)
+              let final = thumb;
+              if (isImagePath(entry.name)) {
+                final = (await makePhotoTexture(thumb, true)) ?? thumb;
+                this.world.setPhotoFrame(objId, true);
+              }
+              this.world.setObjectThumb(objId, final);
               await this.repo.upsertFsEntry({
                 objectId: objId,
                 mode: this.fs.mode() === 'fs-access' ? 1 : 2,
@@ -196,7 +207,7 @@ export class FileService {
                 isDir: false,
                 size: entry.size,
                 mtime: entry.mtime,
-                thumb,
+                thumb: final,
               });
               result.thumbs++;
             }
@@ -400,6 +411,7 @@ export class FileService {
       // (antes: await upsertFsEntry rejeitando → catch → false → toast de erro
       // mesmo com o move OK; e o ícone antigo continuava na cena).
       this.world.removeObject(srcId);
+      void this.updateFolderCount(dirId); // PR10 — contador da pasta muda
       const thumb = src.meta.thumb as string | undefined;
       // Best-effort: reflete o novo caminho no repo; se falhar, o sync do
       // watcher corrige depois.
@@ -448,6 +460,7 @@ export class FileService {
         final,
         { fsPath: path, isDir: true },
       );
+      void this.updateFolderCount(id); // PR10 — contador na face da pasta
       await this.repo.upsertFsEntry({
         objectId: id,
         mode: this.fs.mode() === 'fs-access' ? 1 : this.fs.mode() === 'opfs' ? 2 : 0,
@@ -458,6 +471,68 @@ export class FileService {
         mtime: Date.now(),
       });
       return { id, name: final };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * PR10 — exclui um caminho DENTRO de uma pasta (modal de pasta):
+   * tomba o caminho p/ o watcher não recriar e apaga do sandbox
+   * (em fs-access NÃO toca no disco real — só tombstone).
+   */
+  async deletePath(path: string): Promise<boolean> {
+    this.tombs.add(path);
+    if (this.fs.mode() !== 'fs-access') {
+      try {
+        await this.fs.remove(path);
+      } catch {
+        // ícone/tombstone já refletem a exclusão
+      }
+    }
+    return true;
+  }
+
+  /**
+   * PR10 — tira um item de dentro da pasta e o devolve à mesa: move o
+   * arquivo para a raiz (dedup de nome) e recria o ícone perto do ícone da
+   * pasta. Retorna o id do novo ícone, ou null se falhou.
+   */
+  async extractFromFolder(path: string, nearId?: string): Promise<string | null> {
+    const nome = path.split('/').pop() || 'arquivo';
+    try {
+      const data = await this.fs.read(path);
+      // Dedup do nome na raiz (o destino de extração é sempre a raiz)
+      const raiz = await this.fs.list('/');
+      const usados = new Set(raiz.map((e) => e.name));
+      let final = nome;
+      for (let n = 2; usados.has(final); n++) final = nome.replace(/(\.[^.]*)?$/, ` (${n})$1`);
+      const newPath = `/${final}`;
+      await this.fs.write(newPath, data);
+      await this.fs.remove(path);
+      this.tombs.add(path); // o caminho antigo não volta (watcher)
+      // Ícone perto do ícone da pasta (se existir), senão na grade padrão
+      const near = nearId ? this.world.getObject(nearId)?.pose.position : undefined;
+      const n = this.extractSeq++;
+      const at =
+        near ?
+          {
+            x: near.x + (n % 6) * (CELL * 0.55) - CELL,
+            y: ICON_HALF.y + 0.1,
+            z: near.z + CELL * 0.8,
+          }
+        : undefined;
+      const id = this.spawnIcon(
+        { path: newPath, name: final, isDir: false, size: data.byteLength, mtime: Date.now() },
+        0,
+        at,
+      );
+      // Contador da pasta de origem muda
+      const dirPath = path.slice(0, path.lastIndexOf('/')) || '/';
+      for (const o of this.world.listObjects()) {
+        if (o.meta.fsPath === dirPath) void this.updateFolderCount(o.id);
+      }
+      return id;
     } catch {
       return null;
     }
@@ -523,6 +598,11 @@ export class FileService {
         removed++;
       }
     }
+    // PR10 — repinta o contador das pastas (count muda fora da cena também:
+    // após restore de snapshot o thumb salvo pode estar defasado)
+    for (const o of this.world.listObjects()) {
+      if (o.meta.isDir === true) void this.updateFolderCount(o.id);
+    }
     return { added, removed };
   }
 
@@ -554,8 +634,16 @@ export class FileService {
       this.fs.read(entry.path)
         .then((bytes) => new File([bytes as BlobPart], entry.name))
         .then((file) => makeThumbnail(file))
-        .then((thumb) => {
-          this.world.setObjectThumb(id, thumb);
+        .then(async (thumb) => {
+          // PR10 — imagens viram QUADRO: borda branca + sombra compostos na
+          // própria textura (ligado por padrão; menu Configurações da imagem
+          // alterna). meta.photoFrame guarda o estado p/ o menu.
+          let final = thumb;
+          if (isImagePath(entry.name)) {
+            final = (await makePhotoTexture(thumb, true)) ?? thumb;
+            this.world.setPhotoFrame(id, true);
+          }
+          this.world.setObjectThumb(id, final);
           this.repo.upsertFsEntry({
             objectId: id,
             mode: this.fs.mode() === 'fs-access' ? 1 : 2,
@@ -564,11 +652,65 @@ export class FileService {
             isDir: false,
             size: entry.size,
             mtime: entry.mtime,
-            thumb,
+            thumb: final,
           }).catch(() => {});
         })
         .catch(() => {});
+    } else {
+      // PR10 — pasta com visual de pasta + contador de itens na face
+      void this.updateFolderCount(id);
     }
     return id;
+  }
+
+  /**
+   * PR10 — repinta a face da pasta com o contador de itens atual (lê o
+   * diretório no FS). Sem ícone/caminho → no-op.
+   */
+  async updateFolderCount(id: string): Promise<void> {
+    const o = this.world.getObject(id);
+    const path = o?.meta.fsPath as string | undefined;
+    if (!o || o.meta.isDir !== true || path === undefined) return;
+    try {
+      const items = await this.fs.list(path);
+      const tex = makeFolderTexture(items.length);
+      if (tex) this.world.setObjectThumb(id, tex);
+    } catch {
+      /* diretório sumiu — o watcher/removeObject cuida do ícone */
+    }
+  }
+
+  /**
+   * PR10 — (re)compõe a textura da foto com/sem moldura de quadro. Relê o
+   * arquivo do disco (funciona após recarregar a página). true se aplicou.
+   */
+  async applyPhotoFrame(id: string, framed: boolean): Promise<boolean> {
+    const o = this.world.getObject(id);
+    const fsPath = o?.meta.fsPath as string | undefined;
+    if (!o || fsPath === undefined || o.meta.isDir === true) return false;
+    if (!isImagePath(fsPath)) return false;
+    try {
+      const bytes = await this.fs.read(fsPath);
+      const raw = await makeThumbnail(new File([bytes as BlobPart], fsPath.split('/').pop() ?? 'foto'));
+      const tex = framed ? await makePhotoTexture(raw, true) : raw;
+      if (!tex) return false;
+      this.world.setObjectThumb(id, tex);
+      this.world.setPhotoFrame(id, framed);
+      this.repo
+        .upsertFsEntry({
+          objectId: id,
+          mode: this.fs.mode() === 'fs-access' ? 1 : 2,
+          path: fsPath,
+          name: o.label ?? fsPath.split('/').pop() ?? 'foto',
+          isDir: false,
+          size: bytes.byteLength,
+          mtime: Date.now(),
+          thumb: tex,
+        })
+        .catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
