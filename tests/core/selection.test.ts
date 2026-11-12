@@ -98,6 +98,7 @@ function makeRendererMock(): IRenderer {
     setTheme: vi.fn(),
     render: vi.fn(),
     dispose: vi.fn(),
+    setPilePanel: vi.fn(),
   };
 }
 

@@ -100,6 +100,8 @@ export class World {
 
   private pickedId: string | null = null;
   private dragHeight = 0;
+  /** Ponto de mundo do pointerdown do pick (p/ distinguir clique parado de drag). */
+  private downWorld: Vec3 | null = null;
   private dirty = true;
   private piles = new PileManager();
   /** Seleção múltipla (Fase 7): conjunto de ids com highlight. */
@@ -143,6 +145,10 @@ export class World {
   private scrubIndex = 0;
   /** Item temporariamente elevado no topo da pilha pelo scrub/peel. */
   private activePeelId: string | null = null;
+  /** PR9 — gerador da textura da face da nota (injetado pelo app; core puro). */
+  private noteTextureProvider: ((text: string) => string | null) | null = null;
+  /** PR9 — pilha atualmente ABERTA em grade (painel de vidro + ✕). */
+  private openGridPileId: string | null = null;
   /** Exploding piles (P1): arrastar item para fora explode/dissolve a pilha. */
   private explodingPiles = true;
   /** Auto-align suave (P1 - Item 12): alinha itens soltos à grade implícita de eixos. */
@@ -238,6 +244,7 @@ export class World {
     const e = this.entries.get(id)!;
     e.data.typeFlags |= TypeFlags.StickyNote;
     e.data.meta.noteText = text;
+    this.applyNoteFace(id);
     return id;
   }
 
@@ -246,8 +253,26 @@ export class World {
     const e = this.entries.get(id);
     if (!e || (e.data.typeFlags & TypeFlags.StickyNote) === 0) return false;
     e.data.meta.noteText = text;
+    this.applyNoteFace(id);
     this.dirty = true;
     return true;
+  }
+
+  /**
+   * PR9 — o texto da nota vive na FACE do papel: o app injeta um gerador de
+   * textura (canvas → dataURL, com truncamento + "…"). Core continua puro.
+   */
+  setNoteTextureProvider(fn: ((text: string) => string | null) | null): void {
+    this.noteTextureProvider = fn;
+  }
+
+  /** (Re)aplica a textura da face da nota com o texto atual. */
+  private applyNoteFace(id: string): void {
+    const e = this.entries.get(id);
+    if (!e || this.noteTextureProvider === null) return;
+    const text = (e.data.meta.noteText as string) ?? '';
+    const dataUrl = this.noteTextureProvider(text);
+    if (dataUrl) this.setObjectThumb(id, dataUrl);
   }
 
   isStickyNote(id: string): boolean {
@@ -425,6 +450,7 @@ export class World {
     this.pickedId = hit;
     const e = this.entries.get(hit)!;
     this.dragHeight = e.data.pose.position.y;
+    this.downWorld = { ...worldPoint };
     // O corpo vira "kinematic": segue a mola, colisão desligada no drag
     this.deps.physics.setFrozen(e.body, true);
     this.drag.begin(e.data.pose.position, worldPoint);
@@ -462,6 +488,7 @@ export class World {
       // Drag normal: movimento suficiente → arranca da pilha e inicia drag
       if (dist >= 3) {
         const pullId = this.pendingPull.id;
+        this.downWorld = { ...this.pendingPull.startWorld };
         this.pullFromPile(pullId);
         this.pendingPull = null;
         this.pickedId = pullId;
@@ -715,12 +742,16 @@ export class World {
       return;
     }
 
-    // Flick/drag pendente em item de pilha: resolve no up (C)
+    // Flick/drag pendente em item de pilha: resolve no up (C).
+    // Clique PARADO (sem movimento) NÃO arranca: o item continua na pilha
+    // (o duplo-clique abre a grade; arrastar é quem arranca — PR9).
     if (this.pendingPull) {
-      this.pullFromPile(this.pendingPull.id);
-      // Se houve movimento mínimo, tenta empilhar no destino (preserva clique atual)
       const moved = screen && (Math.hypot(screen.x - this.pendingPull.startScreen.x, screen.y - this.pendingPull.startScreen.y) >= 3);
-      if (moved) this.tryStack(this.pendingPull.id, worldPoint);
+      if (moved) {
+        this.pullFromPile(this.pendingPull.id);
+        // Houve movimento → tenta empilhar no destino
+        this.tryStack(this.pendingPull.id, worldPoint);
+      }
       this.pendingPull = null;
       this.dirty = true;
       return;
@@ -748,6 +779,15 @@ export class World {
       return;
     }
     const { velocity, toss } = this.drag.end();
+    // Clique PARADO (sem movimento entre down e up): só seleciona (o down já
+    // selecionou). NÃO empilha, NÃO gruda na parede — um clique num ícone
+    // vizinho a outro (≤13 un.) não pode fundi-los numa pilha (PR9).
+    // Movimento medido em MUNDO (≥0,5 un.): testes do core simulam drag com
+    // screen constante, e drag real sempre desloca no piso.
+    const movedUp =
+      !!worldPoint && !!this.downWorld &&
+      Math.hypot(worldPoint.x - this.downWorld.x, worldPoint.z - this.downWorld.z) >= 0.5;
+    this.downWorld = null;
     // Descongela e devolve ao mundo físico
     this.deps.physics.setFrozen(e.body, false);
     if (toss) {
@@ -755,7 +795,7 @@ export class World {
       this.deps.physics.setVelocity(e.body, velocity);
       // WallToss (Fase 7): toss recente pode pregar o objeto na parede (se ligado)
       if (this.autoWallPin) this.recentToss.set(e.data.id, 3);
-    } else {
+    } else if (movedUp) {
       // B: arrastar até a parede (sem toss) gruda — antes do tryStack
       const wall = this.autoWallPin ? this.wallContact(e) : null;
       if (wall !== null) {
@@ -1008,6 +1048,87 @@ export class World {
     this.piles.setLayout(base, PileLayout.Leaf);
     this.applyPileLayout();
     return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // PR9 — pilha ABERTA em grade: painel de vidro no piso + botão ✕ flutuante
+  // -------------------------------------------------------------------------
+
+  /**
+   * Duplo-clique na pilha → abre em GRADE (2×N) sobre um painel de vidro,
+   * como no original: itens organizados e um ✕ para fechar (volta a Stack).
+   */
+  openPileGrid(objectId: string): boolean {
+    const base = this.piles.baseOf(objectId);
+    if (!base) return false;
+    this.piles.setLayout(base, PileLayout.Grid); // zera a página
+    this.openGridPileId = base;
+    this.applyPileLayout();
+    return true;
+  }
+
+  /** Fecha a pilha aberta (grade → Stack). false se nenhuma aberta. */
+  closeOpenPile(): boolean {
+    const base = this.openGridPileId;
+    this.openGridPileId = null;
+    if (!base || !this.piles.getState(base)) return false;
+    this.piles.setLayout(base, PileLayout.Stack);
+    this.applyPileLayout();
+    return true;
+  }
+
+  /** A pilha `objectId` é a pilha atualmente ABERTA em grade? */
+  isPileOpen(objectId: string): boolean {
+    return this.openGridPileId !== null && this.openGridPileId === this.piles.baseOf(objectId);
+  }
+
+  /**
+   * Estado da pilha aberta (por frame, p/ o painel de vidro + ✕): centro e
+   * meia-largura/profundidade a partir das posições REAIS dos itens na grade.
+   * null se nenhuma aberta (ou se deixou de ser Grid — auto-cura).
+   */
+  getOpenGridPile(): { pileId: string; center: Vec3; hw: number; hd: number } | null {
+    const baseId = this.openGridPileId;
+    if (!baseId) return null;
+    const state = this.piles.getState(baseId);
+    if (!state || state.layout !== PileLayout.Grid) {
+      this.openGridPileId = null;
+      return null;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    let itemHalf = 7;
+    for (const c of state.children) {
+      const e = this.entries.get(c);
+      if (!e) continue;
+      const pos = this.piles.positionOf(c);
+      if (!pos) continue; // fora da página → oculto
+      itemHalf = Math.max(itemHalf, this.scaledHalf(e).x);
+      minX = Math.min(minX, pos.x);
+      maxX = Math.max(maxX, pos.x);
+      minZ = Math.min(minZ, pos.z);
+      maxZ = Math.max(maxZ, pos.z);
+    }
+    if (!Number.isFinite(minX)) return null;
+    const MARGIN = 5;
+    return {
+      pileId: baseId,
+      center: { x: (minX + maxX) / 2, y: 0, z: (minZ + maxZ) / 2 },
+      hw: (maxX - minX) / 2 + itemHalf + MARGIN,
+      hd: (maxZ - minZ) / 2 + itemHalf + MARGIN,
+    };
+  }
+
+  /** PR9 (E2E): coloca `childId` na pilha de `baseId` (cria a pilha se não existir). */
+  addToPile(baseId: string, childId: string): boolean {
+    if (baseId === childId) return false;
+    const child = this.entries.get(childId);
+    if (!child) return false;
+    const ok = this.piles.add(baseId, childId, child.data.pose.position, this.scaledHalf(child).y);
+    if (ok) this.applyPileLayout();
+    return ok;
   }
 
   /**
@@ -2305,23 +2426,14 @@ export class World {
       return;
     }
     for (const e of this.entries.values()) {
-      const he = this.scaledHalf(e); // label acompanha a escala (P0)
       if ((e.data.typeFlags & TypeFlags.StickyNote) !== 0) {
-        // Nota adesiva: o label É o conteúdo — texto completo, truncado pelo
-        // CSS até preencher o card (com "…" quando não cabe — PR8). O label é
-        // pintado sobre a face do card, não abaixo dele.
-        const text = (e.data.meta.noteText as string) || '—';
-        const p: Vec3 = {
-          x: e.data.pose.position.x,
-          y: e.data.pose.position.y + he.y + 0.2,
-          z: e.data.pose.position.z + he.z * 0.5,
-        };
-        const s = this.deps.renderer.projectToScreen(p);
-        overlay.setLabel(e.data.id, s.visible ? text : null, s.visible ? s : null, { note: true });
+        // PR9: o texto da nota vive na FACE do card (textura) — sem label DOM
+        overlay.setLabel(e.data.id, null, null);
         continue;
       }
       const text = e.data.label;
       if (!text) continue;
+      const he = this.scaledHalf(e); // label acompanha a escala (P0)
       const p: Vec3 = {
         x: e.data.pose.position.x,
         y: e.data.pose.position.y - he.y - 3,
@@ -2396,6 +2508,8 @@ export class World {
       const thumb = o.meta.thumb as string | null | undefined;
       if (thumb) this.deps.renderer.setTexture(render, thumb);
       this.entries.set(o.id, { data: o, body, render });
+      // PR9: nota restaurada sem thumb (snapshot antigo) → regenera a face
+      if (!thumb && (o.typeFlags & TypeFlags.StickyNote) !== 0) this.applyNoteFace(o.id);
     }
     if (snap.camera) this.setCamera(snap.camera);
 

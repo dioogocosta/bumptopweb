@@ -13,6 +13,7 @@ import { ThreeRenderer } from '@render/three/threeRenderer';
 import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
+import { makeNoteTexture } from './noteTexture';
 import { MainLoop } from './main-loop';
 import { DEFAULT_ROOM } from '@core/model/types';
 import { THEMES } from '@core/theme/theme';
@@ -80,6 +81,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
 
   const world = new World({ physics, renderer, overlay });
   await world.init();
+  // PR9 — o texto da nota é DESENHADO no papel (textura na face de cima)
+  world.setNoteTextureProvider((text) => makeNoteTexture(text));
 
   // Tema persistido (settings) — aplica no renderer
   const themeIdx = await repo.getSetting<number>('themeIndex', 0);
@@ -154,6 +157,33 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         // silencioso e parecia "duplo-clique não funciona".
         overlay.toast(t('toast.unsupportedFile'));
       else if (r.kind === 'error') overlay.toast(t('toast.openFailed'));
+    });
+  };
+
+  /** PR9 — abre um arquivo PELO CAMINHO (itens do modal de pasta). */
+  const openPathAndShow = (path: string) => {
+    void files.openPath(path).then((r) => {
+      if (r.kind === 'preview') overlay.showPreview(r);
+      else if (r.kind === 'downloaded') overlay.toast(t('toast.downloading'));
+      else if (r.kind === 'error') overlay.toast(t('toast.openFailed'));
+    });
+  };
+
+  /**
+   * PR9 — modal de vidro com o conteúdo de uma pasta (duplo-clique).
+   * Item-pasta navega (re-render do modal); item-arquivo abre.
+   */
+  const showFolderContents = (path: string, fallbackName: string) => {
+    void files.listFolder(path).then((items) => {
+      overlay.showFolderModal({
+        name: fallbackName,
+        items,
+        onOpen: (p, isDir) => {
+          if (isDir) showFolderContents(p, p.split('/').pop() ?? p);
+          else openPathAndShow(p);
+        },
+        onClose: () => {},
+      });
     });
   };
 
@@ -607,14 +637,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           return;
         }
       }
-      // Chão vazio → fecha leques (Fase 7: duplo-clique no chão recolhe)
+      // Chão vazio → fecha a pilha aberta em grade (PR9) e/ou leques
+      if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));
       if (world.collapseFanOuts() > 0) overlay.toast(t('toast.fansClosed'));
       return;
     }
-    // Item de pilha → fan out (leque) como no original
+    // Item de pilha → ABRE em grade sobre painel de vidro (PR9); se já é a
+    // pilha aberta, o duplo-clique fecha (toggle, como o ✕)
     if (world.inPile(target)) {
-      world.fanOutPile(target);
-      overlay.toast(t('toast.pileFanned'));
+      if (world.isPileOpen(target)) world.closeOpenPile();
+      else world.openPileGrid(target);
+      return;
+    }
+    // Pasta (com fsPath) → modal de vidro com o conteúdo (PR9); o menu
+    // "Abrir" continua importando os itens para a cena
+    const alvoObj = world.getObject(target);
+    if (alvoObj?.meta.isDir === true && typeof alvoObj.meta.fsPath === 'string') {
+      showFolderContents(alvoObj.meta.fsPath as string, alvoObj.label ?? 'Pasta');
       return;
     }
     if (world.isStickyNote(target)) {
@@ -765,6 +804,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     e.stopPropagation();
   });
 
+  // PR9 — ✕ da pilha aberta em grade → fecha (volta a Stack)
+  overlay.onPileCloseClick(() => {
+    if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));
+  });
+
   // Pile Widget Halo (P1): ações do anel de widgets da pilha
   overlay.onPileHaloAction((pileId, action) => {
     switch (action) {
@@ -853,9 +897,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.setResizeHandle(null);
       }
 
+      // PR9 — pilha aberta em grade: painel de vidro no piso + botão ✕
+      const aberta = world.getOpenGridPile();
+      if (aberta) {
+        renderer.setPilePanel({ x: aberta.center.x, z: aberta.center.z, hw: aberta.hw, hd: aberta.hd });
+        const topo = renderer.projectToScreen({
+          x: aberta.center.x,
+          y: 4,
+          z: aberta.center.z - aberta.hd,
+        });
+        overlay.setPileCloseBtn(topo.visible ? { x: topo.x, y: topo.y } : null);
+      } else {
+        renderer.setPilePanel(null);
+        overlay.setPileCloseBtn(null);
+      }
+
       // Atualiza Pile Widget Halo (P1): projeta topo central da pilha → tela
-      const haloState = world.getPileHaloState();
-      if (haloState) {
+      const haloState = world.getPileHaloState();      if (haloState) {
         const center = world.getPileCenter(haloState.pileId);
         if (center) {
           const s = renderer.projectToScreen(center);

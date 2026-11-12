@@ -112,9 +112,16 @@ test('M6: notas adesivas criam/editam via API da cena', async ({ page }) => {
   const after = await page.evaluate(() => window.__bumptop!.world.objectCount());
   expect(after).toBe(before + 1);
 
-  // O texto vira o label projetado no DOM
-  const label = page.locator('.obj-label', { hasText: 'hello' });
-  await expect(label).toBeVisible();
+  // Nota criada com o texto no meta (PR9: o texto vive na textura da face, sem label DOM)
+  const nota = await page.evaluate((nid: string) => {
+    const o = window.__bumptop!.world.getObject(nid)!;
+    return {
+      isSticky: window.__bumptop!.world.isStickyNote(nid),
+      texto: (o.meta.noteText as string) ?? '',
+    };
+  }, id);
+  expect(nota.isSticky).toBe(true);
+  expect(nota.texto).toBe('hello');
 
   // Edição persiste no snapshot
   const text = await page.evaluate((nid: string) => {
@@ -808,16 +815,8 @@ test.describe('PR8', () => {
     }, textoLongo);
     await page.waitForTimeout(500);
 
-    // Label do card: texto completo no DOM, truncado pelo CSS (classe note)
-    const labelInfo = await page.evaluate(() => {
-      const el = document.querySelector<HTMLElement>('.obj-label.note');
-      return { tem: !!el, chars: el?.textContent?.length ?? 0, texto: el?.textContent ?? '' };
-    });
-    expect(labelInfo.tem).toBe(true);
-    expect(labelInfo.texto.startsWith('Primeira linha')).toBe(true);
-    expect(labelInfo.chars).toBeGreaterThan(100); // SEM corte em 40
-
-    // Clique simples (sem arrasto) → modal com o conteúdo COMPLETO
+    // PR9: nota NÃO tem mais label DOM (o texto vive na textura da face).
+    // Só verificamos que o modal leitor (PR8) ainda funciona.
     const tela = await page.evaluate((oid) => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
@@ -833,5 +832,122 @@ test.describe('PR8', () => {
     await page.keyboard.press('Escape');
     await expect(modal).toHaveCount(0);
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), id);
+  });
+});
+
+test.describe('PR9', () => {
+  test('duplo-clique na pilha abre grade com painel de vidro + ✕; ✕ fecha a pilha', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    const pastaId = await page.evaluate(async () => {
+      const w = window.__bumptop!.world;
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry('__p9_a__.txt', { recursive: true }).catch(() => {});
+      await root
+        .getFileHandle('__p9_a__.txt', { create: true })
+        .then((h) => h.createWritable())
+        .then((s) => s.write('a').then(() => s.close()));
+      // diretório real da base (o watcher de 5s remove objetos com fsPath inexistente)
+      await root.getDirectoryHandle('__p9_base__', { create: true });
+      const arq = w.addBox(
+        { x: 0, y: 1.7, z: 0 },
+        { x: 7, y: 1.6, z: 7 },
+        '#4f9cff',
+        '__p9_a__',
+        { fsPath: '/__p9_a__.txt', isDir: false },
+      );
+      const base = w.addBox(
+        { x: 6, y: 1.7, z: 0 },
+        { x: 7, y: 1.6, z: 7 },
+        '#4f9cff',
+        '__p9_base__',
+        { fsPath: '/__p9_base__', isDir: true },
+      );
+      w.addToPile(base, arq);
+      return base;
+    });
+    await page.waitForTimeout(600);
+
+    const telaBase = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, pastaId);
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    await page.mouse.dblclick(box.x + telaBase.x, box.y + telaBase.y);
+
+    await page.waitForFunction(
+      (oid) => window.__bumptop!.world.isPileOpen(oid) === true,
+      pastaId,
+      { timeout: 8000 },
+    );
+
+    const closeBtn = page.locator('.pile-close-btn');
+    await expect(closeBtn).toBeVisible({ timeout: 4000 });
+    await closeBtn.click();
+    await page.waitForFunction(
+      (oid) => window.__bumptop!.world.isPileOpen(oid) === false,
+      pastaId,
+      { timeout: 8000 },
+    );
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), pastaId);
+    await page.evaluate(async () => {
+      await navigator.storage
+        .getDirectory()
+        .then((r) => Promise.all([
+          r.removeEntry('__p9_a__.txt', { recursive: true }).catch(() => {}),
+          r.removeEntry('__p9_base__', { recursive: true }).catch(() => {}),
+        ]));
+    });
+  });
+
+  test('duplo-clique numa pasta abre o modal de vidro com o conteúdo', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    const pastaId = await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry('__p9_pasta__', { recursive: true }).catch(() => {});
+      // PRIMEIRO cria a pasta pelo FileService (senão o dedup renomeia p/ "(2)")
+      const id = (await window.__bumptop!.files.createFolder('__p9_pasta__'))!.id;
+      // DEPOIS cria o arquivo dentro dela
+      await root
+        .getDirectoryHandle('__p9_pasta__')
+        .then((d) => d.getFileHandle('__p9_x__.txt', { create: true }))
+        .then((h) => h.createWritable())
+        .then((s) => s.write('conteudo x').then(() => s.close()));
+      return id;
+    });
+    await page.waitForTimeout(600);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, pastaId);
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+
+    const modal = page.locator('[data-testid="folder-modal"]');
+    await expect(modal).toBeVisible({ timeout: 6000 });
+    const nomes = await modal.locator('.folder-item-name').allTextContents();
+    expect(nomes).toContain('__p9_x__.txt');
+
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), pastaId);
+    await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      await root.removeEntry('__p9_pasta__', { recursive: true }).catch(() => {});
+    });
   });
 });
