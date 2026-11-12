@@ -114,6 +114,11 @@ export interface IRenderer {
   setTheme(theme: Theme): void;
   render(): void;
   dispose(): void;
+  /**
+   * Painel de "vidro" sob uma pilha aberta em grade (PR9): plano translúcido
+   * sobre o piso, sob os itens. null esconde.
+   */
+  setPilePanel(panel: { x: number; z: number; hw: number; hd: number } | null): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +304,27 @@ export interface IOverlay {
   onScrubHover?(cb: (pileId: string, index: number) => void): void;
   /** Indica se o cursor está sobre a faixa de scrub ou o anel de dwell. */
   isScrubHovered?(): boolean;
+
+  // --- PR9 ---
+
+  /** Botão ✕ flutuante da pilha aberta em grade (PR9); null esconde. */
+  setPileCloseBtn(screen: { x: number; y: number } | null): void;
+  /** Registra o callback do clique no ✕ da pilha aberta. */
+  onPileCloseClick(cb: () => void): void;
+
+  /**
+   * Modal de vidro com o conteúdo de uma pasta (PR9): grade de itens com
+   * thumbnail + nome; `onOpen(path, isDir)` ao clicar num item; fecha com
+   * ✕, Esc ou clique no fundo (`onClose`).
+   */
+  showFolderModal(spec: {
+    name: string;
+    items: Array<{ path: string; name: string; isDir: boolean; thumb: string | null }>;
+    emptyLabel?: string;
+    onOpen: (path: string, isDir: boolean) => void;
+    onClose: () => void;
+  }): void;
+  hideFolderModal(): void;
 }
 
 export interface DwellRingData {

@@ -28,6 +28,8 @@ export class ThreeRenderer implements IRenderer {
   private height = 1;
   private highlightMat = new Map<ObjectHandle, THREE.MeshLambertMaterial>();
   private topMat = new Map<ObjectHandle, THREE.MeshLambertMaterial>();
+  /** Painel de vidro da pilha aberta em grade (PR9). */
+  private pilePanel: THREE.Mesh | null = null;
   private floorMat?: THREE.MeshLambertMaterial;
   private wallMat?: THREE.MeshLambertMaterial;
 
@@ -252,6 +254,40 @@ export class ThreeRenderer implements IRenderer {
     this.meshes.delete(handle);
     this.highlightMat.delete(handle);
     this.topMat.delete(handle);
+  }
+
+  /**
+   * Painel de "vidro" sob uma pilha aberta em grade (PR9): plano translúcido
+   * sobre o piso (y≈0.06), sob os itens da grade. null esconde/remove.
+   */
+  setPilePanel(panel: { x: number; z: number; hw: number; hd: number } | null): void {
+    if (!panel) {
+      if (this.pilePanel) {
+        this.scene.remove(this.pilePanel);
+        this.pilePanel.geometry.dispose();
+        (this.pilePanel.material as THREE.Material).dispose();
+        this.pilePanel = null;
+      }
+      return;
+    }
+    if (!this.pilePanel) {
+      const geo = new THREE.PlaneGeometry(1, 1);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x9ecbff,
+        transparent: true,
+        opacity: 0.25,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      this.pilePanel = new THREE.Mesh(geo, mat);
+      this.pilePanel.rotation.x = -Math.PI / 2;
+      this.pilePanel.position.y = 0.06;
+      this.pilePanel.renderOrder = -1;
+      this.scene.add(this.pilePanel);
+    }
+    this.pilePanel.scale.set(Math.max(0.1, panel.hw * 2), Math.max(0.1, panel.hd * 2), 1);
+    this.pilePanel.position.x = panel.x;
+    this.pilePanel.position.z = panel.z;
   }
 
   setCamera(state: CameraState): void {

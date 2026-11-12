@@ -221,15 +221,24 @@ export class FileService {
     if (!o) return { kind: 'error' };
     const fsPath = o.meta.fsPath as string | undefined;
     if (fsPath === undefined) return { kind: 'unsupported' };
-    const name = o.label ?? fsPath.split('/').pop() ?? 'arquivo';
 
     if (o.meta.isDir) {
       await this.importDirectory(fsPath);
       return { kind: 'imported' };
     }
 
+    return this.openPath(fsPath, o.label);
+  }
+
+  /**
+   * Abre um arquivo PELO CAMINHO (PR9 — modal de pasta usa isto; os itens do
+   * modal não são objetos de cena). `labelHint` mantém o nome renomeável.
+   */
+  async openPath(path: string, labelHint: string | null | undefined = undefined): Promise<OpenOutcome> {
+    const name = labelHint || path.split('/').pop() || 'arquivo';
+
     try {
-      const bytes = await this.fs.read(fsPath);
+      const bytes = await this.fs.read(path);
       const mime = mimeFromName(name);
 
       // Pré-visualização in-app: imagem, PDF (blob url) e texto/json (decodificado)
@@ -254,6 +263,30 @@ export class FileService {
     } catch {
       return { kind: 'error' };
     }
+  }
+
+  /**
+   * Lista o conteúdo de uma pasta p/ o modal de vidro (PR9): nome, caminho,
+   * isDir e thumbnail (imagem real ou ícone vetorial por extensão).
+   */
+  async listFolder(
+    path: string,
+  ): Promise<Array<{ path: string; name: string; isDir: boolean; thumb: string | null }>> {
+    const entries = await this.fs.list(path);
+    return Promise.all(
+      entries.map(async (e) => {
+        let thumb: string | null = null;
+        if (!e.isDir) {
+          try {
+            const bytes = await this.fs.read(e.path);
+            thumb = await makeThumbnail(new File([bytes as BlobPart], e.name));
+          } catch {
+            thumb = null;
+          }
+        }
+        return { path: e.path, name: e.name, isDir: e.isDir, thumb };
+      }),
+    );
   }
 
   /**

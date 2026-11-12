@@ -166,6 +166,9 @@ const ptBR: Dict = {
   'ui.namePlaceholder': 'Novo nome…',
   'ui.noteTitle': 'Nota',
   'ui.noteEmpty': '(nota vazia)',
+  'ui.close': 'Fechar',
+  'ui.folderEmpty': '(pasta vazia)',
+  'toast.pileClosed': 'Pilha fechada',
   'ui.resetCamera': 'Redefinir câmera',
 
   // --- Toast de atualização da PWA (index.html) ---
@@ -326,6 +329,9 @@ const en: Dict = {
   'ui.namePlaceholder': 'New name…',
   'ui.noteTitle': 'Note',
   'ui.noteEmpty': '(empty note)',
+  'ui.close': 'Close',
+  'ui.folderEmpty': '(empty folder)',
+  'toast.pileClosed': 'Pile closed',
   'ui.resetCamera': 'Reset camera',
 
   // --- PWA update toast (index.html) ---

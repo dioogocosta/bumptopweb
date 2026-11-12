@@ -34,6 +34,12 @@ export class DomOverlay implements IOverlay {
   private scrubCurrentPileId: string | null = null;
   private previewEl: HTMLDivElement | null = null;
   private previewCleanup: (() => void) | null = null;
+  /** PR9 — botão ✕ da pilha aberta em grade. */
+  private pileCloseEl: HTMLButtonElement | null = null;
+  private pileCloseCb: (() => void) | null = null;
+  /** PR9 — modal de vidro com o conteúdo de uma pasta. */
+  private folderEl: HTMLDivElement | null = null;
+  private folderCleanup: (() => void) | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -740,6 +746,134 @@ export class DomOverlay implements IOverlay {
 
   isScrubHovered(): boolean {
     return this.scrubHovered || this.dwellHovered;
+  }
+
+  // -------------------------------------------------------------------------
+  // PR9 — pilha aberta em grade: botão ✕ flutuante
+  // -------------------------------------------------------------------------
+
+  setPileCloseBtn(screen: { x: number; y: number } | null): void {
+    if (screen === null) {
+      // Esconde (não remove): evita destruir/recriar o elemento a cada frame
+      // quando a projeção oscila — o botão fica estável para clique.
+      if (this.pileCloseEl) this.pileCloseEl.style.display = 'none';
+      return;
+    }
+    if (!this.pileCloseEl) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pile-close-btn';
+      btn.textContent = '✕';
+      btn.setAttribute('aria-label', t('ui.close'));
+      btn.title = t('ui.close');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.pileCloseCb?.();
+      });
+      this.root.appendChild(btn);
+      this.pileCloseEl = btn;
+    }
+    this.pileCloseEl.style.display = '';
+    this.pileCloseEl.style.left = `${screen.x}px`;
+    this.pileCloseEl.style.top = `${screen.y}px`;
+  }
+
+  onPileCloseClick(cb: () => void): void {
+    this.pileCloseCb = cb;
+  }
+
+  // -------------------------------------------------------------------------
+  // PR9 — modal de vidro com o conteúdo de uma pasta
+  // -------------------------------------------------------------------------
+
+  showFolderModal(spec: {
+    name: string;
+    items: Array<{ path: string; name: string; isDir: boolean; thumb: string | null }>;
+    emptyLabel?: string;
+    onOpen: (path: string, isDir: boolean) => void;
+    onClose: () => void;
+  }): void {
+    this.hideFolderModal();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'folder-backdrop';
+    backdrop.style.pointerEvents = 'auto';
+
+    const modal = document.createElement('div');
+    modal.className = 'folder-modal';
+    modal.dataset.testid = 'folder-modal';
+
+    const head = document.createElement('div');
+    head.className = 'folder-head';
+    const title = document.createElement('span');
+    title.className = 'folder-name';
+    title.textContent = spec.name;
+    const close = document.createElement('button');
+    close.className = 'folder-close';
+    close.textContent = '✕';
+    close.setAttribute('aria-label', t('ui.close'));
+    close.title = t('ui.close');
+    head.appendChild(title);
+    head.appendChild(close);
+
+    const body = document.createElement('div');
+    body.className = 'folder-grid';
+    if (spec.items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'folder-empty';
+      empty.textContent = spec.emptyLabel ?? t('ui.folderEmpty');
+      body.appendChild(empty);
+    }
+    for (const item of spec.items) {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'folder-item';
+      const img = document.createElement('img');
+      img.className = 'folder-thumb';
+      img.alt = item.name;
+      img.src = item.thumb ?? '';
+      const label = document.createElement('span');
+      label.className = 'folder-item-name';
+      label.textContent = item.name;
+      cell.appendChild(img);
+      cell.appendChild(label);
+      cell.addEventListener('click', () => spec.onOpen(item.path, item.isDir));
+      body.appendChild(cell);
+    }
+
+    const hide = () => this.hideFolderModal();
+    close.onclick = () => {
+      spec.onClose();
+      hide();
+    };
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) {
+        spec.onClose();
+        hide();
+      }
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        spec.onClose();
+        hide();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+
+    modal.appendChild(head);
+    modal.appendChild(body);
+    backdrop.appendChild(modal);
+    this.root.appendChild(backdrop);
+    this.folderEl = backdrop;
+    this.folderCleanup = () => document.removeEventListener('keydown', onKey);
+  }
+
+  hideFolderModal(): void {
+    if (!this.folderEl) return;
+    this.folderEl.remove();
+    this.folderEl = null;
+    this.folderCleanup?.();
+    this.folderCleanup = null;
   }
 }
 

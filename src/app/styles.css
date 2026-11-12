@@ -648,32 +648,138 @@ body {
   letter-spacing: 0.2px;
 }
 
-/* Label de NOTA ADESIVA (PR8): o texto É o conteúdo do card — amarelo de
- * post-it, multi-linha, pintado sobre a face da nota. O CSS trunca quando
- * o texto não cabe (line-clamp): preenche o tamanho do card e coloca "…"
- * nas últimas linhas. Clicar na nota abre o conteúdo completo. */
-.obj-label.note {
-  max-width: 210px;
-  white-space: pre-wrap;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  overflow: hidden;
-  background: #fff3bf;
-  color: #1f2933;
-  text-shadow: none;
-  border: 1px solid rgba(0, 0, 0, 0.14);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  text-align: left;
-  padding: 4px 8px;
-  border-radius: 2px;
-  line-height: 1.35;
-}
-
 /* Arraste de arquivo do SO sobre a cena (PR8): realce azul tracejado */
 #scene-root canvas.drop-file {
   outline: 3px dashed #4f9cff;
   outline-offset: -4px;
+}
+
+/* ✕ flutuante da pilha aberta em grade (PR9) — como no BumpTop original */
+.pile-close-btn {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  background: #e03e3e;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.pile-close-btn:hover {
+  background: #c53030;
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+/* Modal de vidro com o conteúdo de uma pasta (PR9) */
+.folder-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 30, 60, 0.35);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+.folder-modal {
+  min-width: 380px;
+  max-width: 70vw;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(210, 230, 255, 0.16);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.folder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+.folder-name {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-close {
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 13px;
+  flex: none;
+}
+.folder-close:hover {
+  background: rgba(224, 62, 62, 0.8);
+}
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  padding: 14px;
+  overflow-y: auto;
+}
+.folder-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+.folder-item:hover {
+  background: rgba(79, 156, 255, 0.22);
+  border-color: rgba(79, 156, 255, 0.5);
+}
+.folder-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  pointer-events: none;
+}
+.folder-item-name {
+  color: #fff;
+  font-size: 11px;
+  max-width: 100px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+.folder-empty {
+  grid-column: 1 / -1;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  text-align: center;
+  padding: 26px 0;
 }
 
 /* Toast */

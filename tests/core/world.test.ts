@@ -91,6 +91,7 @@ function makeRendererMock(): IRenderer {
     projectToScreen: vi.fn(() => ({ x: 0, y: 0, visible: true })),
     screenToRay: vi.fn(() => ({ origin: { x: 0, y: 50, z: 0 }, direction: { x: 0, y: -1, z: 0 } })),
     resize: vi.fn(),
+    setPilePanel: vi.fn(),
     setTheme: vi.fn(),
     render: vi.fn(),
     dispose: vi.fn(),
@@ -125,6 +126,10 @@ function makeOverlayMock(): IOverlay & { setLasso: ReturnType<typeof vi.fn> } {
     onScrubItemSelect: vi.fn(),
     onScrubHover: vi.fn(),
     isScrubHovered: vi.fn(() => false),
+    setPileCloseBtn: vi.fn(),
+    onPileCloseClick: vi.fn(),
+    showFolderModal: vi.fn(),
+    hideFolderModal: vi.fn(),
   } as IOverlay & { setLasso: ReturnType<typeof vi.fn> };
 }
 
@@ -314,20 +319,51 @@ describe('World + pilhas (M3)', () => {
     expect(row.meta.noteText).toBe('anotado!');
   });
 
-  it('PR8: label da nota recebe o TEXTO COMPLETO + opts.note (o CSS trunca)', async () => {
+  it('PR9: nota sem label DOM — o texto vive na FACE (textura)', async () => {
     const overlay = makeOverlayMock();
-    const { world } = await makeWorld(overlay);
+    const { world, renderer } = await makeWorld(overlay);
+    // provider injetado (como faz createApp em di.ts)
+    world.setNoteTextureProvider(() => 'data:image/png;fake');
     const longo = 'x'.repeat(200);
     const id = world.addStickyNote({ x: 20, y: 6, z: 20 }, longo);
     world.update(1 / 60);
 
+    // Sem label DOM na nota (o texto é desenhado na face do papel)
     const chamadas = (overlay.setLabel as ReturnType<typeof vi.fn>).mock.calls.filter(
       (c) => c[0] === id,
     );
     expect(chamadas.length).toBeGreaterThan(0);
     const [, text, , opts] = chamadas[chamadas.length - 1];
-    expect(text).toBe(longo); // sem .slice(0,40) — o line-clamp CSS trunca
-    expect(opts).toEqual({ note: true });
+    expect(text).toBeNull();
+    expect(opts).toBeUndefined();
+
+    // Textura aplicada na face do objeto
+    const texturas = (renderer.setTexture as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === (world as any).entries.get(id)?.render,
+    );
+    expect(texturas.length).toBeGreaterThan(0);
+    expect(texturas[texturas.length - 1][1]).toBe('data:image/png;fake');
+  });
+
+  it('PR9: nota sem textura no snapshot regenera a face ao restaurar', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const id = world.addStickyNote({ x: 20, y: 6, z: 20 }, 'texto da nota');
+    world.update(1 / 60);
+
+    const snap = world.toSnapshot();
+    const row = snap.objects.find((o) => o.id === id)!;
+    expect(row.meta.thumb).toBeUndefined(); // snapshot antigo: sem thumb
+
+    // Novo world com provider injetado (como faz createApp) restaura a face
+    const { world: w2, renderer: r2 } = await makeWorld(overlay);
+    w2.setNoteTextureProvider(() => 'data:image/png;fake');
+    w2.loadSnapshot(snap);
+    const texturas = (r2.setTexture as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[1] === 'data:image/png;fake',
+    );
+    expect(texturas.length).toBeGreaterThan(0);
+    expect(texturas[texturas.length - 1][0]).toBeGreaterThan(0);
   });
 
   it('shove: arrastar o chão com o DEDO empurra objetos próximos (Fase 7: shove = touch)', async () => {
@@ -1039,22 +1075,22 @@ describe('Arraste em grupo com pilha na seleção (item 5)', () => {
     expect(centerAfter.z - centerBefore.z).toBeCloseTo(dz, 0);
   });
 
-  it('clique simples em item de pilha sem seleção múltipla ainda arranca o item', async () => {
+  it('PR9: clique PARADO em item de pilha NÃO arranca (duplo-clique abre a grade)', async () => {
     const { world, a } = await pileAndLoose();
     const pa = { ...world.getObject(a)!.pose.position };
     world.processAction({ type: 'pointerDown', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
     world.processAction({ type: 'pointerUp', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, pointerId: 1 });
-    expect(world.inPile(a)).toBe(false);
+    expect(world.inPile(a)).toBe(true); // clique sem movimento preserva a pilha
   });
 
-  it('seleção de itens soltos não sequestra o clique na pilha (item ainda é arrancado)', async () => {
+  it('PR9: seleção de itens soltos não sequestra o clique na pilha (item fica na pilha)', async () => {
     const { world, a, d, e } = await pileAndLoose();
     world.select(d);
     world.toggleSelect(e);
     const pa = { ...world.getObject(a)!.pose.position };
     world.processAction({ type: 'pointerDown', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, button: 0, pointerId: 1 });
     world.processAction({ type: 'pointerUp', world: p(pa.x, pa.z), screen: { x: 100, y: 100 }, pointerId: 1 });
-    expect(world.inPile(a)).toBe(false);
+    expect(world.inPile(a)).toBe(true); // clique parado não arranca
   });
 });
 
