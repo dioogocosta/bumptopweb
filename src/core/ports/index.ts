@@ -316,6 +316,8 @@ export interface IOverlay {
    * Modal de vidro com o conteúdo de uma pasta (PR9): grade de itens com
    * thumbnail + nome; `onOpen(path, isDir)` ao clicar num item; fecha com
    * ✕, Esc ou clique no fundo (`onClose`).
+   * PR10 — ações por item (opcionais): excluir o arquivo (`onDelete`) e
+   * tirar da pasta para a mesa (`onExtract`).
    */
   showFolderModal(spec: {
     name: string;
@@ -323,6 +325,8 @@ export interface IOverlay {
     emptyLabel?: string;
     onOpen: (path: string, isDir: boolean) => void;
     onClose: () => void;
+    onDelete?: (path: string) => void;
+    onExtract?: (path: string) => void;
   }): void;
   hideFolderModal(): void;
 }

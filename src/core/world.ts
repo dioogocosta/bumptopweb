@@ -132,6 +132,9 @@ export class World {
   /** Flick: aguarda o 1º move para decidir se folheia (speed) ou arranca (drag). */
   private pendingPull: { id: string; startWorld: Vec3; startScreen: { x: number; y: number } } | null = null;
 
+  /** PR10 — item pregado em arrasto: desliza ao longo da parede (não desprega). */
+  private wallDrag: { id: string; wall: number } | null = null;
+
   /** Scrunch ativo (3+ dedos no chão): impede pull imediato até pointerUp. */
   private scrunchActive = false;
 
@@ -227,6 +230,14 @@ export class World {
     if (!e) return;
     e.data.meta.thumb = thumb;
     this.deps.renderer.setTexture(e.render, thumb);
+    this.dirty = true;
+  }
+
+  /** PR10 — marca/desmarca o estado da moldura de quadro (p/ menu de contexto). */
+  setPhotoFrame(id: string, framed: boolean): void {
+    const e = this.entries.get(id);
+    if (!e) return;
+    e.data.meta.photoFrame = framed;
     this.dirty = true;
   }
 
@@ -444,8 +455,16 @@ export class World {
 
     // Arrancar um item de uma pilha (drag para fora dissolve/reorganiza)
     if (this.piles.contains(hit)) this.pullFromPile(hit);
-    // Item pregado na parede: arrastar desprega (volta ao dinâmico)
-    if (this.entries.get(hit)?.data.pinnedWall != null) this.pinToWall(hit, null);
+    // PR10 — item pregado: arrastar DESLIZA na parede (só apontar para o
+    // chão no arrasto desprega — onPointerMove converte para drag normal).
+    const pinned = this.entries.get(hit)?.data.pinnedWall;
+    if (pinned != null) {
+      this.wallDrag = { id: hit, wall: pinned };
+      this.pickedId = hit;
+      this.downWorld = { ...worldPoint };
+      this.dirty = true;
+      return;
+    }
 
     this.pickedId = hit;
     const e = this.entries.get(hit)!;
@@ -470,6 +489,34 @@ export class World {
     if (this.shoving) {
       this.applyShove(worldPoint);
       this.lastShovePoint = worldPoint;
+      return;
+    }
+
+    // PR10 — arrasto de item pregado: o alvo é a interseção do raio da tela
+    // com o plano da parede (desliza ao longo dela, sempre clampado).
+    if (this.wallDrag) {
+      const e = this.entries.get(this.wallDrag.id);
+      if (!e || e.data.pinnedWall == null) {
+        this.wallDrag = null;
+        return;
+      }
+      const p = this.wallPointAt(this.wallDrag.wall, screen, e);
+      if (p) {
+        this.placeAt(e, p);
+        this.dirty = true;
+      } else {
+        // Cursor apontou para o chão (abaixo da faixa útil) → desprega e
+        // vira drag normal: o item cai/sente a física do piso.
+        const id = e.data.id;
+        this.wallDrag = null;
+        this.pinToWall(id, null);
+        this.dragHeight = e.data.pose.position.y;
+        this.drag.begin(e.data.pose.position, {
+          x: worldPoint.x,
+          y: this.dragHeight,
+          z: worldPoint.z,
+        });
+      }
       return;
     }
 
@@ -723,6 +770,17 @@ export class World {
   }
 
   private onPointerUp(worldPoint: Vec3, screen?: { x: number; y: number }): void {
+    // PR10 — fim do arrasto na parede: permanece pregado NA POSIÇÃO ARRASTADA
+    // (keepPose evita o salto de volta p/ a altura padrão de pin inicial).
+    if (this.wallDrag) {
+      const id = this.wallDrag.id;
+      const wall = this.entries.get(id)?.data.pinnedWall ?? this.wallDrag.wall;
+      this.wallDrag = null;
+      this.downWorld = null;
+      this.pinToWall(id, wall, true);
+      this.dirty = true;
+      return;
+    }
     if (this.lassoing) {
       const start = this.lassoStart;
       const end = screen ?? this.lassoPoints[this.lassoPoints.length - 1] ?? null;
@@ -1505,8 +1563,11 @@ export class World {
   /**
    * Prega/desprega um objeto numa parede (0=N/-z, 1=S/+z, 2=O/-x, 3=L/+x).
    * O objeto vira kinematic colado à parede; `null` devolve ao dinâmico.
+   * PR10 — `keepPose`: mantém a posição ATUAL do item (fim do arrasto na
+   * parede); sem ele, o pin inicial sobe o item para a altura padrão
+   * (40% da parede), que é onde os quadros ficam bonitos.
    */
-  pinToWall(objectId: string, wall: number | null): void {
+  pinToWall(objectId: string, wall: number | null, keepPose = false): void {
     const e = this.entries.get(objectId);
     if (!e) return;
     const he = this.scaledHalf(e);
@@ -1525,7 +1586,9 @@ export class World {
     const inner = this.innerWall();
     const lowest = he.z + 2;
     const highest = Math.max(lowest, this.room.wallHeight - he.z - 2);
-    const y = clamp(Math.max(e.data.pose.position.y, this.room.wallHeight * 0.4), lowest, highest);
+    const y = keepPose
+      ? clamp(e.data.pose.position.y, lowest, highest)
+      : clamp(Math.max(e.data.pose.position.y, this.room.wallHeight * 0.4), lowest, highest);
     const off = inner - he.y - 0.5;
     const alongX = clamp(e.data.pose.position.x, -(inner - he.x), inner - he.x);
     const alongZ = clamp(e.data.pose.position.z, -(inner - he.x), inner - he.x);
@@ -1567,6 +1630,57 @@ export class World {
     const next = e.data.pinnedWall === null ? 0 : null;
     this.pinToWall(objectId, next);
     return next !== null;
+  }
+
+  /**
+   * PR10 — arrasto na parede: ponto do plano da parede sob o cursor.
+   * Intersecciona o raio da tela com o plano em que o item desliza (mesma
+   * profundidade de `pinToWall`) e clampa à faixa útil da parede. Retorna
+   * null quando o raio não cruza o plano na direção certa OU aponta para a
+   * região do chão (y abaixo da faixa) → sinal para despregar.
+   */
+  private wallPointAt(
+    wall: number,
+    screen: { x: number; y: number },
+    e: Entry,
+  ): Vec3 | null {
+    const he = this.scaledHalf(e);
+    const inner = this.innerWall();
+    const lowest = he.z + 2;
+    const highest = Math.max(lowest, this.room.wallHeight - he.z - 2);
+    const ray = this.deps.renderer.screenToRay(screen);
+    const o = ray.origin;
+    const d = ray.direction;
+
+    // Componente do plano: z (paredes 0/1) ou x (paredes 2/3)
+    const planeZ = wall === 0 || wall === 1;
+    const planeVal = planeZ ? e.data.pose.position.z : e.data.pose.position.x;
+    const dirComp = planeZ ? d.z : d.x;
+    const orgComp = planeZ ? o.z : o.x;
+    // Direção certa: wall 0/2 (paredes -) exigem componente negativa...
+    const dirOk =
+      (wall === 0 && d.z < -1e-6) ||
+      (wall === 1 && d.z > 1e-6) ||
+      (wall === 2 && d.x < -1e-6) ||
+      (wall === 3 && d.x > 1e-6);
+    if (!dirOk) return null;
+    const t = (planeVal - orgComp) / dirComp;
+    if (t <= 0) return null;
+    const hitP = {
+      x: o.x + d.x * t,
+      y: o.y + d.y * t,
+      z: o.z + d.z * t,
+    };
+    // Apontou para a região do chão → desprega
+    if (hitP.y < lowest) return null;
+
+    const y = clamp(hitP.y, lowest, highest);
+    if (planeZ) {
+      const alongX = clamp(hitP.x, -(inner - he.x), inner - he.x);
+      return { x: alongX, y, z: planeVal };
+    }
+    const alongZ = clamp(hitP.z, -(inner - he.x), inner - he.x);
+    return { x: planeVal, y, z: alongZ };
   }
 
   isPinned(objectId: string): boolean {
@@ -1659,6 +1773,14 @@ export class World {
   }
 
   private onCancel(): void {
+    // PR10 — cancelamento durante arrasto na parede: permanece pregado
+    // na posição atual (keepPose, idêntico ao onPointerUp)
+    if (this.wallDrag) {
+      const id = this.wallDrag.id;
+      const wall = this.entries.get(id)?.data.pinnedWall ?? this.wallDrag.wall;
+      this.wallDrag = null;
+      this.pinToWall(id, wall, true);
+    }
     // Laço ativo → esconde o laço mantendo a seleção (como o original)
     if (this.lassoing) this.endLasso();
     this.shoving = false;

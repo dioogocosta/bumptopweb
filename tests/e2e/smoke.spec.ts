@@ -17,11 +17,13 @@ declare global {
       files: {
         mode(): string;
         importDirectory(path?: string): Promise<{ total: number; files: number; thumbs: number }>;
+        importFiles(files: File[], at?: { x: number; y: number; z: number }): Promise<unknown>;
         createFolder(
           name: string,
           at?: { x: number; y: number; z: number },
         ): Promise<{ id: string; name: string } | null>;
         deleteFsObject(id: string): Promise<boolean>;
+        moveInto(srcId: string, dirId: string): Promise<boolean>;
       };
     };
   }
@@ -948,6 +950,214 @@ test.describe('PR9', () => {
     await page.evaluate(async () => {
       const root = await navigator.storage.getDirectory();
       await root.removeEntry('__p9_pasta__', { recursive: true }).catch(() => {});
+    });
+  });
+});
+
+test.describe('PR10', () => {
+  test('item pregado desliza na parede (continua pregado) e desprega arrastando ao chão', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+
+    // Objeto de teste pregado na parede norte, baixado p/ dentro do viewport
+    // (a câmera corta o topo da parede: y=22 sai da tela — placeAt é private
+    // do TS mas acessível em runtime).
+    const itemId = await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      const id = w.addBox({ x: 0, y: 1.7, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#4f9cff', '__p10_parede__');
+      w.pinToWall(id, 0);
+      const runtime = w as unknown as {
+        entries: Map<string, { data: { pose: { position: { z: number } } } }>;
+        placeAt: (e: unknown, p: { x: number; y: number; z: number }) => void;
+      };
+      const e = runtime.entries.get(id)!;
+      runtime.placeAt(e, { x: 0, y: 12, z: e.data.pose.position.z });
+      return id;
+    });
+    await page.waitForTimeout(300);
+
+    const telaItem = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, itemId);
+    // Arrasta ao longo da parede (x deslocado p/ oeste — longe do botão
+    // "reset câmera" no topo, que cobre o canto NE da tela no mobile)
+    const telaAlvo = await page.evaluate((oid) => {
+      const w = window.__bumptop!.world;
+      const z = w.getObject(oid)!.pose.position.z;
+      return window.__bumptop!.renderer.projectToScreen({ x: -30, y: 16, z });
+    }, itemId);
+    await page.mouse.move(box.x + telaItem.x, box.y + telaItem.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + telaAlvo.x, box.y + telaAlvo.y, { steps: 10 });
+    await page.waitForTimeout(200);
+    const pos1 = await page.evaluate((oid) => {
+      const o = window.__bumptop!.world.getObject(oid)!;
+      return { x: o.pose.position.x, pin: o.pinnedWall };
+    }, itemId);
+    expect(pos1.pin).toBe(0); // deslizou e CONTINUA pregado
+    expect(Math.abs(pos1.x + 30)).toBeLessThan(6);
+    // Soltar na parede mantém pregado
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+    expect(await page.evaluate((oid) => window.__bumptop!.world.getObject(oid)!.pinnedWall, itemId)).toBe(0);
+
+    // Agora arrasta apontando para o chão → desprega
+    const tela2 = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, itemId);
+    const telaChao = await page.evaluate(() =>
+      window.__bumptop!.renderer.projectToScreen({ x: -20, y: 0, z: 20 }));
+    await page.mouse.move(box.x + tela2.x, box.y + tela2.y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + telaChao.x, box.y + telaChao.y, { steps: 12 });
+    await page.waitForTimeout(250);
+    const despregou = await page.evaluate((oid) => window.__bumptop!.world.getObject(oid)!.pinnedWall === null, itemId);
+    await page.mouse.up();
+    expect(despregou).toBe(true);
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), itemId);
+  });
+
+  test('imagem importada vira quadro; botão direito → Configurações da imagem → moldura on/off', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+
+    const fotoId = await page.evaluate(async () => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.fsPath || '').startsWith('/__p10_foto')) w.removeObject(o.id);
+      }
+      await navigator.storage
+        .getDirectory()
+        .then((r) => r.removeEntry('__p10_foto.png', { recursive: true }))
+        .catch(() => {});
+      const c = document.createElement('canvas');
+      c.width = 40;
+      c.height = 20;
+      const cx = c.getContext('2d')!;
+      cx.fillStyle = '#e11';
+      cx.fillRect(0, 0, 40, 20);
+      const blob = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
+      const file = new File([blob], '__p10_foto.png', { type: 'image/png' });
+      await window.__bumptop!.files.importFiles([file], { x: 24, y: 2, z: 24 });
+      return w.listObjects().find((o: { meta: { fsPath?: string } }) => o.meta.fsPath === '/__p10_foto.png')?.id ?? null;
+    });
+    // moldura composta assincronamente (spawnIcon)
+    await page.waitForFunction((oid) => window.__bumptop!.world.getObject(oid)?.meta.photoFrame === true, fotoId, { timeout: 8000 });
+
+    // Botão direito na foto → menu → "Configurações da imagem…" → secundário
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, fotoId);
+    await page.mouse.click(box.x + tela.x, box.y + tela.y, { button: 'right' });
+    await page.getByRole('button', { name: /Configurações da imagem/ }).click();
+    await page.getByRole('button', { name: /Moldura de quadro/ }).click(); // desliga
+    await page.waitForFunction((oid) => window.__bumptop!.world.getObject(oid)?.meta.photoFrame === false, fotoId, { timeout: 5000 });
+
+    // Liga de novo
+    await page.mouse.click(box.x + tela.x, box.y + tela.y, { button: 'right' });
+    await page.getByRole('button', { name: /Configurações da imagem/ }).click();
+    await page.getByRole('button', { name: /Moldura de quadro/ }).click();
+    await page.waitForFunction((oid) => window.__bumptop!.world.getObject(oid)?.meta.photoFrame === true, fotoId, { timeout: 5000 });
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), fotoId);
+    await page.evaluate(async () => {
+      await navigator.storage
+        .getDirectory()
+        .then((r) => r.removeEntry('__p10_foto.png', { recursive: true }))
+        .catch(() => {});
+    });
+  });
+
+  test('pasta mostra contador que muda com moveInto; modal tira (⇪) e exclui (✕)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+
+    const pastaId = await page.evaluate(async () => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.fsPath || '').includes('__p10_pasta')) w.removeObject(o.id);
+      }
+      await navigator.storage
+        .getDirectory()
+        .then((r) => r.removeEntry('__p10_pasta__', { recursive: true }))
+        .catch(() => {});
+      const id = (await window.__bumptop!.files.createFolder('__p10_pasta__'))!.id;
+      await new Promise((r) => setTimeout(r, 400)); // contador (0) é pintado assincronamente
+      return id;
+    });
+    const thumb0 = await page.evaluate((oid) => window.__bumptop!.world.getObject(oid)?.meta.thumb ?? null, pastaId);
+    expect(thumb0).toMatch(/^data:image\//);
+
+    // moveInto: contador repinta
+    await page.evaluate(async (oid) => {
+      await navigator.storage
+        .getDirectory()
+        .then((r) => r.getFileHandle('__p10_m2__.txt', { create: true }))
+        .then((h) => h.createWritable())
+        .then((s) => s.write('m2').then(() => s.close()));
+      const w = window.__bumptop!.world;
+      const fid = w.addBox({ x: -24, y: 1.7, z: 24 }, { x: 7, y: 1.6, z: 7 }, '#4f9cff', '__p10_m2__', { fsPath: '/__p10_m2__.txt', isDir: false });
+      await window.__bumptop!.files.moveInto(fid, oid);
+    }, pastaId);
+    await page.waitForTimeout(600);
+    const thumb1 = await page.evaluate((oid) => window.__bumptop!.world.getObject(oid)?.meta.thumb ?? null, pastaId);
+    expect(thumb1).not.toBe(thumb0); // contador repintou
+
+    // Modal: ⇪ tira para a mesa (+1 objeto)
+    const antes = await page.evaluate(() => window.__bumptop!.world.listObjects().length);
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, pastaId);
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="folder-modal"]');
+    await expect(modal).toBeVisible({ timeout: 6000 });
+    const item = modal.locator('.folder-item').first();
+    await item.hover();
+    await page.waitForTimeout(150);
+    await item.locator('.folder-item-act').first().click(); // ⇪ tirar
+    await page.waitForTimeout(900);
+    expect(await page.evaluate(() => window.__bumptop!.world.listObjects().length)).toBe(antes + 1);
+    // ícone extraído existe com o caminho na raiz
+    expect(
+      await page.evaluate(() =>
+        window.__bumptop!.world.listObjects().some((o: { meta: { fsPath?: string } }) => o.meta.fsPath === '/__p10_m2__.txt')),
+    ).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(modal).toHaveCount(0);
+
+    // limpeza
+    await page.evaluate(async () => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.fsPath || '').includes('__p10_')) w.removeObject(o.id);
+      }
+      const root = await navigator.storage.getDirectory();
+      await Promise.all([
+        root.removeEntry('__p10_pasta__', { recursive: true }).catch(() => {}),
+        root.removeEntry('__p10_m2__.txt', { recursive: true }).catch(() => {}),
+        root.removeEntry('__p10_foto.png', { recursive: true }).catch(() => {}),
+      ]);
     });
   });
 });

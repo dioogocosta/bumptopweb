@@ -80,8 +80,12 @@ export class DomOverlay implements IOverlay {
     menu.style.margin = '-140px 0 0 -140px';
 
     const triggerAction = (action: string) => {
+      // Despacha com o menu AINDA anexado ao DOM: o evento precisa borbulhar
+      // até o overlayRoot (app). Só esconde DEPOIS se o handler não abriu
+      // outro menu em sincronia (ex.: "Configurações da imagem…" abre o menu
+      // secundário — esconder depois apagaria o menu recém-aberto).
       menu.dispatchEvent(new CustomEvent('ctxaction', { detail: action, bubbles: true }));
-      this.hideContextMenu();
+      if (this.menuEl === menu) this.hideContextMenu();
     };
 
     // SVG radial com fatias em forma de cunha anelar (pie slices)
@@ -792,6 +796,8 @@ export class DomOverlay implements IOverlay {
     emptyLabel?: string;
     onOpen: (path: string, isDir: boolean) => void;
     onClose: () => void;
+    onDelete?: (path: string) => void;
+    onExtract?: (path: string) => void;
   }): void {
     this.hideFolderModal();
 
@@ -837,6 +843,38 @@ export class DomOverlay implements IOverlay {
       label.textContent = item.name;
       cell.appendChild(img);
       cell.appendChild(label);
+      // PR10 — ações por item: tirar da pasta (⇪) e excluir (✕)
+      if (spec.onExtract || spec.onDelete) {
+        const acts = document.createElement('span');
+        acts.className = 'folder-item-acts';
+        if (spec.onExtract) {
+          const ex = document.createElement('button');
+          ex.type = 'button';
+          ex.className = 'folder-item-act';
+          ex.textContent = '⇪';
+          ex.title = t('menu.extract');
+          ex.setAttribute('aria-label', t('menu.extract'));
+          ex.addEventListener('click', (e) => {
+            e.stopPropagation();
+            spec.onExtract?.(item.path);
+          });
+          acts.appendChild(ex);
+        }
+        if (spec.onDelete) {
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'folder-item-act folder-item-act-danger';
+          del.textContent = '✕';
+          del.title = t('menu.delete');
+          del.setAttribute('aria-label', t('menu.delete'));
+          del.addEventListener('click', (e) => {
+            e.stopPropagation();
+            spec.onDelete?.(item.path);
+          });
+          acts.appendChild(del);
+        }
+        cell.appendChild(acts);
+      }
       cell.addEventListener('click', () => spec.onOpen(item.path, item.isDir));
       body.appendChild(cell);
     }
