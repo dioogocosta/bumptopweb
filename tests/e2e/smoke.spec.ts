@@ -818,18 +818,21 @@ test.describe('PR8', () => {
     }, textoLongo);
     await page.waitForTimeout(500);
 
-    // PR9: nota NÃO tem mais label DOM (o texto vive na textura da face).
-    // Só verificamos que o modal leitor (PR8) ainda funciona.
+    // PR9/PR14: nota NÃO tem mais label DOM (o texto vive na textura da face).
+    // O CLIQUE abre o EDITOR RICO (sem o card escuro de leitura) — conteúdo
+    // completo visível nele.
     const tela = await page.evaluate((oid) => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, id);
     const box = (await page.locator('#scene-root canvas').boundingBox())!;
     await page.mouse.click(box.x + tela.x, box.y + tela.y);
-    const modal = page.locator('[data-testid="file-preview"]');
+    const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 4000 });
-    const mostrado = await modal.locator('.file-preview-text').textContent();
-    expect(mostrado).toBe(textoLongo); // conteúdo COMPLETO, não truncado
+    // Card escuro de leitura (PR8) NÃO deve aparecer
+    await expect(page.locator('[data-testid="file-preview"]')).toHaveCount(0);
+    const mostrado = await page.locator('.note-rich-content').textContent();
+    expect(mostrado).toContain(textoLongo); // conteúdo COMPLETO, não truncado
 
     // Fecha (Esc) e limpa
     await page.keyboard.press('Escape');

@@ -98,16 +98,16 @@ try {
     `noteText ok=${nota.noteText === textoLongo} | label .note ausente=${!nota.temLabelNote} | labels com o texto=${nota.labelsTexto}`);
   await page.screenshot({ path: `${OUT}/p9a-nota-face.png` });
 
-  // ---------- P9b: clique lê o conteúdo COMPLETO (regressão PR8) ----------
-  await sleep(400); // desambiguação clique vs duplo-clique (260ms)
+  // ---------- P9b: clique abre o EDITOR RICO com o conteúdo COMPLETO (PR14) ----------
   const tNota = await telaDe(notaId);
   await page.mouse.click(box.x + tNota.x, box.y + tNota.y);
-  const modal = page.locator('[data-testid="file-preview"]');
+  const modal = page.locator('[data-testid="note-rich"]');
   const leitorOk = await modal.waitFor({ state: 'visible', timeout: 4000 }).then(() => true).catch(() => false);
-  const lido = leitorOk ? await modal.locator('.file-preview-text').textContent() : '';
+  const semLeitorEscuro = (await page.locator('[data-testid="file-preview"]').count()) === 0;
+  const lido = leitorOk ? await page.locator('.note-rich-content').textContent() : '';
   await page.keyboard.press('Escape');
-  check('P9b', leitorOk && lido === textoLongo,
-    `leitor abriu=${leitorOk} | conteúdo completo=${lido === textoLongo} (${(lido || '').length} chars)`);
+  check('P9b', leitorOk && semLeitorEscuro && (lido || '').includes(textoLongo),
+    `editor rico abriu=${leitorOk} | card escuro ausente=${semLeitorEscuro} | conteúdo completo=${(lido || '').includes(textoLongo)} (${(lido || '').length} chars)`);
   await page.screenshot({ path: `${OUT}/p9b-leitor-nota.png` });
 
   // ---------- Pilha de teste (base + 2 arquivos) ----------
