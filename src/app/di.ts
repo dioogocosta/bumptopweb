@@ -16,7 +16,7 @@ import { DomOverlay } from '@overlay/overlay';
 import { makeNoteTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
-import { DEFAULT_ROOM } from '@core/model/types';
+import { DEFAULT_ROOM, TypeFlags } from '@core/model/types';
 import { THEMES } from '@core/theme/theme';
 import { FsAccessFileSystem } from '@fs/fsAccess';
 import { OpfsFileSystem } from '@fs/opfsFs';
@@ -82,8 +82,18 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
 
   const world = new World({ physics, renderer, overlay });
   await world.init();
-  // PR9 — o texto da nota é DESENHADO no papel (textura na face de cima)
-  world.setNoteTextureProvider((text) => makeNoteTexture(text));
+  // PR9/PR12 — a nota é DESENHADA no papel (textura na face de cima): o
+  // provider recebe o meta inteiro (título/cor/lembrete/desenho) e pode
+  // devolver Promise (o desenho carrega async).
+  world.setNoteTextureProvider((meta) =>
+    makeNoteTexture({
+      text: (meta.noteText as string) ?? '',
+      title: (meta.noteTitle as string) ?? undefined,
+      bg: (meta.noteBg as string) ?? undefined,
+      drawing: (meta.noteDrawing as string) ?? undefined,
+      reminder: typeof meta.noteReminder === 'number' ? (meta.noteReminder as number) : undefined,
+    }),
+  );
 
   // Tema persistido (settings) — aplica no renderer
   const themeIdx = await repo.getSetting<number>('themeIndex', 0);
@@ -148,6 +158,44 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   /** Remove o objeto do banco logo após apagá-lo do mundo (ex.: nota esvaziada). */
   const forgetObject = (id: string) => {
     repo.deleteObject(id).catch(() => {});
+  };
+
+  /** PR12 — abre o EDITOR RICO da nota (modal grande estilo Keep) e salva. */
+  const openNoteEditor = (id: string, isNew = false) => {
+    const o = world.getObject(id);
+    if (!o) return;
+    void overlay
+      .editNoteRich({
+        title: (o.meta.noteTitle as string) ?? '',
+        text: (o.meta.noteText as string) ?? '',
+        bg: (o.meta.noteBg as string) ?? undefined,
+        drawing: (o.meta.noteDrawing as string) ?? null,
+        reminder: typeof o.meta.noteReminder === 'number' ? (o.meta.noteReminder as number) : null,
+      })
+      .then((draft) => {
+        // Nota vazia (sem texto, título e desenho) = apagar (comportamento Keep)
+        const empty =
+          draft.text.trim() === '' && draft.title.trim() === '' && draft.drawing === null;
+        if (empty) {
+          world.removeObject(id);
+          forgetObject(id);
+          overlay.toast(t('toast.noteRemoved'));
+          return;
+        }
+        world.setNoteText(id, draft.text);
+        world.setNoteMeta(id, {
+          noteTitle: draft.title,
+          noteBg: draft.bg,
+          noteReminder: draft.reminder,
+          noteDrawing: draft.drawing,
+        });
+        // 1º lembrete → pede permissão de notificação (push)
+        if (draft.reminder !== null && 'Notification' in window && Notification.permission === 'default') {
+          void Notification.requestPermission().catch(() => {});
+        }
+        persistObject(id);
+        if (isNew) overlay.toast(t('toast.noteCreated'));
+      });
   };
 
   /** Abre um objeto: preview in-app (item 3) / importado / download / toasts. */
@@ -383,22 +431,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       // P0 — Escala com feedback de limite
       toastScale(world.scaleSelection(a === 'scaleUp' ? 1 : -1, ctxTargets));
     } else if (a === 'newNote' && ctxFloorPoint) {
-      // Cria a nota e abre o editor (ponto no piso, levemente elevado)
+      // PR12 — cria a nota e abre o EDITOR RICO direto (modal grande)
       const id = world.addStickyNote(
         { x: ctxFloorPoint.x, y: 1.2, z: ctxFloorPoint.z },
         '',
       );
-      const screen = renderer.projectToScreen(world.getObject(id)!.pose.position);
-      void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, '').then((text) => {
-        if (text === '') {
-          world.removeObject(id); // cancelou sem escrever
-          forgetObject(id);
-        } else {
-          world.setNoteText(id, text);
-          persistObject(id);
-          overlay.toast(t('toast.noteCreated'));
-        }
-      });
+      openNoteEditor(id, true);
     } else if (a === 'newFolder' && ctxFloorPoint) {
       // Pasta virtual na cena (item 6): diretório no FS + ícone de pasta
       void files.createFolder(t('menu.newFolderName'), ctxFloorPoint).then((r) => {
@@ -409,19 +447,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         }
       });
     } else if (a === 'editNote' && ctxTarget && world.isStickyNote(ctxTarget)) {
-      const id = ctxTarget;
-      const current = (world.getObject(id)?.meta.noteText as string) ?? '';
-      const screen = renderer.projectToScreen(world.getObject(id)!.pose.position);
-      void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, current).then((text) => {
-        if (text === '') {
-          world.removeObject(id); // esvaziou = apaga a nota
-          forgetObject(id);
-          overlay.toast(t('toast.noteRemoved'));
-        } else {
-          world.setNoteText(id, text);
-          persistObject(id);
-        }
-      });
+      // PR12 — menu "Editar nota" abre o EDITOR RICO
+      openNoteEditor(ctxTarget);
     }
     ctxTarget = null;
     ctxTargets = [];
@@ -673,9 +700,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (noteClickTimer !== null) window.clearTimeout(noteClickTimer);
     noteClickTimer = window.setTimeout(() => {
       noteClickTimer = null;
-      const texto = (world.getObject(target)?.meta.noteText as string) || '';
+      const o = world.getObject(target);
+      const texto = (o?.meta.noteText as string) || '';
+      const titulo = (o?.meta.noteTitle as string) || '';
       overlay.showPreview({
-        name: t('ui.noteTitle'),
+        name: titulo !== '' ? titulo : t('ui.noteTitle'),
         mime: 'text/plain',
         text: texto === '' ? t('ui.noteEmpty') : texto,
       });
@@ -721,23 +750,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     }
     if (world.isStickyNote(target)) {
       // O clique simples abre o leitor (com atraso p/ desambiguar do
-      // duplo-clique); o duplo-clique abre o EDITOR — cancela o leitor.
+      // duplo-clique); o duplo-clique abre o EDITOR RICO (PR12) — cancela o leitor.
       if (noteClickTimer !== null) {
         window.clearTimeout(noteClickTimer);
         noteClickTimer = null;
       }
-      const current = (world.getObject(target)?.meta.noteText as string) ?? '';
-      const screen = renderer.projectToScreen(world.getObject(target)!.pose.position);
-      void overlay.editNote({ x: screen.x + 40, y: screen.y - 80 }, current).then((text) => {
-        if (text === '') {
-          world.removeObject(target);
-          forgetObject(target);
-          overlay.toast(t('toast.noteRemoved'));
-        } else {
-          world.setNoteText(target, text);
-          persistObject(target);
-        }
-      });
+      openNoteEditor(target);
       return;
     }
     openAndShow(target);
@@ -1120,6 +1138,57 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     });
   }, WATCH_MS);
 
+  // PR12 — agendador de lembretes das notas: a cada 15 s procura notas com
+  // lembrete vencido e não disparado → som + toast + push (Notification)
+  const beep = () => {
+    try {
+      const Ctx = window.AudioContext;
+      if (!Ctx) return;
+      const ac = new Ctx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.18, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.9);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start();
+      osc.stop(ac.currentTime + 0.9);
+      osc.onended = () => void ac.close();
+    } catch {
+      // sem áudio (ex.: headless) — o toast e o push ainda avisam
+    }
+  };
+  const REMIND_MS = 15000;
+  const remitter = window.setInterval(() => {
+    if (document.hidden) return;
+    const now = Date.now();
+    for (const o of world.listObjects()) {
+      if ((o.typeFlags & TypeFlags.StickyNote) === 0) continue;
+      if (typeof o.meta.noteReminder !== 'number') continue;
+      if (o.meta.noteReminderFired === true) continue;
+      if ((o.meta.noteReminder as number) > now) continue;
+      world.markNoteReminderFired(o.id);
+      persistObject(o.id);
+      beep();
+      const nome =
+        (o.meta.noteTitle as string) ||
+        (o.meta.noteText as string)?.slice(0, 40) ||
+        t('ui.noteTitle');
+      overlay.toast(t('toast.reminderDue', { title: nome }));
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification((o.meta.noteTitle as string) || t('ui.noteTitle'), {
+            body: ((o.meta.noteText as string) ?? '').slice(0, 120),
+          });
+        } catch {
+          // alguns navegadores exigem service worker p/ Notification
+        }
+      }
+    }
+  }, REMIND_MS);
+
   return {
     world,
     repo,
@@ -1130,6 +1199,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     dispose() {
       loop.stop();
       window.clearInterval(watcher);
+      window.clearInterval(remitter);
       input.detach();
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', onKey);

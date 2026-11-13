@@ -173,11 +173,12 @@ test('menu de contexto: botão direito → criar nota → editar → excluir', a
   // Clica no item (regressão do bug: dispatch após remove() perdia o evento)
   await menu.getByText('Nova nota adesiva').click();
 
-  // Editor abre → escreve e salva
-  const editor = page.locator('.note-editor');
+  // Editor rico (PR12) abre → escreve e fecha (Fechar salva)
+  const editor = page.locator('[data-testid="note-rich"]');
   await expect(editor).toBeVisible();
-  await editor.locator('textarea').fill('nota do teste');
-  await editor.getByRole('button', { name: 'Salvar' }).click();
+  await editor.locator('.note-rich-text').fill('nota do teste');
+  await editor.locator('.note-rich-done').click(); // Fechar salva
+  await expect(editor).toHaveCount(0);
 
   // Nota criada: contador subiu
   await page.waitForTimeout(300);
@@ -1159,5 +1160,121 @@ test.describe('PR10', () => {
         root.removeEntry('__p10_foto.png', { recursive: true }).catch(() => {}),
       ]);
     });
+  });
+});
+
+test.describe('PR12', () => {
+  test('nota abre o editor rico GRANDE; formatação, cor e checklist persistem em meta', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+
+    const notaId = await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.noteText || '').includes('__p12_e2e__')) w.removeObject(o.id);
+      }
+      return w.addStickyNote({ x: 40, y: 1.2, z: -40 }, '__p12_e2e__');
+    });
+    await page.waitForTimeout(300);
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+
+    // Duplo-clique → modal rico GRANDE (≥80% largura)
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 5000 });
+    const largura = await modal.evaluate(
+      (el) => el.getBoundingClientRect().width / window.innerWidth,
+    );
+    expect(largura).toBeGreaterThanOrEqual(0.8);
+
+    // Formatação: seleciona e aplica B → **…**
+    const ta = page.locator('.note-rich-text');
+    await ta.fill('linha teste');
+    await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(6, 11));
+    await page.locator('.note-rich-tool').filter({ hasText: 'Aa ▾' }).click();
+    await page.locator('.note-rich-fmt-item').filter({ hasText: /^B$/ }).click();
+    await expect(ta).toHaveValue('linha **teste**');
+
+    // Cor de fundo pela paleta
+    await page.locator('.note-rich-tool').filter({ hasText: '🎨' }).click();
+    await page.locator('.note-rich-swatch').nth(2).click();
+
+    // Fechar salva → meta atualizada
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+    await page.waitForTimeout(600);
+    const meta = await page.evaluate((oid) => {
+      const o = window.__bumptop!.world.getObject(oid)!;
+      return { bg: o.meta.noteBg, text: o.meta.noteText, thumb: o.meta.thumb };
+    }, notaId);
+    expect(meta.bg).toBe('#f28b82');
+    expect(meta.text).toBe('linha **teste**');
+    expect((meta.thumb as string).startsWith('data:image/png')).toBe(true);
+
+    // limpeza
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+
+  test('checklist ☑ e lembrete ⏰ funcionam no editor rico', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+
+    const notaId = await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.noteText || '').includes('__p12_e2e__')) w.removeObject(o.id);
+      }
+      return w.addStickyNote({ x: -40, y: 1.2, z: -40 }, '__p12_e2e__');
+    });
+    await page.waitForTimeout(300);
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    // Checklist: ☑ vira "- [ ] " e o segundo clique marca "- [x] "
+    const ta = page.locator('.note-rich-text');
+    await ta.fill('comprar leite');
+    await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, el.value.length));
+    await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click();
+    await expect(ta).toHaveValue('- [ ] comprar leite');
+    await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, el.value.length));
+    await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click();
+    await expect(ta).toHaveValue('- [x] comprar leite');
+
+    // Lembrete: popover ⏰ → "Amanhã 08:00" → chip aparece
+    await page.locator('.note-rich-tool').filter({ hasText: '⏰' }).click();
+    await page.locator('.note-rich-remind-row').filter({ hasText: 'Amanhã' }).click();
+    await expect(page.locator('.note-rich-remind-info')).toContainText('⏰');
+
+    // Fechar salva → meta.noteReminder amanhã 08:00, não disparado
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+    await page.waitForTimeout(500);
+    const rem = await page.evaluate((oid) => {
+      const o = window.__bumptop!.world.getObject(oid)!;
+      return { at: o.meta.noteReminder, fired: o.meta.noteReminderFired };
+    }, notaId);
+    expect(typeof rem.at).toBe('number');
+    expect(new Date(rem.at as number).getHours()).toBe(8);
+    expect(rem.fired).toBe(false);
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
 });

@@ -149,7 +149,7 @@ export class World {
   /** Item temporariamente elevado no topo da pilha pelo scrub/peel. */
   private activePeelId: string | null = null;
   /** PR9 — gerador da textura da face da nota (injetado pelo app; core puro). */
-  private noteTextureProvider: ((text: string) => string | null) | null = null;
+  private noteTextureProvider: ((meta: Record<string, unknown>) => string | null | Promise<string | null>) | null = null;
   /** PR9 — pilha atualmente ABERTA em grade (painel de vidro + ✕). */
   private openGridPileId: string | null = null;
   /** Exploding piles (P1): arrastar item para fora explode/dissolve a pilha. */
@@ -270,20 +270,74 @@ export class World {
   }
 
   /**
-   * PR9 — o texto da nota vive na FACE do papel: o app injeta um gerador de
-   * textura (canvas → dataURL, com truncamento + "…"). Core continua puro.
+   * PR9/PR12 — a face da nota é gerada pelo app injetado via provider
+   * (canvas → dataURL; recebe o `meta` inteiro e pode devolver Promise,
+   * pois o desenho carrega async). Core continua puro.
    */
-  setNoteTextureProvider(fn: ((text: string) => string | null) | null): void {
+  setNoteTextureProvider(
+    fn: ((meta: Record<string, unknown>) => string | null | Promise<string | null>) | null,
+  ): void {
     this.noteTextureProvider = fn;
   }
 
-  /** (Re)aplica a textura da face da nota com o texto atual. */
+  /** (Re)aplica a textura da face da nota com o meta atual (PR12). */
   private applyNoteFace(id: string): void {
     const e = this.entries.get(id);
     if (!e || this.noteTextureProvider === null) return;
-    const text = (e.data.meta.noteText as string) ?? '';
-    const dataUrl = this.noteTextureProvider(text);
-    if (dataUrl) this.setObjectThumb(id, dataUrl);
+    const out = this.noteTextureProvider(e.data.meta);
+    if (out === null) return;
+    if (typeof out === 'string') {
+      // Caminho sync (sem desenho): textura aplicada na hora
+      this.setObjectThumb(id, out);
+    } else {
+      void out.then((url) => {
+        if (url) this.setObjectThumb(id, url);
+      });
+    }
+  }
+
+  /**
+   * PR12 — atualiza as aparências/estado da nota (título, cor de fundo,
+   * lembrete, desenho) e repinta a face. Mudar o lembrete rearmou o disparo.
+   */
+  setNoteMeta(
+    id: string,
+    patch: {
+      noteTitle?: string;
+      noteBg?: string;
+      noteReminder?: number | null;
+      noteDrawing?: string | null;
+    },
+  ): boolean {
+    const e = this.entries.get(id);
+    if (!e || (e.data.typeFlags & TypeFlags.StickyNote) === 0) return false;
+    if (patch.noteTitle !== undefined) e.data.meta.noteTitle = patch.noteTitle;
+    if (patch.noteBg !== undefined) e.data.meta.noteBg = patch.noteBg;
+    if (patch.noteDrawing !== undefined) {
+      if (patch.noteDrawing === null) delete e.data.meta.noteDrawing;
+      else e.data.meta.noteDrawing = patch.noteDrawing;
+    }
+    if (patch.noteReminder !== undefined) {
+      if (patch.noteReminder === null) {
+        delete e.data.meta.noteReminder;
+        delete e.data.meta.noteReminderFired;
+      } else {
+        e.data.meta.noteReminder = patch.noteReminder;
+        e.data.meta.noteReminderFired = false; // rearma o disparo
+      }
+    }
+    this.applyNoteFace(id);
+    this.dirty = true;
+    return true;
+  }
+
+  /** Marca um lembrete como já disparado (o agendador do app chama). */
+  markNoteReminderFired(id: string): boolean {
+    const e = this.entries.get(id);
+    if (!e) return false;
+    e.data.meta.noteReminderFired = true;
+    this.dirty = true;
+    return true;
   }
 
   isStickyNote(id: string): boolean {
