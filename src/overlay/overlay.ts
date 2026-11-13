@@ -4,6 +4,15 @@
  * Usa DOM direto p/ M0; pode migrar p/ Preact quando a UI crescer.
  */
 import { t } from '@core/i18n/i18n';
+import {
+  NOTE_COLORS,
+  applyInlineFormat,
+  applyLineFormat,
+  computeReminder,
+  toggleChecklist,
+  type FormatResult,
+  type NoteInline,
+} from '@core/util/notes';
 import type {
   ContextMenuItem,
   DwellRingData,
@@ -592,6 +601,494 @@ export class DomOverlay implements IOverlay {
     this.previewEl = null;
     this.previewCleanup?.();
     this.previewCleanup = null;
+  }
+
+  /**
+   * PR12 — editor RICO de nota em modal GRANDE (estilo Keep): formatação
+   * (H1/H2/Aa/B/I/U/S via markdown-lite), cor de fundo, lembrete, checklist,
+   * desenho em canvas e undo/redo. Fechar (✕/Esc/backdrop) salva e resolve
+   * com o estado final. `null` nunca — o cancelamento é o undo.
+   */
+  editNoteRich(spec: {
+    title: string;
+    text: string;
+    bg?: string;
+    drawing?: string | null;
+    reminder?: number | null;
+  }): Promise<{ title: string; text: string; bg: string; drawing: string | null; reminder: number | null }> {
+    return new Promise((resolve) => {
+      const draft = {
+        title: spec.title,
+        text: spec.text,
+        bg: spec.bg ?? '#ffd43b',
+        drawing: spec.drawing ?? null,
+        reminder: spec.reminder ?? null,
+      };
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'note-rich-backdrop';
+      backdrop.style.pointerEvents = 'auto';
+      const modal = document.createElement('div');
+      modal.className = 'note-rich-modal';
+      modal.dataset.testid = 'note-rich';
+      modal.style.background = draft.bg;
+
+      // ---- Cabeçalho: título + ✕ ----
+      const head = document.createElement('div');
+      head.className = 'note-rich-head';
+      const titleIn = document.createElement('input');
+      titleIn.className = 'note-rich-title';
+      titleIn.type = 'text';
+      titleIn.placeholder = t('ui.noteTitlePlaceholder');
+      titleIn.value = draft.title;
+      titleIn.addEventListener('input', () => {
+        draft.title = titleIn.value;
+        pushUndo();
+      });
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'note-rich-close';
+      closeBtn.textContent = '✕';
+      closeBtn.title = t('ui.close');
+      head.appendChild(titleIn);
+      head.appendChild(closeBtn);
+
+      // ---- Corpo: textarea (texto) ou canvas (desenho) ----
+      const body = document.createElement('div');
+      body.className = 'note-rich-body';
+      const ta = document.createElement('textarea');
+      ta.className = 'note-rich-text';
+      ta.placeholder = t('ui.notePlaceholder');
+      ta.value = draft.text;
+      const canvasWrap = document.createElement('div');
+      canvasWrap.className = 'note-rich-canvas-wrap';
+      canvasWrap.style.display = 'none';
+      const canvas = document.createElement('canvas');
+      canvas.className = 'note-rich-canvas';
+      const drawBar = document.createElement('div');
+      drawBar.className = 'note-rich-draw-bar';
+      canvasWrap.appendChild(canvas);
+      canvasWrap.appendChild(drawBar);
+      body.appendChild(ta);
+      body.appendChild(canvasWrap);
+
+      ta.addEventListener('input', () => {
+        draft.text = ta.value;
+        scheduleUndo();
+      });
+      // Undo/redo nativo do textarea desativado — usamos as pilhas próprias
+      ta.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          doUndo();
+        } else if (((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key.toLowerCase() === 'z')) || (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          doRedo();
+        }
+      });
+
+      // ---- Pilhas de undo/redo (snapshots título+texto) ----
+      const undoStack: Array<{ title: string; text: string }> = [];
+      const redoStack: Array<{ title: string; text: string }> = [];
+      let undoTimer = 0;
+      let lastSnap = JSON.stringify({ title: draft.title, text: draft.text });
+      const pushUndo = () => {
+        const snap = JSON.stringify({ title: draft.title, text: draft.text });
+        if (snap === lastSnap) return;
+        undoStack.push(JSON.parse(lastSnap) as { title: string; text: string });
+        if (undoStack.length > 60) undoStack.shift();
+        redoStack.length = 0;
+        lastSnap = snap;
+      };
+      const scheduleUndo = () => {
+        window.clearTimeout(undoTimer);
+        undoTimer = window.setTimeout(pushUndo, 400);
+      };
+      const applySnap = (s: { title: string; text: string }) => {
+        draft.title = s.title;
+        draft.text = s.text;
+        titleIn.value = s.title;
+        ta.value = s.text;
+        lastSnap = JSON.stringify(s);
+      };
+      const doUndo = () => {
+        if (undoStack.length === 0) return;
+        redoStack.push(JSON.parse(lastSnap) as { title: string; text: string });
+        applySnap(undoStack.pop()!);
+      };
+      const doRedo = () => {
+        if (redoStack.length === 0) return;
+        undoStack.push(JSON.parse(lastSnap) as { title: string; text: string });
+        applySnap(redoStack.pop()!);
+      };
+
+      // ---- Popovers (um por vez, acima da toolbar) ----
+      let popEl: HTMLDivElement | null = null;
+      const closePop = () => {
+        popEl?.remove();
+        popEl = null;
+      };
+      const openPop = (anchor: HTMLElement, build: (pop: HTMLDivElement) => void) => {
+        if (popEl) {
+          closePop();
+          return;
+        }
+        const pop = document.createElement('div');
+        pop.className = 'note-rich-pop';
+        build(pop);
+        modal.appendChild(pop);
+        // Posiciona acima da toolbar, alinhado ao botão
+        const ar = anchor.getBoundingClientRect();
+        const mr = modal.getBoundingClientRect();
+        pop.style.left = `${Math.max(8, ar.left - mr.left)}px`;
+        pop.style.bottom = `${mr.bottom - ar.top + 6}px`;
+        popEl = pop;
+      };
+
+      // ---- Formatação de texto (1º ícone: Aa) ----
+      const applyFmt = (r: FormatResult) => {
+        pushUndo();
+        ta.value = r.text;
+        draft.text = r.text;
+        ta.focus();
+        ta.setSelectionRange(r.start, r.end);
+      };
+      const applyToSelection = (fn: (text: string, s: number, e: number) => FormatResult) => {
+        applyFmt(fn(ta.value, ta.selectionStart, ta.selectionEnd));
+      };
+
+      // ---- Toolbar ----
+      const toolbar = document.createElement('div');
+      toolbar.className = 'note-rich-toolbar';
+      const mkBtn = (glyph: string, titleKey: string, onClick: (e: MouseEvent) => void) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'note-rich-tool';
+        b.textContent = glyph;
+        b.title = t(titleKey);
+        b.setAttribute('aria-label', t(titleKey));
+        b.addEventListener('click', (e) => onClick(e));
+        toolbar.appendChild(b);
+        return b;
+      };
+
+      // 1º ícone — formatação (Aa ▾)
+      mkBtn('Aa ▾', 'ui.formatText', (e) =>
+        openPop(e.currentTarget as HTMLElement, (pop) => {
+          pop.classList.add('fmt');
+          const row = document.createElement('div');
+          row.className = 'note-rich-fmt-row';
+          const fmtItem = (label: string, tip: string, run: () => void) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'note-rich-fmt-item';
+            b.textContent = label;
+            b.title = t(tip);
+            b.addEventListener('click', () => {
+              run();
+              closePop();
+            });
+            row.appendChild(b);
+          };
+          fmtItem('H1', 'ui.h1', () => applyToSelection((x, s, e2) => applyLineFormat(x, s, e2, 'h1')));
+          fmtItem('H2', 'ui.h2', () => applyToSelection((x, s, e2) => applyLineFormat(x, s, e2, 'h2')));
+          fmtItem('Aa', 'ui.normalText', () => applyToSelection((x, s, e2) => applyLineFormat(x, s, e2, 'text')));
+          const sep = document.createElement('span');
+          sep.className = 'note-rich-fmt-sep';
+          row.appendChild(sep);
+          const inline = (label: string, tip: string, kind: NoteInline) =>
+            fmtItem(label, tip, () => applyToSelection((x, s, e2) => applyInlineFormat(x, s, e2, kind)));
+          inline('B', 'ui.bold', 'b');
+          inline('I', 'ui.italic', 'i');
+          inline('U', 'ui.underline', 'u');
+          inline('S', 'ui.strike', 's');
+          pop.appendChild(row);
+        }),
+      );
+
+      // 2º ícone — cor do plano de fundo (🎨)
+      mkBtn('🎨', 'ui.bgColor', (e) =>
+        openPop(e.currentTarget as HTMLElement, (pop) => {
+          pop.classList.add('palette');
+          const label = document.createElement('div');
+          label.className = 'note-rich-pop-label';
+          label.textContent = t('ui.bgColor');
+          pop.appendChild(label);
+          const grid = document.createElement('div');
+          grid.className = 'note-rich-swatch-grid';
+          for (const c of NOTE_COLORS) {
+            const sw = document.createElement('button');
+            sw.type = 'button';
+            sw.className = 'note-rich-swatch';
+            sw.style.background = c;
+            sw.title = c;
+            if (c === draft.bg) sw.classList.add('sel');
+            sw.addEventListener('click', () => {
+              pushUndo();
+              draft.bg = c;
+              modal.style.background = c;
+              closePop();
+            });
+            grid.appendChild(sw);
+          }
+          pop.appendChild(grid);
+        }),
+      );
+
+      // 3º ícone — lembrete (⏰)
+      const remindInfo = document.createElement('span');
+      remindInfo.className = 'note-rich-remind-info';
+      const fmtWhen = (ms: number): string =>
+        new Date(ms).toLocaleString(undefined, {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      const refreshRemindInfo = () => {
+        remindInfo.textContent = draft.reminder !== null ? `⏰ ${fmtWhen(draft.reminder)}` : '';
+      };
+      refreshRemindInfo();
+      mkBtn('⏰', 'ui.remindLater', (e) =>
+        openPop(e.currentTarget as HTMLElement, (pop) => {
+          pop.classList.add('remind');
+          const label = document.createElement('div');
+          label.className = 'note-rich-pop-label';
+          label.textContent = t('ui.remindLater');
+          pop.appendChild(label);
+          const simpleRow = (labelText: string, right: string, val: () => number | null) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'note-rich-remind-row';
+            const l = document.createElement('span');
+            l.textContent = labelText;
+            const r = document.createElement('span');
+            r.className = 'note-rich-remind-when';
+            r.textContent = right;
+            b.appendChild(l);
+            b.appendChild(r);
+            b.addEventListener('click', () => {
+              pushUndo();
+              draft.reminder = val();
+              refreshRemindInfo();
+              closePop();
+            });
+            pop.appendChild(b);
+          };
+          simpleRow(t('ui.remindToday'), '18:00', () => computeReminder('today', Date.now()));
+          simpleRow(t('ui.remindTomorrow'), '08:00', () => computeReminder('tomorrow', Date.now()));
+          simpleRow(t('ui.remindNextWeek'), 'seg., 08:00', () => computeReminder('nextweek', Date.now()));
+          const customRow = document.createElement('label');
+          customRow.className = 'note-rich-remind-row';
+          const cl = document.createElement('span');
+          cl.textContent = `⏲ ${t('ui.remindCustom')}`;
+          const dt = document.createElement('input');
+          dt.type = 'datetime-local';
+          dt.className = 'note-rich-remind-dt';
+          dt.addEventListener('change', () => {
+            const ms = new Date(dt.value).getTime();
+            if (!Number.isFinite(ms)) return;
+            draft.reminder = computeReminder('custom', Date.now(), ms);
+            refreshRemindInfo();
+            closePop();
+          });
+          customRow.appendChild(cl);
+          customRow.appendChild(dt);
+          pop.appendChild(customRow);
+          if (draft.reminder !== null) {
+            const rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'note-rich-remind-row danger';
+            rm.textContent = t('ui.remindRemove');
+            rm.addEventListener('click', () => {
+              draft.reminder = null;
+              refreshRemindInfo();
+              closePop();
+            });
+            pop.appendChild(rm);
+          }
+        }),
+      );
+
+      // 4º ícone — lista com marcadores (☑)
+      mkBtn('☑', 'ui.checklist', () => applyToSelection(toggleChecklist));
+
+      // 5º ícone — desenhar (✍)
+      mkBtn('✍', 'ui.draw', () => {
+        enterDraw();
+      });
+
+      // undo/redo
+      mkBtn('↶', 'ui.undo', () => doUndo());
+      mkBtn('↷', 'ui.redo', () => doRedo());
+
+      const spacer = document.createElement('span');
+      spacer.className = 'note-rich-spacer';
+      toolbar.appendChild(spacer);
+      toolbar.appendChild(remindInfo);
+      const closeBig = document.createElement('button');
+      closeBig.type = 'button';
+      closeBig.className = 'note-rich-done';
+      closeBig.textContent = t('ui.close');
+      closeBig.addEventListener('click', () => finish());
+      toolbar.appendChild(closeBig);
+
+      // ---- Modo desenho ----
+      let drawMode = false;
+      let tool: 'pen' | 'eraser' = 'pen';
+      const enterDraw = () => {
+        drawMode = true;
+        ta.style.display = 'none';
+        canvasWrap.style.display = 'flex';
+        drawBar.innerHTML = '';
+        const penBtn = document.createElement('button');
+        penBtn.type = 'button';
+        penBtn.className = 'note-rich-tool sel';
+        penBtn.textContent = '✒';
+        penBtn.title = t('ui.drawPen');
+        const erBtn = document.createElement('button');
+        erBtn.type = 'button';
+        erBtn.className = 'note-rich-tool';
+        erBtn.textContent = '◌';
+        erBtn.title = t('ui.drawEraser');
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'note-rich-tool';
+        clearBtn.textContent = '🗑';
+        clearBtn.title = t('ui.drawClear');
+        const doneBtn = document.createElement('button');
+        doneBtn.type = 'button';
+        doneBtn.className = 'note-rich-tool';
+        doneBtn.textContent = '✓';
+        doneBtn.title = t('ui.drawDone');
+        drawBar.appendChild(penBtn);
+        drawBar.appendChild(erBtn);
+        drawBar.appendChild(clearBtn);
+        drawBar.appendChild(doneBtn);
+        penBtn.addEventListener('click', () => {
+          tool = 'pen';
+          penBtn.classList.add('sel');
+          erBtn.classList.remove('sel');
+        });
+        erBtn.addEventListener('click', () => {
+          tool = 'eraser';
+          erBtn.classList.add('sel');
+          penBtn.classList.remove('sel');
+        });
+        clearBtn.addEventListener('click', () => {
+          pushUndo();
+          const c2 = canvas.getContext('2d');
+          c2?.clearRect(0, 0, canvas.width, canvas.height);
+        });
+        doneBtn.addEventListener('click', () => {
+          pushUndo();
+          // Canvas vazio (nada desenhado) → remove o desenho
+          const c2 = canvas.getContext('2d');
+          const data = c2?.getImageData(0, 0, canvas.width, canvas.height).data ?? [];
+          let ink = false;
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] !== 0) {
+              ink = true;
+              break;
+            }
+          }
+          draft.drawing = ink ? canvas.toDataURL('image/png') : null;
+          exitDraw();
+        });
+        // Ajusta o canvas ao tamanho real do corpo (após visível)
+        requestAnimationFrame(() => {
+          const rect = canvasWrap.getBoundingClientRect();
+          if (rect.width < 10 || rect.height < 10) return;
+          canvas.width = Math.floor(rect.width);
+          canvas.height = Math.floor(rect.height - drawBar.offsetHeight - 10);
+          const c2 = canvas.getContext('2d');
+          if (c2 && draft.drawing) {
+            const img = new Image();
+            img.onload = () => {
+              const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+              c2.drawImage(img, 0, 0, img.width * scale, img.height * scale);
+            };
+            img.src = draft.drawing;
+          }
+        });
+        // Gesto de desenhar
+        let drawing = false;
+        canvas.style.touchAction = 'none';
+        canvas.addEventListener('pointerdown', (ev) => {
+          drawing = true;
+          const c2 = canvas.getContext('2d');
+          if (!c2) return;
+          c2.beginPath();
+          c2.moveTo(ev.offsetX, ev.offsetY);
+        });
+        canvas.addEventListener('pointermove', (ev) => {
+          if (!drawing) return;
+          const c2 = canvas.getContext('2d');
+          if (!c2) return;
+          c2.lineCap = 'round';
+          c2.lineJoin = 'round';
+          c2.strokeStyle = tool === 'pen' ? '#1f2933' : 'rgba(0,0,0,1)';
+          c2.globalCompositeOperation = tool === 'pen' ? 'source-over' : 'destination-out';
+          c2.lineWidth = tool === 'pen' ? 4 : 26;
+          c2.lineTo(ev.offsetX, ev.offsetY);
+          c2.stroke();
+        });
+        const stop = () => {
+          drawing = false;
+        };
+        canvas.addEventListener('pointerup', stop);
+        canvas.addEventListener('pointerleave', stop);
+      };
+      const exitDraw = () => {
+        drawMode = false;
+        canvasWrap.style.display = 'none';
+        ta.style.display = 'block';
+      };
+
+      // ---- Montagem + fechamento (FECHAR SALVA) ----
+      modal.appendChild(head);
+      modal.appendChild(body);
+      modal.appendChild(toolbar);
+      backdrop.appendChild(modal);
+      this.root.appendChild(backdrop);
+
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (drawMode) {
+          // Sai do modo desenho mantendo o que há (rascunho no canvas)
+          const c2 = canvas.getContext('2d');
+          if (c2) {
+            const data = c2.getImageData(0, 0, canvas.width, canvas.height).data;
+            let ink = false;
+            for (let i = 3; i < data.length; i += 4) {
+              if (data[i] !== 0) {
+                ink = true;
+                break;
+              }
+            }
+            if (ink) draft.drawing = canvas.toDataURL('image/png');
+          }
+        }
+        backdrop.remove();
+        document.removeEventListener('keydown', onKey);
+        resolve({ ...draft });
+      };
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') finish();
+      };
+      document.addEventListener('keydown', onKey);
+      closeBtn.addEventListener('click', () => finish());
+      backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) finish();
+      });
+      // Clique fora fecha popover (não o modal)
+      modal.addEventListener('pointerdown', (e) => {
+        const tgt = e.target as HTMLElement;
+        if (popEl && !popEl.contains(tgt) && !tgt.closest('.note-rich-tool')) closePop();
+      });
+      titleIn.focus();
+    });
   }
 
   /** Indica se o cursor está sobre o Pile Widget Halo no overlay. */
