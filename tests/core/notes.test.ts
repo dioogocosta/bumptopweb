@@ -7,6 +7,7 @@ import {
   applyInlineFormat,
   applyLineFormat,
   computeReminder,
+  noteTextToHtml,
   parseInline,
   parseNoteMarkdown,
   toggleChecklist,
@@ -157,6 +158,47 @@ describe('applyInlineFormat', () => {
     const r = applyInlineFormat('ab', 1, 1, 'i');
     expect(r.text).toBe('a**b');
     expect(r.start).toBe(2);
+  });
+});
+
+describe('noteTextToHtml', () => {
+  it('linha simples vira div.nl-line.nl-p', () => {
+    const html = noteTextToHtml('oi');
+    expect(html).toBe('<div class="nl-line nl-p">oi</div>');
+  });
+
+  it('título e subtítulo ganham as classes nl-h1/nl-h2 (sem # visível)', () => {
+    const html = noteTextToHtml('# Título\n## Sub');
+    expect(html).toContain('<div class="nl-line nl-h1">Título</div>');
+    expect(html).toContain('<div class="nl-line nl-h2">Sub</div>');
+  });
+
+  it('item de checklist tem .nl-box (contenteditable=false) e data-done', () => {
+    const html = noteTextToHtml('- [ ] comprar\n- [x] feito');
+    expect(html).toContain('class="nl-line nl-item" data-done="0"');
+    expect(html).toContain('class="nl-line nl-item" data-done="1"');
+    expect((html.match(/class="nl-box" contenteditable="false"/g) ?? []).length).toBe(2);
+    expect(html).toContain('>comprar</span>');
+    expect(html).toContain('>feito</span>');
+  });
+
+  it('formatação inline vira <b>/<i>/<u>/<s> de verdade', () => {
+    const html = noteTextToHtml('**b** *i* __u__ ~~s~~');
+    expect(html).toContain('<b>b</b>');
+    expect(html).toContain('<i>i</i>');
+    expect(html).toContain('<u>u</u>');
+    expect(html).toContain('<s>s</s>');
+  });
+
+  it('escapa HTML do texto (segurança)', () => {
+    const html = noteTextToHtml('<img src=x>&"');
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img src=x&gt;&amp;&quot;');
+  });
+
+  it('texto vazio gera uma linha vazia (parágrafo)', () => {
+    const html = noteTextToHtml('');
+    expect(html).toBe('<div class="nl-line nl-p"></div>');
   });
 });
 

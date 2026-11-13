@@ -1160,9 +1160,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       // sem áudio (ex.: headless) — o toast e o push ainda avisam
     }
   };
-  const REMIND_MS = 15000;
-  const remitter = window.setInterval(() => {
-    if (document.hidden) return;
+  const checkReminders = () => {
     const now = Date.now();
     for (const o of world.listObjects()) {
       if ((o.typeFlags & TypeFlags.StickyNote) === 0) continue;
@@ -1177,6 +1175,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         (o.meta.noteText as string)?.slice(0, 40) ||
         t('ui.noteTitle');
       overlay.toast(t('toast.reminderDue', { title: nome }));
+      // PR13 — dispara MESMO com a aba em segundo plano: a Notification do
+      // Windows não exige foco (sem guard document.hidden)
       if ('Notification' in window && Notification.permission === 'granted') {
         try {
           new Notification((o.meta.noteTitle as string) || t('ui.noteTitle'), {
@@ -1187,7 +1187,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         }
       }
     }
-  }, REMIND_MS);
+  };
+  checkReminders(); // checagem imediata no bootstrap (vencidos ao carregar)
+  const REMIND_MS = 10000;
+  const remitter = window.setInterval(checkReminders, REMIND_MS);
 
   return {
     world,

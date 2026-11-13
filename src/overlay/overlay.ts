@@ -4,15 +4,7 @@
  * Usa DOM direto p/ M0; pode migrar p/ Preact quando a UI crescer.
  */
 import { t } from '@core/i18n/i18n';
-import {
-  NOTE_COLORS,
-  applyInlineFormat,
-  applyLineFormat,
-  computeReminder,
-  toggleChecklist,
-  type FormatResult,
-  type NoteInline,
-} from '@core/util/notes';
+import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
 import type {
   ContextMenuItem,
   DwellRingData,
@@ -652,13 +644,19 @@ export class DomOverlay implements IOverlay {
       head.appendChild(titleIn);
       head.appendChild(closeBtn);
 
-      // ---- Corpo: textarea (texto) ou canvas (desenho) ----
+      // ---- Corpo: editor WYSIWYG (contentEditable) ou canvas (desenho) ----
+      // PR13 — a formatação renderiza NO ATO (sem ** / # visíveis): o editor
+      // é um contentEditable com blocos .nl-line; o modelo de armazenamento
+      // continua markdown-lite (serializado do DOM a cada digitação).
       const body = document.createElement('div');
       body.className = 'note-rich-body';
-      const ta = document.createElement('textarea');
-      ta.className = 'note-rich-text';
-      ta.placeholder = t('ui.notePlaceholder');
-      ta.value = draft.text;
+      const editor = document.createElement('div');
+      editor.className = 'note-rich-content';
+      editor.contentEditable = 'true';
+      editor.setAttribute('role', 'textbox');
+      editor.dataset.placeholder = t('ui.notePlaceholder');
+      editor.innerHTML = noteTextToHtml(draft.text);
+      editor.classList.toggle('empty', draft.text === '');
       const canvasWrap = document.createElement('div');
       canvasWrap.className = 'note-rich-canvas-wrap';
       canvasWrap.style.display = 'none';
@@ -668,23 +666,8 @@ export class DomOverlay implements IOverlay {
       drawBar.className = 'note-rich-draw-bar';
       canvasWrap.appendChild(canvas);
       canvasWrap.appendChild(drawBar);
-      body.appendChild(ta);
+      body.appendChild(editor);
       body.appendChild(canvasWrap);
-
-      ta.addEventListener('input', () => {
-        draft.text = ta.value;
-        scheduleUndo();
-      });
-      // Undo/redo nativo do textarea desativado — usamos as pilhas próprias
-      ta.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-          e.preventDefault();
-          doUndo();
-        } else if (((e.ctrlKey || e.metaKey) && (e.shiftKey && e.key.toLowerCase() === 'z')) || (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-          e.preventDefault();
-          doRedo();
-        }
-      });
 
       // ---- Pilhas de undo/redo (snapshots título+texto) ----
       const undoStack: Array<{ title: string; text: string }> = [];
@@ -707,7 +690,8 @@ export class DomOverlay implements IOverlay {
         draft.title = s.title;
         draft.text = s.text;
         titleIn.value = s.title;
-        ta.value = s.text;
+        editor.innerHTML = noteTextToHtml(s.text);
+        editor.classList.toggle('empty', s.text === '');
         lastSnap = JSON.stringify(s);
       };
       const doUndo = () => {
@@ -721,9 +705,282 @@ export class DomOverlay implements IOverlay {
         applySnap(redoStack.pop()!);
       };
 
+      // ---- PR13 — DOM ⇄ markdown-lite (WYSIWYG) ----
+      type St = { b: boolean; i: boolean; u: boolean; s: boolean };
+      const styleOf = (e: HTMLElement, st: St): St => {
+        const tag = e.tagName.toLowerCase();
+        const s2: St = { ...st };
+        if (tag === 'b' || tag === 'strong') s2.b = true;
+        else if (tag === 'i' || tag === 'em') s2.i = true;
+        else if (tag === 'u') s2.u = true;
+        else if (tag === 's' || tag === 'strike' || tag === 'del') s2.s = true;
+        return s2;
+      };
+      /**
+       * Serializa a linha p/ markdown E devolve o mapa DOM→markdown
+       * (`map[domIdx] = mdIdx`) — usado p/ dividir a linha no cursor no Enter.
+       */
+      const serializeMapped = (line: HTMLElement): { md: string; map: number[] } => {
+        const map: number[] = [];
+        let out = '';
+        const add = (t: string): number => {
+          for (let k = 0; k < t.length; k++) map.push(out.length + k);
+          out += t;
+          return t.length;
+        };
+        const wrapSeg = (
+          mdStart: number,
+          mdEnd: number,
+          domStart: number,
+          domN: number,
+          pre: string,
+        ) => {
+          if (mdEnd <= mdStart) return;
+          const suf = [...pre].reverse().join('');
+          out = out.slice(0, mdStart) + pre + out.slice(mdStart, mdEnd) + suf + out.slice(mdEnd);
+          for (let k = domStart; k < domStart + domN && k < map.length; k++) map[k] += pre.length;
+        };
+        const walk = (n: Node, st: St): number => {
+          if (n.nodeType === Node.TEXT_NODE) return add(n.textContent ?? '');
+          if (n.nodeType !== Node.ELEMENT_NODE) return 0;
+          const e = n as HTMLElement;
+          if (e.classList.contains('nl-box')) return 0; // checkbox não é texto
+          if (e.tagName === 'BR') return 0; // quebra visual, não de modelo
+          const st2 = styleOf(e, st);
+          const domStart = map.length;
+          const mdStart = out.length;
+          let domN = 0;
+          e.childNodes.forEach((c) => {
+            domN += walk(c, st2);
+          });
+          const mdEnd = out.length;
+          let off = 0;
+          if (st2.b && !st.b) {
+            wrapSeg(mdStart + off, mdEnd + off, domStart, domN, '**');
+            off += 2;
+          }
+          if (st2.i && !st.i) {
+            wrapSeg(mdStart + off, mdEnd + off, domStart, domN, '*');
+            off += 1;
+          }
+          if (st2.u && !st.u) {
+            wrapSeg(mdStart + off, mdEnd + off, domStart, domN, '__');
+            off += 2;
+          }
+          if (st2.s && !st.s) {
+            wrapSeg(mdStart + off, mdEnd + off, domStart, domN, '~~');
+            off += 2;
+          }
+          return domN;
+        };
+        walk(line, { b: false, i: false, u: false, s: false });
+        return { md: out, map };
+      };
+      const serializeRich = (): string => {
+        const lines: string[] = [];
+        editor.querySelectorAll<HTMLElement>('.nl-line').forEach((line) => {
+          const { md } = serializeMapped(line);
+          if (line.classList.contains('nl-h1')) lines.push(`# ${md}`);
+          else if (line.classList.contains('nl-h2')) lines.push(`## ${md}`);
+          else if (line.classList.contains('nl-item')) {
+            lines.push(`${line.dataset.done === '1' ? '- [x] ' : '- [ ] '}${md}`);
+          } else lines.push(md);
+        });
+        return lines.join('\n');
+      };
+      const syncModel = () => {
+        draft.text = serializeRich();
+        editor.classList.toggle('empty', draft.text === '');
+        scheduleUndo();
+      };
+
+      // ---- Cursor / blocos ----
+      const currentLine = (): HTMLElement | null => {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return null;
+        let n: Node | null = sel.anchorNode;
+        while (n && n !== editor) {
+          if (n instanceof HTMLElement && n.classList.contains('nl-line')) return n;
+          n = n.parentNode;
+        }
+        return null;
+      };
+      const caretIndexInLine = (line: HTMLElement): number => {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return -1;
+        const r = sel.getRangeAt(0);
+        const pre = document.createRange();
+        pre.selectNodeContents(line);
+        try {
+          pre.setEnd(r.endContainer, r.endOffset);
+        } catch {
+          return -1;
+        }
+        return pre.toString().length;
+      };
+      const setCaretInLine = (line: HTMLElement, idx: number) => {
+        const target = (line.querySelector('.nl-text') as HTMLElement) ?? line;
+        const sel = window.getSelection();
+        const r = document.createRange();
+        r.selectNodeContents(target);
+        let left = Math.max(0, idx);
+        let placed = false;
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        for (let tn = walker.nextNode(); tn !== null; tn = walker.nextNode()) {
+          const t2 = tn as Text;
+          if (left <= t2.length) {
+            r.setStart(t2, left);
+            placed = true;
+            break;
+          }
+          left -= t2.length;
+        }
+        if (!placed) r.setStart(target, target.childNodes.length);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+      };
+      const placeCaretAtStart = (line: HTMLElement) => {
+        const target = (line.querySelector('.nl-text') as HTMLElement) ?? line;
+        if (target.childNodes.length === 0) target.appendChild(document.createTextNode(''));
+        const sel = window.getSelection();
+        const r = document.createRange();
+        r.setStart(target, 0);
+        r.collapse(true);
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+      };
+      const lineKindOf = (line: HTMLElement): 'text' | 'h1' | 'h2' | 'item' => {
+        if (line.classList.contains('nl-item')) return 'item';
+        if (line.classList.contains('nl-h1')) return 'h1';
+        if (line.classList.contains('nl-h2')) return 'h2';
+        return 'text';
+      };
+      /** Substitui a linha por um bloco novo gerado de markdown-lite. */
+      const rebuildLine = (
+        line: HTMLElement,
+        kind: 'text' | 'h1' | 'h2' | 'item',
+        done: boolean,
+        md: string,
+      ): HTMLElement => {
+        const raw =
+          kind === 'item'
+            ? `${done ? '- [x] ' : '- [ ] '}${md}`
+            : kind === 'h1'
+              ? `# ${md}`
+              : kind === 'h2'
+                ? `## ${md}`
+                : md;
+        const tpl = document.createElement('template');
+        tpl.innerHTML = noteTextToHtml(raw);
+        const nl = tpl.content.firstElementChild as HTMLElement;
+        line.replaceWith(nl);
+        return nl;
+      };
+
+      editor.addEventListener('input', () => syncModel());
+      // Undo/redo nativo do contentEditable desativado — pilhas próprias
+      editor.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+          e.preventDefault();
+          doUndo();
+        } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+          e.preventDefault();
+          doRedo();
+        }
+      });
+      // PR13 — Enter interceptado: cria um bloco NOVO (item→item pendente;
+      // h1/h2→texto normal). O Enter nativo clonaria o bloco (checkbox duplo).
+      editor.addEventListener('beforeinput', (e) => {
+        if (e.inputType !== 'insertParagraph') return;
+        const line = currentLine();
+        if (!line) return;
+        e.preventDefault();
+        pushUndo();
+        const { md, map } = serializeMapped(line);
+        const domIdx = caretIndexInLine(line);
+        const mdIdx = domIdx >= 0 && domIdx < map.length ? map[domIdx] : md.length;
+        const left = md.slice(0, mdIdx);
+        const right = md.slice(mdIdx);
+        const kind = lineKindOf(line);
+        const done = line.dataset.done === '1';
+        const leftMd =
+          kind === 'item'
+            ? `${done ? '- [x] ' : '- [ ] '}${left}`
+            : kind === 'h1'
+              ? `# ${left}`
+              : kind === 'h2'
+                ? `## ${left}`
+                : left;
+        const rightMd = kind === 'item' ? `- [ ] ${right}` : right;
+        const tpl = document.createElement('template');
+        tpl.innerHTML = noteTextToHtml(`${leftMd}\n${rightMd}`);
+        const nodes = Array.from(tpl.content.children) as HTMLElement[];
+        line.replaceWith(...nodes);
+        if (nodes.length > 1) placeCaretAtStart(nodes[1]);
+        syncModel();
+      });
+      // PR13 — checkbox CLICÁVEL: marcar ✓ riscado; não rouba o foco
+      editor.addEventListener('mousedown', (e) => {
+        if ((e.target as HTMLElement).closest?.('.nl-box')) e.preventDefault();
+      });
+      editor.addEventListener('click', (e) => {
+        const box = (e.target as HTMLElement).closest?.('.nl-box') as HTMLElement | null;
+        if (!box) return;
+        const line = box.closest('.nl-line') as HTMLElement;
+        pushUndo();
+        line.dataset.done = line.dataset.done === '1' ? '0' : '1';
+        syncModel();
+      });
+
+      // ---- Ações de formatação (toolbar/popover) ----
+      const execInline = (cmd: 'bold' | 'italic' | 'underline' | 'strikeThrough') => {
+        editor.focus();
+        document.execCommand('styleWithCSS', false, 'false');
+        document.execCommand(cmd, false);
+        syncModel();
+      };
+      /** Formato de BLOCO (H1/H2/texto) na linha do cursor (toggle). */
+      const applyBlockFormat = (kind: 'h1' | 'h2' | 'text') => {
+        const line = currentLine();
+        if (!line) return;
+        const domIdx = Math.max(0, caretIndexInLine(line));
+        const cur = lineKindOf(line);
+        const target = cur === kind ? 'text' : kind;
+        pushUndo();
+        const { md } = serializeMapped(line);
+        const nl = rebuildLine(line, target, false, md);
+        setCaretInLine(nl, domIdx);
+        syncModel();
+      };
+      /** Liga/desliga checklist na linha do cursor. */
+      const applyChecklist = () => {
+        const line = currentLine();
+        if (!line) return;
+        const domIdx = Math.max(0, caretIndexInLine(line));
+        const isItem = lineKindOf(line) === 'item';
+        pushUndo();
+        const { md } = serializeMapped(line);
+        const nl = rebuildLine(line, isItem ? 'text' : 'item', false, md);
+        setCaretInLine(nl, domIdx);
+        syncModel();
+      };
+
       // ---- Popovers (um por vez, acima da toolbar) ----
       let popEl: HTMLDivElement | null = null;
+      // PR13 — commit PENDENTE do datetime-local: o `input` grava o valor
+      // escolhido e o closePop consolida (antes, o Fechar removia o campo do
+      // DOM ANTES do `change` disparar → o lembrete nunca era gravado).
+      let pendingRemind: number | null = null;
+      const commitRemind = () => {
+        if (pendingRemind === null) return;
+        pushUndo();
+        draft.reminder = computeReminder('custom', Date.now(), pendingRemind);
+        pendingRemind = null;
+        refreshRemindInfo();
+      };
       const closePop = () => {
+        if (popEl?.classList.contains('remind')) commitRemind();
         popEl?.remove();
         popEl = null;
       };
@@ -744,17 +1001,7 @@ export class DomOverlay implements IOverlay {
         popEl = pop;
       };
 
-      // ---- Formatação de texto (1º ícone: Aa) ----
-      const applyFmt = (r: FormatResult) => {
-        pushUndo();
-        ta.value = r.text;
-        draft.text = r.text;
-        ta.focus();
-        ta.setSelectionRange(r.start, r.end);
-      };
-      const applyToSelection = (fn: (text: string, s: number, e: number) => FormatResult) => {
-        applyFmt(fn(ta.value, ta.selectionStart, ta.selectionEnd));
-      };
+      // ---- Formatação de texto (1º ícone: Aa) → execInline/applyBlockFormat ----
 
       // ---- Toolbar ----
       const toolbar = document.createElement('div');
@@ -766,6 +1013,9 @@ export class DomOverlay implements IOverlay {
         b.textContent = glyph;
         b.title = t(titleKey);
         b.setAttribute('aria-label', t(titleKey));
+        // mousedown preventDefault: NÃO rouba o foco/seleção do editor
+        // (crítico p/ execCommand aplicar no texto selecionado)
+        b.addEventListener('mousedown', (e) => e.preventDefault());
         b.addEventListener('click', (e) => onClick(e));
         toolbar.appendChild(b);
         return b;
@@ -783,24 +1033,25 @@ export class DomOverlay implements IOverlay {
             b.className = 'note-rich-fmt-item';
             b.textContent = label;
             b.title = t(tip);
+            b.addEventListener('mousedown', (e) => e.preventDefault());
             b.addEventListener('click', () => {
               run();
               closePop();
             });
             row.appendChild(b);
           };
-          fmtItem('H1', 'ui.h1', () => applyToSelection((x, s, e2) => applyLineFormat(x, s, e2, 'h1')));
-          fmtItem('H2', 'ui.h2', () => applyToSelection((x, s, e2) => applyLineFormat(x, s, e2, 'h2')));
-          fmtItem('Aa', 'ui.normalText', () => applyToSelection((x, s, e2) => applyLineFormat(x, s, e2, 'text')));
+          fmtItem('H1', 'ui.h1', () => applyBlockFormat('h1'));
+          fmtItem('H2', 'ui.h2', () => applyBlockFormat('h2'));
+          fmtItem('Aa', 'ui.normalText', () => applyBlockFormat('text'));
           const sep = document.createElement('span');
           sep.className = 'note-rich-fmt-sep';
           row.appendChild(sep);
-          const inline = (label: string, tip: string, kind: NoteInline) =>
-            fmtItem(label, tip, () => applyToSelection((x, s, e2) => applyInlineFormat(x, s, e2, kind)));
-          inline('B', 'ui.bold', 'b');
-          inline('I', 'ui.italic', 'i');
-          inline('U', 'ui.underline', 'u');
-          inline('S', 'ui.strike', 's');
+          const inline = (label: string, tip: string, cmd: 'bold' | 'italic' | 'underline' | 'strikeThrough') =>
+            fmtItem(label, tip, () => execInline(cmd));
+          inline('B', 'ui.bold', 'bold');
+          inline('I', 'ui.italic', 'italic');
+          inline('U', 'ui.underline', 'underline');
+          inline('S', 'ui.strike', 'strikeThrough');
           pop.appendChild(row);
         }),
       );
@@ -867,6 +1118,7 @@ export class DomOverlay implements IOverlay {
             b.appendChild(l);
             b.appendChild(r);
             b.addEventListener('click', () => {
+              pendingRemind = null; // opção rápida cancela custom pendente
               pushUndo();
               draft.reminder = val();
               refreshRemindInfo();
@@ -884,12 +1136,14 @@ export class DomOverlay implements IOverlay {
           const dt = document.createElement('input');
           dt.type = 'datetime-local';
           dt.className = 'note-rich-remind-dt';
-          dt.addEventListener('change', () => {
+          // PR13 — `input` (não `change`): grada o valor no ATO, pois o
+          // closePop pode remover o campo antes do `change` disparar
+          dt.addEventListener('input', () => {
+            pendingRemind = null;
+            if (dt.value === '') return;
             const ms = new Date(dt.value).getTime();
             if (!Number.isFinite(ms)) return;
-            draft.reminder = computeReminder('custom', Date.now(), ms);
-            refreshRemindInfo();
-            closePop();
+            pendingRemind = ms;
           });
           customRow.appendChild(cl);
           customRow.appendChild(dt);
@@ -900,6 +1154,7 @@ export class DomOverlay implements IOverlay {
             rm.className = 'note-rich-remind-row danger';
             rm.textContent = t('ui.remindRemove');
             rm.addEventListener('click', () => {
+              pendingRemind = null;
               draft.reminder = null;
               refreshRemindInfo();
               closePop();
@@ -910,7 +1165,7 @@ export class DomOverlay implements IOverlay {
       );
 
       // 4º ícone — lista com marcadores (☑)
-      mkBtn('☑', 'ui.checklist', () => applyToSelection(toggleChecklist));
+      mkBtn('☑', 'ui.checklist', () => applyChecklist());
 
       // 5º ícone — desenhar (✍)
       mkBtn('✍', 'ui.draw', () => {
@@ -937,7 +1192,8 @@ export class DomOverlay implements IOverlay {
       let tool: 'pen' | 'eraser' = 'pen';
       const enterDraw = () => {
         drawMode = true;
-        ta.style.display = 'none';
+        editor.style.display = 'none';
+        editor.blur();
         canvasWrap.style.display = 'flex';
         drawBar.innerHTML = '';
         const penBtn = document.createElement('button');
@@ -1041,7 +1297,7 @@ export class DomOverlay implements IOverlay {
       const exitDraw = () => {
         drawMode = false;
         canvasWrap.style.display = 'none';
-        ta.style.display = 'block';
+        editor.style.display = '';
       };
 
       // ---- Montagem + fechamento (FECHAR SALVA) ----
@@ -1055,6 +1311,8 @@ export class DomOverlay implements IOverlay {
       const finish = () => {
         if (finished) return;
         finished = true;
+        // PR13 — popover de lembrete aberto ao fechar: consolida o datetime
+        if (popEl?.classList.contains('remind')) commitRemind();
         if (drawMode) {
           // Sai do modo desenho mantendo o que há (rascunho no canvas)
           const c2 = canvas.getContext('2d');

@@ -288,6 +288,70 @@ export function applyInlineFormat(
 /** Tipos de lembrete rápido do popover "Lembrar depois". */
 export type ReminderKind = 'today' | 'tomorrow' | 'nextweek' | 'custom';
 
+/** Escapa HTML de um trecho de texto. */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Runs → HTML inline (`<b>/<i>/<u>/<s>`). */
+export function runsToHtml(runs: NoteRun[]): string {
+  let out = '';
+  for (const r of runs) {
+    let s = escapeHtml(r.text);
+    if (s === '') continue;
+    if (r.b) s = `<b>${s}</b>`;
+    if (r.i) s = `<i>${s}</i>`;
+    if (r.u) s = `<u>${s}</u>`;
+    if (r.s) s = `<s>${s}</s>`;
+    out += s;
+  }
+  return out;
+}
+
+/**
+ * PR12b — texto markdown-lite → HTML do editor RICO (contentEditable).
+ * Cada linha vira um `div.nl-line` (nl-h1/nl-h2/nl-item/nl-p); itens de
+ * checklist têm um `.nl-box` (contenteditable=false) clicável. O editor
+ * manipula este DOM e re-serializa para markdown ao digitar.
+ */
+export function noteTextToHtml(text: string): string {
+  const out: string[] = [];
+  for (const raw of text.split('\n')) {
+    let cls = 'nl-p';
+    let body = raw;
+    let done = false;
+    if (body.startsWith('# ')) {
+      cls = 'nl-h1';
+      body = body.slice(2);
+    } else if (body.startsWith('## ')) {
+      cls = 'nl-h2';
+      body = body.slice(3);
+    } else if (body.startsWith('- [x] ')) {
+      cls = 'nl-item';
+      done = true;
+      body = body.slice(6);
+    } else if (body.startsWith('- [ ] ')) {
+      cls = 'nl-item';
+      body = body.slice(6);
+    }
+    const runs = runsToHtml(parseInline(body));
+    if (cls === 'nl-item') {
+      out.push(
+        `<div class="nl-line nl-item" data-done="${done ? '1' : '0'}">` +
+          `<span class="nl-box" contenteditable="false"></span>` +
+          `<span class="nl-text">${runs}</span></div>`,
+      );
+    } else {
+      out.push(`<div class="nl-line ${cls}">${runs}</div>`);
+    }
+  }
+  return out.join('');
+}
+
 /**
  * Lembrete rápido → epoch ms a partir de `now`:
  * hoje = 18:00 (se já passou, agora+1h); amanhã = 08:00;
