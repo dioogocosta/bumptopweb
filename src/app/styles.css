@@ -240,16 +240,84 @@ body {
   padding: 8px 22px;
   min-height: 0;
 }
-.note-rich-text {
+.note-rich-content {
   flex: 1;
   border: none;
   background: transparent;
-  resize: none;
   outline: none;
   font-size: 16px;
   line-height: 1.55;
   font-family: inherit;
   color: inherit;
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
+  padding-bottom: 16px;
+}
+.note-rich-content.empty::before {
+  content: attr(data-placeholder);
+  color: rgba(31, 41, 51, 0.4);
+  position: absolute;
+  pointer-events: none;
+}
+.note-rich-content:focus {
+  outline: none;
+}
+/* Blocos do editor WYSIWYG (PR13) */
+.note-rich-content .nl-line {
+  min-height: 1.55em;
+}
+.note-rich-content .nl-h1 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 8px 0 2px;
+}
+.note-rich-content .nl-h2 {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.4;
+  margin: 6px 0 2px;
+}
+.note-rich-content .nl-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.note-rich-content .nl-box {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+  border: 2px solid #57606a;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  display: inline-block;
+}
+.note-rich-content .nl-item[data-done='1'] .nl-box {
+  background: #2f9e44;
+  border-color: #2f9e44;
+}
+.note-rich-content .nl-item[data-done='1'] .nl-box::after {
+  content: '✓';
+  position: absolute;
+  top: -3px;
+  left: 1px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.note-rich-content .nl-text {
+  min-width: 0;
+  flex: 1;
+}
+.note-rich-content .nl-item[data-done='1'] .nl-text {
+  text-decoration: line-through;
+  opacity: 0.55;
 }
 .note-rich-canvas-wrap {
   flex: 1;

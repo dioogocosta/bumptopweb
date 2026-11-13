@@ -173,10 +173,10 @@ test('menu de contexto: botão direito → criar nota → editar → excluir', a
   // Clica no item (regressão do bug: dispatch após remove() perdia o evento)
   await menu.getByText('Nova nota adesiva').click();
 
-  // Editor rico (PR12) abre → escreve e fecha (Fechar salva)
+  // Editor WYSIWYG (PR13) abre → escreve e fecha (Fechar salva)
   const editor = page.locator('[data-testid="note-rich"]');
   await expect(editor).toBeVisible();
-  await editor.locator('.note-rich-text').fill('nota do teste');
+  await editor.locator('.note-rich-content').fill('nota do teste');
   await editor.locator('.note-rich-done').click(); // Fechar salva
   await expect(editor).toHaveCount(0);
 
@@ -1163,8 +1163,8 @@ test.describe('PR10', () => {
   });
 });
 
-test.describe('PR12', () => {
-  test('nota abre o editor rico GRANDE; formatação, cor e checklist persistem em meta', async ({ page }) => {
+test.describe('PR13', () => {
+  test('nota abre o editor WYSIWYG GRANDE; negrito renderiza ao vivo e persiste', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
@@ -1176,9 +1176,9 @@ test.describe('PR12', () => {
     const notaId = await page.evaluate(() => {
       const w = window.__bumptop!.world;
       for (const o of w.listObjects()) {
-        if ((o.meta.noteText || '').includes('__p12_e2e__')) w.removeObject(o.id);
+        if ((o.meta.noteText || '').includes('__p13_e2e__')) w.removeObject(o.id);
       }
-      return w.addStickyNote({ x: 40, y: 1.2, z: -40 }, '__p12_e2e__');
+      return w.addStickyNote({ x: 40, y: 1.2, z: -40 }, 'texto p13 e2e');
     });
     await page.waitForTimeout(300);
     const tela = await page.evaluate((oid) => {
@@ -1186,7 +1186,7 @@ test.describe('PR12', () => {
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, notaId);
 
-    // Duplo-clique → modal rico GRANDE (≥80% largura)
+    // Duplo-clique → modal WYSIWYG GRANDE (≥80% largura)
     await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
     const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 5000 });
@@ -1195,19 +1195,33 @@ test.describe('PR12', () => {
     );
     expect(largura).toBeGreaterThanOrEqual(0.8);
 
-    // Formatação: seleciona e aplica B → **…**
-    const ta = page.locator('.note-rich-text');
-    await ta.fill('linha teste');
-    await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(6, 11));
+    // WYSIWYG: seleciona "p13 e2e" e aplica B → <b> NO ATO (sem ** visível)
+    const editor = page.locator('.note-rich-content');
+    await expect(editor).toBeVisible();
+    await editor.evaluate((el) => {
+      const line = el.querySelector('.nl-line')!;
+      const r = document.createRange();
+      r.selectNodeContents(line);
+      const s = window.getSelection()!;
+      s.removeAllRanges();
+      s.addRange(r);
+    });
     await page.locator('.note-rich-tool').filter({ hasText: 'Aa ▾' }).click();
     await page.locator('.note-rich-fmt-item').filter({ hasText: /^B$/ }).click();
-    await expect(ta).toHaveValue('linha **teste**');
+    await expect(editor.locator('b')).toHaveCount(1);
+    // Sem marcadores visíveis no texto renderizado
+    expect(await editor.textContent()).not.toContain('**');
+    // H1 na linha do cursor → classe nl-h1, sem # visível
+    await page.locator('.note-rich-tool').filter({ hasText: 'Aa ▾' }).click();
+    await page.locator('.note-rich-fmt-item').filter({ hasText: /^H1$/ }).click();
+    await expect(editor.locator('.nl-h1')).toHaveCount(1);
+    expect(await editor.textContent()).not.toContain('#');
 
     // Cor de fundo pela paleta
     await page.locator('.note-rich-tool').filter({ hasText: '🎨' }).click();
     await page.locator('.note-rich-swatch').nth(2).click();
 
-    // Fechar salva → meta atualizada
+    // Fechar salva → meta atualizada (modelo continua markdown-lite)
     await page.locator('.note-rich-done').click();
     await expect(modal).toHaveCount(0);
     await page.waitForTimeout(600);
@@ -1216,14 +1230,14 @@ test.describe('PR12', () => {
       return { bg: o.meta.noteBg, text: o.meta.noteText, thumb: o.meta.thumb };
     }, notaId);
     expect(meta.bg).toBe('#f28b82');
-    expect(meta.text).toBe('linha **teste**');
+    expect(meta.text).toContain('**');
     expect((meta.thumb as string).startsWith('data:image/png')).toBe(true);
 
     // limpeza
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
 
-  test('checklist ☑ e lembrete ⏰ funcionam no editor rico', async ({ page }) => {
+  test('checkbox clicável com riscado e lembrete ⏰ funcionam no editor', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
@@ -1235,9 +1249,9 @@ test.describe('PR12', () => {
     const notaId = await page.evaluate(() => {
       const w = window.__bumptop!.world;
       for (const o of w.listObjects()) {
-        if ((o.meta.noteText || '').includes('__p12_e2e__')) w.removeObject(o.id);
+        if ((o.meta.noteText || '').includes('comprar leite p13')) w.removeObject(o.id);
       }
-      return w.addStickyNote({ x: -40, y: 1.2, z: -40 }, '__p12_e2e__');
+      return w.addStickyNote({ x: -40, y: 1.2, z: -40 }, 'comprar leite p13');
     });
     await page.waitForTimeout(300);
     const tela = await page.evaluate((oid) => {
@@ -1248,32 +1262,42 @@ test.describe('PR12', () => {
     const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 5000 });
 
-    // Checklist: ☑ vira "- [ ] " e o segundo clique marca "- [x] "
-    const ta = page.locator('.note-rich-text');
-    await ta.fill('comprar leite');
-    await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, el.value.length));
+    // Checklist: ☑ cria item com box clicável (precisa do cursor numa linha)
+    const editor = page.locator('.note-rich-content');
+    await editor.click();
     await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click();
-    await expect(ta).toHaveValue('- [ ] comprar leite');
-    await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(0, el.value.length));
-    await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click();
-    await expect(ta).toHaveValue('- [x] comprar leite');
+    const item = page.locator('.note-rich-content .nl-item');
+    await expect(item).toHaveCount(1);
+    await expect(item).toHaveAttribute('data-done', '0');
+    // Clicar NO box marca ✓ (e o texto fica riscado)
+    await item.locator('.nl-box').click();
+    await expect(item).toHaveAttribute('data-done', '1');
+    const riscado = await item.evaluate(
+      (el) => getComputedStyle(el.querySelector('.nl-text')!).textDecorationLine,
+    );
+    expect(riscado).toContain('line-through');
 
     // Lembrete: popover ⏰ → "Amanhã 08:00" → chip aparece
     await page.locator('.note-rich-tool').filter({ hasText: '⏰' }).click();
     await page.locator('.note-rich-remind-row').filter({ hasText: 'Amanhã' }).click();
     await expect(page.locator('.note-rich-remind-info')).toContainText('⏰');
 
-    // Fechar salva → meta.noteReminder amanhã 08:00, não disparado
+    // Fechar salva → modelo "- [x] " + meta.noteReminder amanhã 08:00
     await page.locator('.note-rich-done').click();
     await expect(modal).toHaveCount(0);
     await page.waitForTimeout(500);
-    const rem = await page.evaluate((oid) => {
+    const salvo = await page.evaluate((oid) => {
       const o = window.__bumptop!.world.getObject(oid)!;
-      return { at: o.meta.noteReminder, fired: o.meta.noteReminderFired };
+      return {
+        text: o.meta.noteText as string,
+        at: o.meta.noteReminder,
+        fired: o.meta.noteReminderFired,
+      };
     }, notaId);
-    expect(typeof rem.at).toBe('number');
-    expect(new Date(rem.at as number).getHours()).toBe(8);
-    expect(rem.fired).toBe(false);
+    expect(salvo.text).toContain('- [x] comprar leite p13');
+    expect(typeof salvo.at).toBe('number');
+    expect(new Date(salvo.at as number).getHours()).toBe(8);
+    expect(salvo.fired).toBe(false);
 
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
