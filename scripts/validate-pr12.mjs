@@ -1,16 +1,16 @@
-/** Sonda PR12 — sistema de notas rico (estilo Keep):
+/** Sonda PR12 (regressão pós-PR13) — sistema de notas rico:
  *
- *  P12a  duplo-clique na nota abre o modal RICO GRANDE (≥80% da tela)
- *  P12b  formatação: B insere **negrito**, H1 prefixa a linha com "# ",
- *        undo (↶) volta ao texto anterior
+ *  P12a  duplo-clique abre o modal rico GRANDE (≥80% da tela)
  *  P12c  paleta: clicar uma cor muda o fundo do modal e persiste em
  *        meta.noteBg (textura regenerada)
- *  P12d  checklist: ☑ vira "- [ ] item" e toggle marca "- [x] item"
  *  P12e  desenho: ✍ abre canvas, desenhar e concluir grava meta.noteDrawing
- *  P12f  lembrete: ⏰ "Amanhã 08:00" grava meta.noteReminder; lembrete
+ *  P12f  lembrete rápido ⏰ "Amanhã 08:00" grava meta.noteReminder; lembrete
  *        vencido dispara (toast ⏰ + noteReminderFired)
  *  P12g  nota antiga (só noteText) continua renderizando a face
  *  P12h  zero erros de console
+ *
+ * (P12b/P12d — formatação e checklist — foram reescritas no PR13 WYSIWYG:
+ *  cobertas pela sonda validate-pr13.mjs.)
  *
  * Uso: BASE_URL=http://localhost:4173 node scripts/validate-pr12.mjs
  */
@@ -67,75 +67,47 @@ try {
   ids.push(notaId);
   await sleep(300);
 
-  // ---------- P12a: duplo-clique abre o modal rico GRANDE ----------
-  const tNota = await telaDe(notaId);
-  await page.mouse.dblclick(box.x + tNota.x, box.y + tNota.y);
+  const abrirModal = async () => {
+    const t = await telaDe(notaId);
+    await page.mouse.dblclick(box.x + t.x, box.y + t.y);
+    await page.locator('[data-testid="note-rich"]').waitFor({ state: 'visible', timeout: 5000 });
+    await sleep(200);
+  };
+  const fechar = async () => {
+    await page.locator('.note-rich-done').click();
+    await page.locator('[data-testid="note-rich"]').waitFor({ state: 'detached', timeout: 5000 });
+    await sleep(600);
+  };
+
+  // ---------- P12a: modal rico GRANDE ----------
+  await abrirModal();
   const modal = page.locator('[data-testid="note-rich"]');
-  const abriu = await modal.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
   const tamanho = await modal.evaluate((el) => {
     const r = el.getBoundingClientRect();
     return { w: r.width / window.innerWidth, h: r.height / window.innerHeight };
-  }).catch(() => ({ w: 0, h: 0 }));
-  check('P12a', abriu && tamanho.w >= 0.8 && tamanho.h >= 0.75,
-    `modal=${abriu} | largura ${(tamanho.w * 100).toFixed(0)}% ≥80% | altura ${(tamanho.h * 100).toFixed(0)}% ≥75%`);
+  });
+  check('P12a', tamanho.w >= 0.8 && tamanho.h >= 0.75,
+    `largura ${(tamanho.w * 100).toFixed(0)}% ≥80% | altura ${(tamanho.h * 100).toFixed(0)}% ≥75%`);
   await page.screenshot({ path: `${OUT}/p12a-modal-grande.png` });
 
-  // ---------- P12b: formatação (Aa: B / H1) + undo ----------
-  const ta = page.locator('.note-rich-text');
-  await ta.fill('linha teste');
-  await sleep(500); // deixa o snapshot de undo assentar
-  // Seleciona "teste" (índices 6..11)
-  await ta.evaluate((el) => el.setSelectionRange(6, 11));
-  // Abre o popover de formatação e clica B
-  await page.locator('.note-rich-tool').filter({ hasText: 'Aa ▾' }).click();
-  await page.locator('.note-rich-fmt-item').filter({ hasText: /^B$/ }).click();
-  const comBold = await ta.inputValue();
-  // Seleciona a 1ª linha e aplica H1
-  await ta.evaluate((el) => el.setSelectionRange(0, 3));
-  await page.locator('.note-rich-tool').filter({ hasText: 'Aa ▾' }).click();
-  await page.locator('.note-rich-fmt-item').filter({ hasText: /^H1$/ }).click();
-  const comH1 = await ta.inputValue();
-  // Undo volta ao estado antes do H1
-  await page.locator('.note-rich-tool').filter({ hasText: '↶' }).click();
-  const aposUndo = await ta.inputValue();
-  const fmtOk = comBold.includes('**teste**') && comH1.startsWith('# ') && !aposUndo.startsWith('# ');
-  check('P12b', fmtOk,
-    `B='${comBold}' | H1='${comH1.slice(0, 12)}…' | undo='${aposUndo.slice(0, 12)}…'`);
-  await page.screenshot({ path: `${OUT}/p12b-formatacao.png` });
-
   // ---------- P12c: paleta de cor de fundo ----------
+  const editor = page.locator('.note-rich-content');
+  await editor.click();
+  await page.keyboard.type('nota paleta');
   await page.locator('.note-rich-tool').filter({ hasText: '🎨' }).click();
   const swatches = page.locator('.note-rich-swatch');
   const nSw = await swatches.count();
   await swatches.nth(2).click(); // #f28b82 (coral)
   const bgModal = await modal.evaluate((el) => getComputedStyle(el).backgroundColor);
-  // Fecha (Fechar salva) e confere meta + textura nova
   const thumb0 = await page.evaluate((id) => window.__bumptop.world.getObject(id)?.meta.thumb ?? null, notaId);
-  await page.locator('.note-rich-done').click();
-  await sleep(700);
+  await fechar();
   const metaBg = await page.evaluate((id) => window.__bumptop.world.getObject(id)?.meta.noteBg ?? null, notaId);
   const thumb1 = await page.evaluate((id) => window.__bumptop.world.getObject(id)?.meta.thumb ?? null, notaId);
   check('P12c', nSw >= 8 && bgModal.includes('242, 139, 130') && metaBg === '#f28b82' && thumb0 !== thumb1,
     `paleta=${nSw} cores | modal bg=${bgModal} | meta.noteBg=${metaBg} | textura repintou=${thumb0 !== thumb1}`);
 
-  // ---------- P12d: checklist ☑ ----------
-  await page.mouse.dblclick(box.x + tNota.x, box.y + tNota.y);
-  await modal.waitFor({ state: 'visible', timeout: 5000 });
-  await ta.fill('item um');
-  await ta.evaluate((el) => el.setSelectionRange(0, 7));
-  await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click();
-  const pendente = await ta.inputValue();
-  await ta.evaluate((el) => el.setSelectionRange(0, el.value.length));
-  await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click(); // toggle → marcado
-  const marcado = await ta.inputValue();
-  await ta.evaluate((el) => el.setSelectionRange(0, el.value.length));
-  await page.locator('.note-rich-tool').filter({ hasText: '☑' }).click(); // toggle → desmarca
-  const desmarcado = await ta.inputValue();
-  check('P12d', pendente === '- [ ] item um' && marcado === '- [x] item um' && desmarcado === 'item um',
-    `pendente='${pendente}' | marcado='${marcado}' | desmarcado='${desmarcado}'`);
-  await page.screenshot({ path: `${OUT}/p12d-checklist.png` });
-
   // ---------- P12e: desenho (✍ → canvas → ✓) ----------
+  await abrirModal();
   await page.locator('.note-rich-tool').filter({ hasText: '✍' }).click();
   const canvas = page.locator('.note-rich-canvas');
   const cvis = await canvas.waitFor({ state: 'visible', timeout: 4000 }).then(() => true).catch(() => false);
@@ -149,28 +121,25 @@ try {
     }
     await page.mouse.up();
     await sleep(200);
-    // Conclui o desenho (✓ na barra do canvas)
     await page.locator('.note-rich-draw-bar button').filter({ hasText: '✓' }).click();
     await sleep(200);
-    desenhou = await ta.isVisible();
+    desenhou = await editor.isVisible();
   }
-  await page.locator('.note-rich-done').click();
-  await sleep(700);
+  await fechar();
   const noteDrawing = await page.evaluate((id) => window.__bumptop.world.getObject(id)?.meta.noteDrawing ?? null, notaId);
   check('P12e', cvis && desenhou && typeof noteDrawing === 'string' && noteDrawing.startsWith('data:image/png'),
-    `canvas=${cvis} | voltou ao texto=${desenhou} | meta.noteDrawing png=${typeof noteDrawing === 'string'}`);
+    `canvas=${cvis} | voltou ao editor=${desenhou} | meta.noteDrawing png=${typeof noteDrawing === 'string'}`);
   await page.screenshot({ path: `${OUT}/p12e-desenho.png` });
 
-  // ---------- P12f: lembrete (⏰) + disparo do agendador ----------
-  await page.mouse.dblclick(box.x + tNota.x, box.y + tNota.y);
-  await modal.waitFor({ state: 'visible', timeout: 5000 });
+  // ---------- P12f: lembrete rápido (⏰ Amanhã) + disparo do agendador ----------
+  await abrirModal();
   await page.locator('.note-rich-tool').filter({ hasText: '⏰' }).click();
+  await sleep(200);
   const amanhaRow = page.locator('.note-rich-remind-row').filter({ hasText: 'Amanhã' });
   await amanhaRow.click();
   await sleep(300);
   const chip = await page.locator('.note-rich-remind-info').textContent();
-  await page.locator('.note-rich-done').click();
-  await sleep(500);
+  await fechar();
   const lembrete = await page.evaluate((id) => {
     const o = window.__bumptop.world.getObject(id);
     return { at: o?.meta.noteReminder ?? null, fired: o?.meta.noteReminderFired };
@@ -179,7 +148,7 @@ try {
     lembrete.at !== null &&
     new Date(lembrete.at).getHours() === 8 &&
     lembrete.fired === false;
-  // Lembrete vencido → o agendador (15 s) dispara: toast ⏰ + flag
+  // Lembrete vencido → o agendador (10 s) dispara: toast ⏰ + flag
   await page.evaluate((id) => {
     const w = window.__bumptop.world;
     w.setNoteMeta(id, { noteReminder: Date.now() - 2000 });
@@ -203,8 +172,7 @@ try {
   // ---------- P12g: nota antiga (texto puro) continua renderizando ----------
   const antigaId = await page.evaluate(() => {
     const w = window.__bumptop.world;
-    const id = w.addStickyNote({ x: -40, y: 1.2, z: 40 }, 'nota antiga de texto simples');
-    return id;
+    return w.addStickyNote({ x: -40, y: 1.2, z: 40 }, 'nota antiga de texto simples');
   });
   ids.push(antigaId);
   await sleep(500);
