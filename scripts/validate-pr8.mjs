@@ -83,7 +83,8 @@ try {
     `realce arraste=${dropOk.realce}/${dropOk.saiuRealce} | objeto na cena=${objNaCena} | conteúdo no OPFS=${JSON.stringify(conteudo)}`);
   await page.screenshot({ path: `${OUT}/p8a-drop.png` });
 
-  // ---------- P8b: label da nota com texto completo + classe note ----------
+  // ---------- P8b: o texto INTEIRO está no modelo (desde o PR9 sem label
+  // DOM — o texto vive na textura da face; antes: corte em 40) ----------
   const textoLongo =
     'Primeira linha da nota com bastante texto para estourar o tamanho do card. ' +
     'Segunda linha continua o conteudo para garantir o truncamento visual. ' +
@@ -98,12 +99,16 @@ try {
     return w.addStickyNote({ x: 30, y: 6, z: 30 }, txt);
   }, textoLongo);
   await sleep(600);
-  const label = await page.evaluate(() => {
-    const el = document.querySelector('.obj-label.note');
-    return { tem: !!el, chars: el?.textContent?.length ?? 0 };
-  });
-  check('P8b', label.tem && label.chars > 100,
-    `label .note presente=${label.tem} | chars no DOM=${label.chars} (antes: corte em 40)`);
+  const nota = await page.evaluate((oid) => {
+    const o = window.__bumptop.world.getObject(oid);
+    return {
+      text: o?.meta.noteText ?? '',
+      semLabel: !document.querySelector('.obj-label.note'),
+      face: (o?.meta.thumb ?? '').startsWith('data:image/png'),
+    };
+  }, notaId);
+  check('P8b', nota.text === textoLongo && nota.semLabel && nota.face,
+    `noteText completo=${nota.text === textoLongo} | label .note ausente (PR9)=${nota.semLabel} | face png=${nota.face}`);
   await page.screenshot({ path: `${OUT}/p8b-nota-card.png` });
 
   // ---------- P8c: clique na nota → EDITOR RICO com o conteúdo COMPLETO ----------
