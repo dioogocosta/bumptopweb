@@ -1249,17 +1249,17 @@ describe('Girar, paredes e níveis de física', () => {
 });
 
 describe('Parede: prender é opcional e item preso pode ser puxado', () => {
-  it('por padrão, arremessar contra a parede NÃO prende o item', async () => {
+  it('PR11: por padrão, arremessar/arrastar até a parede PRENDE o item', async () => {
     const overlay = makeOverlayMock();
     const { world } = await makeWorld(overlay);
-    expect(world.isAutoWallPin()).toBe(false);
+    expect(world.isAutoWallPin()).toBe(true);
     const id = world.addBox({ x: 0, y: 1.6, z: -100 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
     world.processAction({ type: 'pointerDown', world: { x: 0, y: 0, z: -100 }, screen: { x: 0, y: 0 }, button: 0, pointerId: 1 });
     world.processAction({ type: 'pointerMove', world: { x: 0, y: 0, z: -140 }, screen: { x: 0, y: 0 }, pointerId: 1 });
     for (let i = 0; i < 6; i++) world.update(1 / 60);
     world.processAction({ type: 'pointerUp', world: { x: 0, y: 0, z: -140 }, screen: { x: 0, y: 0 }, pointerId: 1 });
     for (let i = 0; i < 3; i++) world.update(1 / 60);
-    expect(world.getObject(id)!.pinnedWall).toBeNull();
+    expect(world.getObject(id)!.pinnedWall).toBe(0); // prega na parede norte
   });
 
   it('PR10: item preso desliza ao longo da parede e permanece pregado', async () => {

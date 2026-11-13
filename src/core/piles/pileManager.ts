@@ -61,12 +61,23 @@ export class PileManager {
     return true;
   }
 
-  /** Remove um item de qualquer pilha; pilha com <2 itens é dissolvida. */
+  /**
+   * Remove um item de qualquer pilha; pilha com <2 itens é dissolvida.
+   * PR11 — se o item puxado é a BASE e restam ≥2 filhos, o próximo filho é
+   * promovido a base (a pilha sobrevive; nova chave retornada em baseId).
+   */
   remove(childId: string): { dissolved: boolean; baseId: string | null } {
     for (const [key, p] of this.piles) {
       const idx = p.children.indexOf(childId);
       if (idx === -1) continue;
       p.children.splice(idx, 1);
+      if (childId === key && p.children.length >= 2) {
+        // Puxou a base com filhos suficientes → promove o 1º filho
+        const newBase = p.children[0];
+        this.piles.delete(key);
+        this.piles.set(newBase, p);
+        return { dissolved: false, baseId: newBase };
+      }
       if (childId === key || p.children.length < 2) {
         this.piles.delete(key);
         return { dissolved: true, baseId: key };

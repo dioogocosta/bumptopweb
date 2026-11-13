@@ -165,6 +165,7 @@ const ptBR: Dict = {
   'toast.scrubSelected': 'Item {name} selecionado',
   'hint.scrubStrip': 'Deslize para folhear os itens da pilha',
   'hint.resizeHandle': 'Arraste para redimensionar a seleção',
+  'hint.rotateHandle': 'Clique para endireitar; arraste para girar',
 
   // --- UI geral ---
   'ui.save': 'Salvar',
@@ -178,6 +179,11 @@ const ptBR: Dict = {
   'ui.folderEmpty': '(pasta vazia)',
   'toast.pileClosed': 'Pilha fechada',
   'ui.resetCamera': 'Redefinir câmera',
+  'ui.zoomIn': 'Aproximar (zoom)',
+  'ui.zoomOut': 'Afastar (zoom)',
+  'toast.rotationReset': 'Rotação resetada',
+  'toast.zoomIn': 'Aproximando',
+  'toast.zoomOut': 'Afastando',
 
   // --- Toast de atualização da PWA (index.html) ---
   'pwa.update': 'Atualização disponível.',
@@ -336,6 +342,7 @@ const en: Dict = {
   'toast.scrubSelected': 'Item {name} selected',
   'hint.scrubStrip': 'Scrub through pile items',
   'hint.resizeHandle': 'Drag to resize selection',
+  'hint.rotateHandle': 'Click to straighten; drag to rotate',
 
   // --- General UI ---
   'ui.save': 'Save',
@@ -349,6 +356,11 @@ const en: Dict = {
   'ui.folderEmpty': '(empty folder)',
   'toast.pileClosed': 'Pile closed',
   'ui.resetCamera': 'Reset camera',
+  'ui.zoomIn': 'Zoom in',
+  'ui.zoomOut': 'Zoom out',
+  'toast.rotationReset': 'Rotation reset',
+  'toast.zoomIn': 'Zooming in',
+  'toast.zoomOut': 'Zooming out',
 
   // --- PWA update toast (index.html) ---
   'pwa.update': 'Update available.',

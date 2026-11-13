@@ -127,6 +127,59 @@ body {
   z-index: 11;
 }
 
+/* Handle de rotação (PR11): ícone de seta circular ao lado do resize */
+.rotate-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  background: var(--accent);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+  color: #fff;
+}
+
+/* Controles de zoom na tela (PR11): botões lupa + / lupa - (topo-esquerda,
+ * longe do reset-cam (topo-dir) e do ponto de foco da parede (topo-centro)) */
+.zoom-controls {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 40;
+  pointer-events: auto;
+}
+.zoom-controls button {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.8);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.zoom-controls button:hover {
+  background: rgba(30, 41, 59, 0.95);
+}
+.zoom-controls button:active {
+  transform: scale(0.92);
+}
+
 /* Pile Widget Halo (P1 — anel de widgets ao redor da pilha) */
 .pile-halo {
   position: absolute;
