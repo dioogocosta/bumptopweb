@@ -106,19 +106,21 @@ try {
     `label .note presente=${label.tem} | chars no DOM=${label.chars} (antes: corte em 40)`);
   await page.screenshot({ path: `${OUT}/p8b-nota-card.png` });
 
-  // ---------- P8c: clique na nota → conteúdo COMPLETO no modal ----------
+  // ---------- P8c: clique na nota → EDITOR RICO com o conteúdo COMPLETO ----------
+  // (PR14: o card escuro de leitura saiu — o clique abre o editor rico)
   const tela = await page.evaluate((oid) => {
     const pos = window.__bumptop.world.getObject(oid).pose.position;
     return window.__bumptop.renderer.projectToScreen(pos);
   }, notaId);
   const box = await page.locator('#scene-root canvas').boundingBox();
   await page.mouse.click(box.x + tela.x, box.y + tela.y);
-  const modal = page.locator('[data-testid="file-preview"]');
+  const modal = page.locator('[data-testid="note-rich"]');
   const modalOk = await modal.waitFor({ state: 'visible', timeout: 4000 }).then(() => true).catch(() => false);
-  const mostrado = modalOk ? await modal.locator('.file-preview-text').textContent() : '';
+  const semLeitorEscuro = (await page.locator('[data-testid="file-preview"]').count()) === 0;
+  const mostrado = modalOk ? await page.locator('.note-rich-content').textContent() : '';
   await page.keyboard.press('Escape');
-  check('P8c', modalOk && mostrado === textoLongo,
-    `modal abriu=${modalOk} | conteúdo completo=${mostrado === textoLongo} (${(mostrado || '').length} chars)`);
+  check('P8c', modalOk && semLeitorEscuro && (mostrado || '').includes(textoLongo),
+    `editor rico abriu=${modalOk} | card escuro ausente=${semLeitorEscuro} | conteúdo completo=${(mostrado || '').includes(textoLongo)} (${(mostrado || '').length} chars)`);
   await page.screenshot({ path: `${OUT}/p8c-leitor-nota.png` });
 
   // ---------- P8d: menu "Salvar no computador" dispara download ----------

@@ -1336,9 +1336,15 @@ export class DomOverlay implements IOverlay {
         if (e.key === 'Escape') finish();
       };
       document.addEventListener('keydown', onKey);
+      // PR14 — guard: o 2º clique de um duplo-clique na nota cai no backdrop
+      // (o modal acabou de cobrir o canvas) e fecharia o editor na sequência.
+      // Cliques no backdrop nos primeiros 350 ms são ignorados.
+      const openedAt = Date.now();
       closeBtn.addEventListener('click', () => finish());
       backdrop.addEventListener('click', (e) => {
-        if (e.target === backdrop) finish();
+        if (e.target !== backdrop) return;
+        if (Date.now() - openedAt < 350) return;
+        finish();
       });
       // Clique fora fecha popover (não o modal)
       modal.addEventListener('pointerdown', (e) => {

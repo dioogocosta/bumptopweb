@@ -679,11 +679,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   });
 
   // -------------------------------------------------------------------------
-  // PR8 — clique numa nota adesiva lê o conteúdo completo (modal de texto).
-  // Clique vs. arrastar (moveu >6 px) vs. duplo-clique (abre o editor —
-  // 260 ms de espera, cancelado pelo dblclick).
+  // PR8/PR14 — clique numa nota adesiva abre o EDITOR RICO direto (sem o
+  // card escuro de leitura). Clique vs. arrastar (moveu >6 px). O
+  // duplo-clique também abre (fallback — normalmente o 1º clique já abriu
+  // o modal, que cobre o canvas e engole o resto do duplo-clique).
   // -------------------------------------------------------------------------
-  let noteClickTimer: number | null = null;
   let downScreen: { x: number; y: number } | null = null;
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button === 0) downScreen = { x: e.clientX, y: e.clientY };
@@ -697,18 +697,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     const s = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     const target = world.pickObjectAt(resolveFloor(s), s);
     if (!target || !world.isStickyNote(target)) return;
-    if (noteClickTimer !== null) window.clearTimeout(noteClickTimer);
-    noteClickTimer = window.setTimeout(() => {
-      noteClickTimer = null;
-      const o = world.getObject(target);
-      const texto = (o?.meta.noteText as string) || '';
-      const titulo = (o?.meta.noteTitle as string) || '';
-      overlay.showPreview({
-        name: titulo !== '' ? titulo : t('ui.noteTitle'),
-        mime: 'text/plain',
-        text: texto === '' ? t('ui.noteEmpty') : texto,
-      });
-    }, 260);
+    openNoteEditor(target);
   });
 
   // Duplo-clique (desktop) → em pilha: abre em leque; em nota: edita texto;
@@ -749,12 +738,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       return;
     }
     if (world.isStickyNote(target)) {
-      // O clique simples abre o leitor (com atraso p/ desambiguar do
-      // duplo-clique); o duplo-clique abre o EDITOR RICO (PR12) — cancela o leitor.
-      if (noteClickTimer !== null) {
-        window.clearTimeout(noteClickTimer);
-        noteClickTimer = null;
-      }
+      // Fallback: se o 1º clique não abriu o editor (ex.: foi arrasto),
+      // o duplo-clique abre. O caso normal o modal já cobre o canvas.
       openNoteEditor(target);
       return;
     }
