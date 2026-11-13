@@ -125,7 +125,7 @@ export class World {
   private wallFocus: { azimuth: number; elevation: number; distance: number; target: Vec3 } | null = null;
   private physicsLevel: PhysicsLevel;
   /** Prender automaticamente na parede ao arremessar/arrastar até ela (desligado: o item bate e volta). */
-  private autoWallPin = false;
+  private autoWallPin = true; // arrastar até qualquer parede prega automaticamente
   /** ids lançados recentemente (TTL em s) → elegíveis a WallToss. */
   private recentToss = new Map<string, number>();
 
@@ -444,6 +444,19 @@ export class World {
       // Shove (M5): arrastar o CHÃO com o dedo empurra os objetos próximos
       this.shoving = true;
       this.lastShovePoint = worldPoint;
+      return;
+    }
+
+    // PR11 — item de pilha aberta (grid): arrasto direto (puxa da pilha e arrasta)
+    if (this.piles.contains(hit) && this.isPileOpen(hit)) {
+      this.pullFromPile(hit);
+      this.pickedId = hit;
+      const e = this.entries.get(hit)!;
+      this.dragHeight = e.data.pose.position.y;
+      this.downWorld = { ...worldPoint };
+      this.deps.physics.setFrozen(e.body, true);
+      this.drag.begin(e.data.pose.position, worldPoint);
+      this.dirty = true;
       return;
     }
 
@@ -904,8 +917,16 @@ export class World {
   private pullFromPile(objectId: string): void {
     const baseBefore = this.piles.baseOf(objectId);
     const membersBefore = baseBefore ? [...(this.piles.getState(baseBefore)?.children ?? [])] : [];
-    const shouldExplode = this.explodingPiles && baseBefore !== null && membersBefore.length > 2;
+    // PR11 — pilha ABERTA em grade: puxar um item NÃO explode o restante
+    // (o usuário está organizando; a explosão P1 vale só para pilhas fechadas)
+    const shouldExplode = this.explodingPiles && !this.isPileOpen(objectId) &&
+      baseBefore !== null && membersBefore.length > 2;
     const { dissolved, baseId } = this.piles.remove(objectId);
+    // PR11 — a base puxada promoveu um novo base: acompanha o re-key
+    if (baseId && baseBefore && baseId !== baseBefore) {
+      if (this.hoveredPileId === baseBefore) this.hoveredPileId = baseId;
+      if (this.openGridPileId === baseBefore) this.openGridPileId = baseId;
+    }
 
     if (shouldExplode) {
       // Exploding piles (P1): puxar um item explode/espalha o restante da pilha
@@ -1623,13 +1644,25 @@ export class World {
     this.dirty = true;
   }
 
-  /** Alterna o pin na parede 0 (norte) — atalho/menu simplificado. */
+  /** Alterna o pin na parede mais próxima do objeto (0=N, 1=S, 2=O, 3=L). */
   togglePin(objectId: string): boolean {
     const e = this.entries.get(objectId);
     if (!e) return false;
-    const next = e.data.pinnedWall === null ? 0 : null;
-    this.pinToWall(objectId, next);
-    return next !== null;
+    const cur = e.data.pinnedWall;
+    if (cur !== null) {
+      // Já está pregado: desprega
+      this.pinToWall(objectId, null);
+      return false;
+    }
+    // Não está pregado: prega na parede mais próxima (com base na posição)
+    const wall = this.wallContact(e);
+    if (wall !== null) {
+      this.pinToWall(objectId, wall);
+      return true;
+    }
+    // Sem parede por perto: prega na parede norte (0) como fallback
+    this.pinToWall(objectId, 0);
+    return true;
   }
 
   /**
@@ -1989,6 +2022,17 @@ export class World {
     }
     if (targets.length > 0) this.dirty = true;
     return targets.length;
+  }
+
+  /** Define a rotação absoluta (quat) de um único objeto solto. */
+  rotateSelectionTo(id: string, quat: { x: number; y: number; z: number; w: number }): void {
+    const e = this.entries.get(id);
+    if (!e || e.data.pinnedWall != null || this.piles.contains(id)) return;
+    this.deps.physics.setRotation(e.body, quat);
+    e.data.pose = { position: e.data.pose.position, rotation: quat };
+    const inside = this.clampToRoom(e, e.data.pose.position);
+    this.placeAt(e, inside);
+    this.dirty = true;
   }
 
   /** Nível de física: 1 = interação visual, 2 = física real (caixas colidem). */
@@ -2569,6 +2613,13 @@ export class World {
   /** Preset de câmera (teclas 1..4) — espelha os views do BT_Camera. */
   setCameraPreset(n: number): void {
     this.camera.preset(n);
+    this.deps.renderer.setCamera(this.camera.getState());
+    this.dirty = true;
+  }
+
+  /** Zoom da câmera (delta negativo aproxima, positivo afasta). */
+  zoomCamera(delta: number): void {
+    this.camera.zoom(delta);
     this.deps.renderer.setCamera(this.camera.getState());
     this.dirty = true;
   }

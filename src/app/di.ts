@@ -771,6 +771,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       toastScale(world.scaleSelection(1));
     } else if (e.key === '-' || e.key === '_') {
       toastScale(world.scaleSelection(-1));
+    } else if (e.key === 'PageUp') {
+      // PR11 — zoom da câmera: aproximar (delta na escala do wheel: ~±100)
+      world.zoomCamera(-80);
+    } else if (e.key === 'PageDown') {
+      // PR11 — zoom da câmera: afastar
+      world.zoomCamera(80);
     } else if (e.key === 't' || e.key === 'T') {
       const next = (themeIdxRef.value + 1) % THEMES.length;
       themeIdxRef.value = next;
@@ -867,7 +873,54 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     e.stopPropagation();
   });
 
-  // PR9 — ✕ da pilha aberta em grade → fecha (volta a Stack)
+  // PR11 — handle de rotação: clique reseta (reto), arrastar gira em Y
+  overlay.onRotateStart((e: PointerEvent) => {
+    const ids = world.getSelectedIds();
+    if (ids.length === 0) return;
+    const id = ids[0];
+    const obj = world.getObject(id);
+    if (!obj) return;
+    // Clique simples (sem movimento) = reseta rotação para 0 (reto)
+    const rot0 = obj.pose.rotation;
+    const startScreen = { x: e.clientX, y: e.clientY };
+    let moved = false;
+    const onMove = (me: PointerEvent) => {
+      const dx = me.clientX - startScreen.x;
+      if (Math.abs(dx) > 4) moved = true;
+      // Giro em torno do eixo Y proporcional ao movimento horizontal
+      const angle = (dx * 0.01) % (Math.PI * 2);
+      const q = { x: 0, y: Math.sin(angle / 2), z: 0, w: Math.cos(angle / 2) };
+      // Aplica delta sobre a rotação inicial (quat = q * rot0)
+      const r = rot0;
+      const next = {
+        x: r.w * q.x + r.x * q.w + r.y * q.z - r.z * q.y,
+        y: r.w * q.y - r.x * q.z + r.y * q.w + r.z * q.x,
+        z: r.w * q.z + r.x * q.y - r.y * q.x + r.z * q.w,
+        w: r.w * q.w - r.x * q.x - r.y * q.y - r.z * q.z,
+      };
+      // rotateSelectionTo já marca o mundo como dirty
+      world.rotateSelectionTo(id, next);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (!moved) {
+        // Clique parado → reseta rotação (reto)
+        world.rotateSelectionTo(id, { x: 0, y: 0, z: 0, w: 1 });
+        overlay.toast(t('toast.rotationReset'));
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  // PR11 — botões de zoom na tela (delta na escala do wheel)
+  overlay.onZoom(
+    () => { world.zoomCamera(-60); overlay.toast(t('toast.zoomIn')); },
+    () => { world.zoomCamera(60); overlay.toast(t('toast.zoomOut')); },
+  );
   overlay.onPileCloseClick(() => {
     if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));
   });
@@ -953,11 +1006,15 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         }
         if (anyVisible) {
           overlay.setResizeHandle({ x: maxX, y: minY });
+          // PR11 — handle de rotação no canto oposto (inf-esq)
+          overlay.setRotateHandle({ x: minX, y: maxY });
         } else {
           overlay.setResizeHandle(null);
+          overlay.setRotateHandle(null);
         }
       } else {
         overlay.setResizeHandle(null);
+        overlay.setRotateHandle(null);
       }
 
       // PR9 — pilha aberta em grade: painel de vidro no piso + botão ✕

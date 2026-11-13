@@ -41,6 +41,14 @@ export class DomOverlay implements IOverlay {
   private folderEl: HTMLDivElement | null = null;
   private folderCleanup: (() => void) | null = null;
 
+  /** PR11 — handle de rotação do selecionado (canto do bbox). */
+  private rotateEl: HTMLDivElement | null = null;
+  private rotateCb: ((e: PointerEvent) => void) | null = null;
+
+  /** PR11 — botões de zoom na tela (topo). */
+  private zoomCbIn: (() => void) | null = null;
+  private zoomCbOut: (() => void) | null = null;
+
   constructor(root: HTMLElement) {
     this.root = root;
     root.style.position = 'fixed';
@@ -59,6 +67,25 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('resetcamera', { bubbles: true }));
     });
     this.root.appendChild(reset);
+
+    // PR11 — controles de zoom na tela (topo central)
+    const zoomWrap = document.createElement('div');
+    zoomWrap.className = 'zoom-controls';
+    const btnIn = document.createElement('button');
+    btnIn.type = 'button';
+    btnIn.title = t('ui.zoomIn');
+    btnIn.setAttribute('aria-label', t('ui.zoomIn'));
+    btnIn.textContent = '🔍+';
+    btnIn.addEventListener('click', () => this.zoomCbIn?.());
+    const btnOut = document.createElement('button');
+    btnOut.type = 'button';
+    btnOut.title = t('ui.zoomOut');
+    btnOut.setAttribute('aria-label', t('ui.zoomOut'));
+    btnOut.textContent = '🔍-';
+    btnOut.addEventListener('click', () => this.zoomCbOut?.());
+    zoomWrap.appendChild(btnIn);
+    zoomWrap.appendChild(btnOut);
+    this.root.appendChild(zoomWrap);
   }
 
   showContextMenu(screen: { x: number; y: number }, items: ContextMenuItem[]): void {
@@ -397,6 +424,46 @@ export class DomOverlay implements IOverlay {
   /** Registra o callback de início do gesto de resize. */
   onResizeStart(cb: (e: PointerEvent) => void): void {
     this.resizeCb = cb;
+  }
+
+  /**
+   * Handle de rotação (PR11): círculo no canto do bbox da seleção.
+   * Clique = reseta rotação (reto); arrastar = gira em torno do eixo Y.
+   */
+  setRotateHandle(screen: { x: number; y: number } | null): void {
+    if (screen === null) {
+      if (this.rotateEl) this.rotateEl.style.display = 'none';
+      return;
+    }
+    if (!this.rotateEl) {
+      const el = document.createElement('div');
+      el.className = 'rotate-handle';
+      el.title = t('hint.rotateHandle');
+      el.setAttribute('aria-label', t('hint.rotateHandle'));
+      el.textContent = '↻';
+      el.style.pointerEvents = 'auto';
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.rotateCb?.(e);
+      });
+      this.root.appendChild(el);
+      this.rotateEl = el;
+    }
+    this.rotateEl.style.display = 'block';
+    this.rotateEl.style.left = `${screen.x}px`;
+    this.rotateEl.style.top = `${screen.y}px`;
+  }
+
+  /** Registra o callback de início do gesto de rotação. */
+  onRotateStart(cb: (e: PointerEvent) => void): void {
+    this.rotateCb = cb;
+  }
+
+  /** Registra callbacks dos botões de zoom na tela. */
+  onZoom(cbIn: () => void, cbOut: () => void): void {
+    this.zoomCbIn = cbIn;
+    this.zoomCbOut = cbOut;
   }
 
   /**
