@@ -148,3 +148,51 @@ test('PR15: modo laço no toque — botão liga, arrasto seleciona vários, toqu
   expect(await page.evaluate(() => window.__bumptop!.world.isLassoMode())).toBe(false);
   await expect(page.locator('.lasso-btn.sel')).toHaveCount(0);
 });
+
+// -------------------------------------------------------------------------
+// PR17 — teclado no celular: o editor da nota vira FOLHA em tela cheia
+// (viewport com interactive-widget=resizes-content + CSS mobile), então o
+// teclado nunca cobre o campo de digitação nem a barra de ferramentas.
+// -------------------------------------------------------------------------
+test('PR17: editor da nota em folha tela-cheia no mobile + meta resizes-content', async ({ page }) => {
+  // 1) meta viewport pede resize do conteúdo com o teclado (Chrome/Android)
+  const meta = await page.evaluate(() =>
+    document.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? '',
+  );
+  expect(meta).toContain('interactive-widget=resizes-content');
+
+  // Nota de teste e clique → editor rico
+  const notaId = await page.evaluate(() => {
+    const w = window.__bumptop!.world;
+    for (const o of w.listObjects()) {
+      if (((o.meta?.noteText as string) || '').includes('NOTA P17')) w.removeObject(o.id);
+    }
+    return w.addStickyNote({ x: -18, y: 1.6, z: -18 }, 'NOTA P17 folha');
+  });
+  await page.waitForTimeout(400);
+  const tela = await page.evaluate((oid) => {
+    const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+    return window.__bumptop!.renderer.projectToScreen(pos);
+  }, notaId);
+  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  await page.mouse.click(box.x + tela.x, box.y + tela.y);
+  const modal = page.locator('[data-testid="note-rich"]');
+  await expect(modal).toBeVisible({ timeout: 4000 });
+
+  // 2) No mobile o modal OCUPA A TELA TODA (folha), sem margens
+  const mb = (await modal.boundingBox())!;
+  const vp = page.viewportSize()!;
+  expect(mb.x).toBeLessThanOrEqual(1);
+  expect(mb.y).toBeLessThanOrEqual(1);
+  expect(Math.abs(mb.width - vp.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(mb.height - vp.height)).toBeLessThanOrEqual(2);
+
+  // 3) A barra de ferramentas fica DENTRO da tela (acima do teclado quando
+  // ele abrir — o viewport encolhe e a folha acompanha)
+  const tb = (await page.locator('.note-rich-toolbar').boundingBox())!;
+  expect(tb.y + tb.height).toBeLessThanOrEqual(vp.height + 1);
+
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0);
+  await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+});

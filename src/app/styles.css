@@ -208,6 +208,20 @@ body {
   overflow: hidden;
   color: #1f2933;
 }
+/* PR17 — no celular o editor vira FOLHA em tela cheia (estilo Google Keep):
+   com `interactive-widget=resizes-content` o viewport encolhe quando o
+   teclado abre e a barra de ferramentas fica LOGO ACIMA dele. */
+@media (max-width: 640px) {
+  .note-rich-backdrop {
+    align-items: stretch;
+  }
+  .note-rich-modal {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
 .note-rich-head {
   display: flex;
   align-items: center;

@@ -1488,6 +1488,22 @@ export class DomOverlay implements IOverlay {
       this.root.appendChild(backdrop);
 
       let finished = false;
+      // PR17 — teclado no celular: fallback (iOS/Android sem
+      // `interactive-widget=resizes-content`) — encosta o modal na área
+      // VISÍVEL do visualViewport enquanto o teclado estiver aberto.
+      const vp = window.visualViewport;
+      const fitKb = () => {
+        if (!vp) return;
+        const tecladoAberto = vp.height + vp.offsetTop < window.innerHeight - 60;
+        if (tecladoAberto) {
+          modal.style.height = `${Math.max(280, Math.round(vp.height - 2))}px`;
+        } else {
+          modal.style.height = '';
+        }
+      };
+      vp?.addEventListener('resize', fitKb);
+      vp?.addEventListener('scroll', fitKb);
+      fitKb();
       const finish = () => {
         if (finished) return;
         finished = true;
@@ -1508,6 +1524,9 @@ export class DomOverlay implements IOverlay {
             if (ink) draft.drawing = canvas.toDataURL('image/png');
           }
         }
+        vp?.removeEventListener('resize', fitKb);
+        vp?.removeEventListener('scroll', fitKb);
+        modal.style.height = '';
         backdrop.remove();
         document.removeEventListener('keydown', onKey);
         resolve({ ...draft });
