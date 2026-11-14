@@ -385,6 +385,97 @@ describe('World + pilhas (M3)', () => {
 // ---------------------------------------------------------------------------
 
 describe('Fase 7: laço (lasso) e seleção múltipla', () => {
+  it('PR15: modo laço p/ TOQUE — arrastar o dedo no chão vazio desenha o laço', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    const a = world.addBox({ x: 10, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'a.txt');
+    const b = world.addBox({ x: 40, y: 1.6, z: 0 }, { x: 7, y: 1.6, z: 7 }, '#fff', 'b.txt');
+    vi.mocked(renderer.projectToScreen).mockImplementation((p) => ({
+      x: p.x * 10,
+      y: p.z * 10,
+      visible: true,
+    }));
+
+    // Sem o modo: toque no chão vazio = shove (NÃO laço)
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 0, y: 0 },
+      button: 0,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 500, y: 100 },
+      pointerId: 1,
+    });
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 500, y: 100 },
+      pointerId: 1,
+    });
+    expect(world.getSelectedIds()).toHaveLength(0);
+
+    // Liga o modo laço → o MESMO gesto de toque agora desenha o laço
+    world.setLassoMode(true);
+    expect(world.isLassoMode()).toBe(true);
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 0, y: 0 },
+      button: 0,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    world.processAction({
+      type: 'pointerMove',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 500, y: 100 },
+      pointerId: 2,
+    });
+    expect(world.getSelectedIds()).toContain(a);
+    expect(world.getSelectedIds()).toContain(b);
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 500, y: 100 },
+      pointerId: 2,
+    });
+    expect(world.getSelectedIds()).toHaveLength(2);
+    // Laço fechado de verdade mantém o modo ligado
+    expect(world.isLassoMode()).toBe(true);
+  });
+
+  it('PR15: toque PARADO no chão (tap) no modo laço DESLIGA o modo', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    vi.mocked(renderer.projectToScreen).mockImplementation((p) => ({
+      x: p.x * 10,
+      y: p.z * 10,
+      visible: true,
+    }));
+    world.setLassoMode(true);
+    // Toque parado (down + up sem mover) → sai do modo
+    world.processAction({
+      type: 'pointerDown',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 200, y: 200 },
+      button: 0,
+      pointerId: 1,
+      pointerType: 'touch',
+    });
+    world.processAction({
+      type: 'pointerUp',
+      world: { x: -100, y: 0, z: -100 },
+      screen: { x: 202, y: 201 },
+      pointerId: 1,
+    });
+    expect(world.isLassoMode()).toBe(false);
+  });
+
   it('mouse no chão vazio inicia o laço e o retângulo de tela seleciona por projeção', async () => {
     const overlay = makeOverlayMock();
     const { world, renderer } = await makeWorld(overlay);

@@ -23,6 +23,8 @@ export class DomOverlay implements IOverlay {
   private menuCleanup: (() => void) | null = null;
   private resizeCb: ((e: PointerEvent) => void) | null = null;
   private haloEl: HTMLDivElement | null = null;
+  /** PR15 — botão "Modo laço" (seleção múltipla no toque). */
+  private lassoBtn: HTMLButtonElement | null = null;
   private haloHovered = false;
   private haloActionCb: ((pileId: string, action: string) => void) | null = null;
   private haloCurrentPileId: string | null = null;
@@ -86,7 +88,25 @@ export class DomOverlay implements IOverlay {
     btnOut.addEventListener('click', () => this.zoomCbOut?.());
     zoomWrap.appendChild(btnIn);
     zoomWrap.appendChild(btnOut);
+    // PR15 — botão "Modo laço": no TOQUE, arrastar o dedo no chão vazio
+    // desenha o laço (seleção múltipla). Liga/desliga por aqui ou com um
+    // toque parado no chão (o World avisa via onLassoModeChanged).
+    this.lassoBtn = document.createElement('button');
+    this.lassoBtn.type = 'button';
+    this.lassoBtn.className = 'lasso-btn';
+    this.lassoBtn.title = t('ui.lassoMode');
+    this.lassoBtn.setAttribute('aria-label', t('ui.lassoMode'));
+    this.lassoBtn.textContent = '⬭';
+    this.lassoBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('lassomode', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.lassoBtn);
     this.root.appendChild(zoomWrap);
+  }
+
+  /** PR15 — estado visual do botão "Modo laço" (ligado = realçado). */
+  setLassoModeActive(on: boolean): void {
+    this.lassoBtn?.classList.toggle('sel', on);
   }
 
   showContextMenu(screen: { x: number; y: number }, items: ContextMenuItem[]): void {

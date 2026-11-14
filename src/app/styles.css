@@ -157,9 +157,12 @@ body {
   display: flex;
   gap: 6px;
   z-index: 40;
-  pointer-events: auto;
+  /* PR15: o wrapper não captura ponteiro — só os botões. Assim arrastos
+     na cena que passam pelos VAZIOS entre botões chegam ao canvas. */
+  pointer-events: none;
 }
 .zoom-controls button {
+  pointer-events: auto;
   width: 32px;
   height: 32px;
   border: none;
@@ -178,6 +181,11 @@ body {
 }
 .zoom-controls button:active {
   transform: scale(0.92);
+}
+/* PR15 — botão "Modo laço" (mesma barra dos controles de zoom) */
+.zoom-controls .lasso-btn.sel {
+  background: #2f6fed;
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 /* ===== PR12 — Editor rico de nota (modal grande estilo Keep) ===== */
