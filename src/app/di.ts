@@ -817,6 +817,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   const onResetCamera = () => world.setCameraPreset(1);
   overlayRoot.addEventListener('resetcamera', onResetCamera);
 
+  // PR15 — botão "Modo laço" (seleção múltipla no toque): liga/desliga o
+  // modo no World e sincroniza o estado visual do botão (+ toast de ajuda)
+  overlayRoot.addEventListener('lassomode', () => {
+    world.setLassoMode(!world.isLassoMode());
+  });
+  world.onLassoModeChanged((on) => {
+    overlay.setLassoModeActive(on);
+    overlay.toast(t(on ? 'toast.lassoOn' : 'toast.lassoOff'));
+  });
+
   // Persistência: carrega cena salva ou cria cenário de demonstração
   const saved = await repo.loadScene();
   if (saved && saved.objects.length > 0) {

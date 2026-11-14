@@ -199,7 +199,11 @@ export class PointerInput implements IInput {
 
   private onUp = (e: PointerEvent): void => {
     if (!this.target) return;
-    this.target.releasePointerCapture?.(e.pointerId);
+    // try/catch: eventos sintéticos (testes) ou ponteiros já soltos lançam
+    // NotFoundError — sem o guard, o pointerUp nunca chega ao World.
+    try {
+      this.target.releasePointerCapture?.(e.pointerId);
+    } catch { /* ignora */ }
     const s = this.local(e);
     this.pointers.delete(e.pointerId);
     this.clearLongPress();

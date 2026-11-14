@@ -117,6 +117,9 @@ export class World {
   private lassoClosed = false;
   private lassoCrossTarget: { x: number; y: number } | null = null;
   private lassoMenuListener: LassoMenuListener | null = null;
+  /** PR15 — modo laço p/ TOQUE: ligado, arrastar o dedo no chão desenha o laço. */
+  private lassoMode = false;
+  private lassoModeListener: ((on: boolean) => void) | null = null;
   private group: GroupMember[] = [];
   private groupStartScreen: { x: number; y: number } | null = null;
   private groupMoved = false;
@@ -477,8 +480,10 @@ export class World {
 
     if (!hit) {
       // Original: LassoMenu inicia no chão vazio com MOUSE; ShoveGesture é
-      // gesto de TOQUE (contato largo). Aqui: mouse/pen → laço, toque → shove.
-      if (!isTouch) {
+      // gesto de TOQUE (contato largo). Aqui: mouse/pen → laço, toque →
+      // shove — EXCETO no MODO LAÇO (PR15, botão na tela): com ele ligado,
+      // o toque no chão também desenha o laço (seleção múltipla mobile).
+      if (!isTouch || this.lassoMode) {
         this.lassoing = true;
         this.lassoStart = { ...a.screen };
         this.lassoPoints = [{ ...a.screen }];
@@ -856,6 +861,15 @@ export class World {
         end !== null &&
         Math.hypot(end.x - start.x, end.y - start.y) <= LASSO_START_RADIUS;
       const openMenu = this.lassoClosed && inDisc && this.selectedIds.size > 0;
+      // PR15 — no modo laço, TOQUE PARADO no chão (sem desenhar) desliga o
+      // modo (mesmo efeito do botão). Laço fechado de verdade mantém o modo.
+      if (this.lassoMode && !openMenu && start) {
+        const spread = this.lassoPoints.reduce(
+          (m, p) => Math.max(m, Math.hypot(p.x - start.x, p.y - start.y)),
+          0,
+        );
+        if (spread < 8) this.setLassoMode(false);
+      }
       this.endLasso();
       if (openMenu && start) this.lassoMenuListener?.(start, [...this.selectedIds]);
       return;
@@ -2355,6 +2369,23 @@ export class World {
   /** Lasso'n'Cross / LassoMenu: callback ao fechar o laço e soltar no disco azul. */
   onLassoMenu(listener: LassoMenuListener | null): void {
     this.lassoMenuListener = listener;
+  }
+
+  /** PR15 — modo laço p/ toque (botão na tela): ligado, toque+arrasto no chão vazio desenha o laço. */
+  setLassoMode(on: boolean): void {
+    if (this.lassoMode === on) return;
+    this.lassoMode = on;
+    this.lassoModeListener?.(on);
+    this.dirty = true;
+  }
+
+  isLassoMode(): boolean {
+    return this.lassoMode;
+  }
+
+  /** Avisa quando o modo laço muda (inclusive pela saída por toque no chão). */
+  onLassoModeChanged(listener: ((on: boolean) => void) | null): void {
+    this.lassoModeListener = listener;
   }
 
   /** Estado do laço (p/ testes e overlay). */
