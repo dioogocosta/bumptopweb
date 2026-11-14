@@ -14,6 +14,99 @@ import type {
   ScrubStripData,
 } from '@core/ports/index';
 
+// -------------------------------------------------------------------------
+// PR16 — colar com formatação: HTML da área de transferência → markdown-lite
+// -------------------------------------------------------------------------
+type MdStyles = { b: boolean; i: boolean; u: boolean; s: boolean };
+
+const MD_BLOCK_TAGS = new Set([
+  'DIV', 'P', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+  'BLOCKQUOTE', 'PRE', 'TABLE', 'TR', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER',
+]);
+const MD_SKIP_TAGS = new Set(['STYLE', 'SCRIPT', 'SVG', 'IMG', 'PICTURE', 'VIDEO', 'AUDIO', 'CANVAS', 'IFRAME']);
+
+/** Estilos inline suportados pelo markdown-lite das notas. */
+const mdInlineStyle = (tag: string, st: MdStyles): MdStyles | null => {
+  const s2: MdStyles = { ...st };
+  if (tag === 'B' || tag === 'STRONG') s2.b = true;
+  else if (tag === 'I' || tag === 'EM') s2.i = true;
+  else if (tag === 'U' || tag === 'INS') s2.u = true;
+  else if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL') s2.s = true;
+  else return null;
+  return s2;
+};
+
+/**
+ * PR16 — converte HTML colado (ex.: Google Keep, Gmail, Word) nos blocos do
+ * editor rico: UM `nl-line` por parágrafo/`<br>`, negrito/itálico/sublinhado/
+ * riscado viram os marcadores `**`/`*`/`__`/`~~`; links e demais elementos
+ * contribuem só o texto. Sem isto, o colar nativo injeta o HTML cru dentro
+ * de UMA linha e a serialização ignora as quebras — tudo gruda num blob.
+ */
+export function htmlToNoteMd(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const lines: string[] = [];
+  let cur = '';
+  const flush = () => {
+    lines.push(cur);
+    cur = '';
+  };
+  // Espaços/quebras de texto corrido colapsam; quebras de BLOCO são reais
+  const collapse = (s: string) => s.replace(/\s+/g, ' ');
+
+  const walk = (n: Node, st: MdStyles): void => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      cur += collapse(n.textContent ?? '');
+      return;
+    }
+    if (n.nodeType !== Node.ELEMENT_NODE) return;
+    const el = n as Element;
+    const tag = el.tagName;
+    if (MD_SKIP_TAGS.has(tag)) return;
+    if (tag === 'BR') {
+      flush();
+      return;
+    }
+    if (MD_BLOCK_TAGS.has(tag)) {
+      // Bloco próprio: fecha a linha atual (se houver conteúdo), caminha os
+      // filhos e fecha o bloco como linha própria (vazio = linha em branco)
+      if (cur !== '') flush();
+      el.childNodes.forEach((c) => walk(c, st));
+      flush();
+      return;
+    }
+    if (tag === 'A') {
+      // Link: mantém o texto visível (o modelo de notas não tem âncoras)
+      el.childNodes.forEach((c) => walk(c, st));
+      return;
+    }
+    const st2 = mdInlineStyle(tag, st);
+    if (st2) {
+      const before = cur.length;
+      el.childNodes.forEach((c) => walk(c, st2));
+      const inner = cur.slice(before);
+      if (inner.trim() !== '') {
+        let wrapped = inner;
+        if (st2.b && !st.b) wrapped = `**${wrapped}**`;
+        if (st2.i && !st.i) wrapped = `*${wrapped}*`;
+        if (st2.u && !st.u) wrapped = `__${wrapped}__`;
+        if (st2.s && !st.s) wrapped = `~~${wrapped}~~`;
+        cur = cur.slice(0, before) + wrapped;
+      }
+      return;
+    }
+    el.childNodes.forEach((c) => walk(c, st2 ?? st));
+  };
+
+  doc.body.childNodes.forEach((n) => walk(n, { b: false, i: false, u: false, s: false }));
+  flush();
+  return lines
+    .map((l) => l.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\n+|\n+$/g, '');
+}
+
 export class DomOverlay implements IOverlay {
   private root: HTMLElement;
   private menuEl: HTMLDivElement | null = null;
@@ -72,19 +165,29 @@ export class DomOverlay implements IOverlay {
     this.root.appendChild(reset);
 
     // PR11 — controles de zoom na tela (topo central)
+    // PR16 — ícones em SVG (o emoji 🔍+ renderizava mal nos dispositivos)
+    const zoomSvg = (plus: boolean): string =>
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<circle cx="10.5" cy="10.5" r="6.2" stroke="currentColor" stroke-width="2.3"/>` +
+      `<line x1="15.2" y1="15.2" x2="20.4" y2="20.4" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>` +
+      (plus
+        ? `<line x1="7.8" y1="10.5" x2="13.2" y2="10.5" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>` +
+          `<line x1="10.5" y1="7.8" x2="10.5" y2="13.2" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>`
+        : `<line x1="7.8" y1="10.5" x2="13.2" y2="10.5" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>`) +
+      `</svg>`;
     const zoomWrap = document.createElement('div');
     zoomWrap.className = 'zoom-controls';
     const btnIn = document.createElement('button');
     btnIn.type = 'button';
     btnIn.title = t('ui.zoomIn');
     btnIn.setAttribute('aria-label', t('ui.zoomIn'));
-    btnIn.textContent = '🔍+';
+    btnIn.innerHTML = zoomSvg(true);
     btnIn.addEventListener('click', () => this.zoomCbIn?.());
     const btnOut = document.createElement('button');
     btnOut.type = 'button';
     btnOut.title = t('ui.zoomOut');
     btnOut.setAttribute('aria-label', t('ui.zoomOut'));
-    btnOut.textContent = '🔍-';
+    btnOut.innerHTML = zoomSvg(false);
     btnOut.addEventListener('click', () => this.zoomCbOut?.());
     zoomWrap.appendChild(btnIn);
     zoomWrap.appendChild(btnOut);
@@ -938,6 +1041,63 @@ export class DomOverlay implements IOverlay {
         const nodes = Array.from(tpl.content.children) as HTMLElement[];
         line.replaceWith(...nodes);
         if (nodes.length > 1) placeCaretAtStart(nodes[1]);
+        syncModel();
+      });
+      // PR16 — COLAR preservando a formatação: converte o HTML da área de
+      // transferência (Keep, Gmail, Word...) em markdown-lite com UM bloco
+      // por parágrafo. O colar nativo injetava o HTML cru dentro de UMA
+      // linha; `<br>`/`<div>` não eram quebras no modelo e tudo grudava.
+      editor.addEventListener('paste', (ev: ClipboardEvent) => {
+        const dt = ev.clipboardData;
+        if (!dt) return;
+        ev.preventDefault();
+        const html = dt.getData('text/html');
+        const plain = dt.getData('text/plain');
+        const pastedMd =
+          html !== '' ? htmlToNoteMd(html) : (plain ?? '').replace(/\r\n?/g, '\n');
+        if (pastedMd === '') return;
+        pushUndo();
+        const pastedLines = pastedMd.split('\n');
+        const line = currentLine();
+        if (!line) {
+          // Sem cursor no editor: anexa no fim
+          const tpl = document.createElement('template');
+          tpl.innerHTML = noteTextToHtml(pastedMd);
+          const nodes = Array.from(tpl.content.children) as HTMLElement[];
+          editor.append(...nodes);
+          if (nodes.length > 0) placeCaretAtStart(nodes[nodes.length - 1]);
+          syncModel();
+          return;
+        }
+        const kind = lineKindOf(line);
+        const done = line.dataset.done === '1';
+        const { md: lineMd, map } = serializeMapped(line);
+        const domIdx = caretIndexInLine(line);
+        const mdIdx = domIdx >= 0 && domIdx < map.length ? map[domIdx] : lineMd.length;
+        const left = lineMd.slice(0, mdIdx);
+        const right = lineMd.slice(mdIdx);
+        const leftMd =
+          kind === 'item'
+            ? `${done ? '- [x] ' : '- [ ] '}${left}`
+            : kind === 'h1'
+              ? `# ${left}`
+              : kind === 'h2'
+                ? `## ${left}`
+                : left;
+        // A 1ª linha colada entra NO bloco do cursor (herda h1/h2/checklist);
+        // as demais viram blocos próprios; a parte direita fecha por último
+        const full = [
+          leftMd + (pastedLines[0] ?? ''),
+          ...pastedLines.slice(1),
+          ...(kind === 'item' ? [`- [ ] ${right}`] : right !== '' ? [right] : []),
+        ].join('\n');
+        const tpl = document.createElement('template');
+        tpl.innerHTML = noteTextToHtml(full);
+        const nodes = Array.from(tpl.content.children) as HTMLElement[];
+        line.replaceWith(...nodes);
+        // Cursor no início da linha que carrega a parte direita (se houver)
+        const caretAt = right !== '' ? pastedLines.length : Math.max(0, nodes.length - 1);
+        if (nodes[caretAt]) placeCaretAtStart(nodes[caretAt]);
         syncModel();
       });
       // PR13 — checkbox CLICÁVEL: marcar ✓ riscado; não rouba o foco

@@ -1305,3 +1305,81 @@ test.describe('PR13', () => {
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
 });
+
+test.describe('PR16 — colar com formatação + ícones de zoom', () => {
+  test('colar HTML (estilo Google Keep) preserva parágrafos e negrito/itálico', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if (((o.meta?.noteText as string) || '').includes('NOTA P16')) w.removeObject(o.id);
+      }
+      return w.addStickyNote({ x: 30, y: 6, z: 30 }, 'NOTA P16 original');
+    });
+    await page.waitForTimeout(400);
+
+    // Clique na nota abre o EDITOR RICO (PR14)
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    await page.mouse.click(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    // Cola HTML com estrutura típica do Google Keep: <b>/<i>, <br> e <div>
+    await page.locator('.note-rich-content').click();
+    await page.evaluate(() => {
+      const ed = document.querySelector('.note-rich-content') as HTMLElement;
+      const sel = window.getSelection()!;
+      const r = document.createRange();
+      r.selectNodeContents(ed);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      const dt = new DataTransfer();
+      dt.setData(
+        'text/html',
+        '<b>linha um negrito</b><br><i>linha dois italico</i><div><br></div><div>terceiro paragrafo</div>',
+      );
+      dt.setData('text/plain', 'fallback texto plano');
+      ed.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }),
+      );
+    });
+    await page.waitForTimeout(200);
+
+    // Fecha (persiste) e confere o MODELO: quebras de linha e marcadores
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+    await page.waitForTimeout(300);
+    const salvo = await page.evaluate((oid) => (window.__bumptop!.world.getObject(oid)!.meta.noteText as string) ?? '', notaId);
+    // Parágrafos preservados (4 linhas, não um blob de uma linha só)
+    expect(salvo.split('\n').length).toBeGreaterThanOrEqual(4);
+    // Negrito e itálico viraram markdown-lite
+    expect(salvo).toContain('**linha um negrito**');
+    expect(salvo).toContain('*linha dois italico*');
+    // Linha em branco entre parágrafos preservada
+    expect(salvo).toContain('\n\nterceiro paragrafo');
+    // O fallback texto plano NÃO foi usado (o HTML ganhou)
+    expect(salvo).not.toContain('fallback texto plano');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+
+  test('botões de zoom usam ícones SVG (não emoji)', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForTimeout(600);
+    const svgs = await page.locator('.zoom-controls button svg').count();
+    expect(svgs).toBe(2);
+    // O "+" do zoom-in e o traço do zoom-out desenhados no SVG
+    const zin = await page.locator('.zoom-controls button').first().locator('svg line').count();
+    expect(zin).toBe(3); // alça + traços do +
+    const zout = await page.locator('.zoom-controls button').nth(1).locator('svg line').count();
+    expect(zout).toBe(2); // alça + traço do −
+  });
+});
