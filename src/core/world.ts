@@ -214,6 +214,8 @@ export class World {
     pos = { x: clamp(pos.x, -mx, mx), y: Math.max(halfExtents.y, pos.y), z: clamp(pos.z, -mz, mz) };
     const body = this.deps.physics.createBox(id, pos, halfExtents);
     const render = this.deps.renderer.addBox(id, halfExtents, color);
+    // PR26 — pastas ganham silhueta 3D recortada (corpo + aba)
+    if (opts?.isDir) this.deps.renderer.setFolderShape(render, halfExtents);
     this.deps.renderer.setPose(render, { position: pos, rotation: identityQuat() });
     if (opts?.thumb) this.deps.renderer.setTexture(render, opts.thumb);
     const data: BumpObjectData = {
@@ -2225,6 +2227,8 @@ export class World {
       const pose: Pose = { position: pos, rotation: { ...s.data.pose.rotation } };
       this.deps.renderer.setPose(render, pose);
       this.deps.renderer.setScale(render, scale);
+      // PR26 — cópia de pasta mantém a silhueta recortada
+      if (s.data.meta.isDir === true) this.deps.renderer.setFolderShape(render, base);
       const thumb = s.data.meta.thumb as string | null | undefined;
       if (thumb) this.deps.renderer.setTexture(render, thumb);
       const data: BumpObjectData = {
@@ -2860,6 +2864,8 @@ export class World {
       const render = this.deps.renderer.addBox(o.id, halfExtents, color);
       this.deps.renderer.setPose(render, o.pose);
       this.deps.renderer.setScale(render, scale);
+      // PR26 — pasta restaurada do snapshot mantém a silhueta recortada
+      if (o.meta.isDir === true) this.deps.renderer.setFolderShape(render, halfExtents);
       const thumb = o.meta.thumb as string | null | undefined;
       if (thumb) this.deps.renderer.setTexture(render, thumb);
       this.entries.set(o.id, { data: o, body, render });

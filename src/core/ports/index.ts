@@ -103,6 +103,8 @@ export interface IRenderer {
   setHighlight(handle: ObjectHandle, highlighted: boolean): void;
   /** Escala visual da caixa (multiplica os half-extents base). P0 — Scale. */
   setScale(handle: ObjectHandle, scale: number): void;
+  /** PR26 — troca a geometria p/ SILHUETA de pasta (corpo + aba recortados). */
+  setFolderShape(handle: ObjectHandle, halfExtents: Vec3): void;
   remove(handle: ObjectHandle): void;
   setCamera(state: CameraState): void;
   getCamera(): CameraState;
