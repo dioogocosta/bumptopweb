@@ -1375,7 +1375,7 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForTimeout(600);
     const svgs = await page.locator('.zoom-controls button svg').count();
-    expect(svgs).toBe(2);
+    expect(svgs).toBe(3); // PR18: zoom-in, zoom-out e o 🔍 da busca
     // O "+" do zoom-in e o traço do zoom-out desenhados no SVG
     const zin = await page.locator('.zoom-controls button').first().locator('svg line').count();
     expect(zin).toBe(3); // alça + traços do +

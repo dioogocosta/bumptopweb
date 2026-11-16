@@ -385,6 +385,62 @@ describe('World + pilhas (M3)', () => {
 // ---------------------------------------------------------------------------
 
 describe('Fase 7: laço (lasso) e seleção múltipla', () => {
+  it('PR18: busca nas notas — filtra por título/texto, destaca e voa até o match', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    const notaA = world.addStickyNote({ x: 20, y: 1.2, z: 20 }, 'nota do DIOGO custo 51');
+    const notaB = world.addStickyNote({ x: -20, y: 1.2, z: -20 }, 'segunda nota: receita de bolo');
+    vi.mocked(renderer.projectToScreen).mockImplementation((p) => ({
+      x: p.x * 10,
+      y: p.z * 10,
+      visible: true,
+    }));
+
+    // Filtra: só a nota A contém "diogo" (case-insensitive)
+    expect(world.searchNotes('DIOGO')).toEqual([notaA]);
+    expect(world.searchNotes('custo')).toEqual([notaA]);
+    // Título também entra (notaB com título)
+    world.searchNotes('receita');
+    expect(world.searchNotes('bolo')).toEqual([notaB]);
+    // Estado exposto p/ os destaques: ids + índice (ainda nenhum escolhido)
+    let st = world.getSearchState();
+    expect(st?.ids).toEqual([notaB]);
+    expect(st?.index).toBe(-1);
+    // Sem matches → lista vazia, mas a busca continua ativa (query na tela)
+    expect(world.searchNotes('zebra')).toEqual([]);
+    st = world.getSearchState();
+    expect(st?.ids).toEqual([]);
+    // Query vazia encerra (state null)
+    expect(world.searchNotes('')).toEqual([]);
+    expect(world.getSearchState()).toBeNull();
+
+    // Dois matches → navegação em ciclo com contador
+    expect(world.searchNotes('nota')).toHaveLength(2);
+    world.gotoSearchMatch(1);
+    expect(world.getSearchState()?.index).toBe(0);
+    world.gotoSearchMatch(1);
+    expect(world.getSearchState()?.index).toBe(1);
+    world.gotoSearchMatch(1); // wrap: última → primeira
+    expect(world.getSearchState()?.index).toBe(0);
+    world.gotoSearchMatch(-1); // volta
+    expect(world.getSearchState()?.index).toBe(1);
+
+    // "Voar": após frames de update a câmera converge para a nota em zoom
+    const alvo = world.getObject(notaA)!.pose.position;
+    world.searchNotes('diogo');
+    world.gotoSearchMatch(1); // única → índice 0, inicia animação
+    for (let i = 0; i < 40; i++) world.update(1 / 30);
+    const cam = world.getCamera();
+    expect(cam.target.x).toBeCloseTo(alvo.x, 0);
+    expect(cam.target.z).toBeCloseTo(alvo.z, 0);
+    expect(cam.distance).toBeLessThan(130); // aproximou
+    expect(cam.distance).toBeGreaterThanOrEqual(70);
+
+    // endSearch limpa tudo
+    world.endSearch();
+    expect(world.getSearchState()).toBeNull();
+  });
+
   it('PR15: modo laço p/ TOQUE — arrastar o dedo no chão vazio desenha o laço', async () => {
     const overlay = makeOverlayMock();
     const { world, renderer } = await makeWorld(overlay);

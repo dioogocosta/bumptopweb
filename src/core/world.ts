@@ -120,6 +120,19 @@ export class World {
   /** PR15 — modo laço p/ TOQUE: ligado, arrastar o dedo no chão desenha o laço. */
   private lassoMode = false;
   private lassoModeListener: ((on: boolean) => void) | null = null;
+  /** PR18 — busca nas notas: ids que casam + índice do match atual. */
+  private searchIds: string[] = [];
+  private searchIndex = -1;
+  private searchQuery = '';
+  /** PR18 — animação "voar até a nota" (zoom out → pan → zoom in). */
+  private searchAnim: {
+    fromTarget: Vec3;
+    toTarget: Vec3;
+    d0: number;
+    d1: number;
+    p: number;
+  } | null = null;
+  private searchListener: (() => void) | null = null;
   private group: GroupMember[] = [];
   private groupStartScreen: { x: number; y: number } | null = null;
   private groupMoved = false;
@@ -2388,6 +2401,69 @@ export class World {
     this.lassoModeListener = listener;
   }
 
+  // -------------------------------------------------------------------------
+  // PR18 — busca nas notas (botão 🔍): destaca os matches e "voa" até eles
+  // -------------------------------------------------------------------------
+
+  /** Busca em títulos + texto das notas (sem acento/caixa). Retorna os ids. */
+  searchNotes(query: string): string[] {
+    const q = query.trim().toLowerCase();
+    this.searchQuery = q;
+    this.searchIndex = -1;
+    this.searchAnim = null;
+    this.searchIds = [];
+    if (q !== '') {
+      for (const [id, e] of this.entries) {
+        if ((e.data.typeFlags & TypeFlags.StickyNote) === 0) continue;
+        const texto = `${e.data.meta?.noteTitle ?? ''}\n${e.data.meta?.noteText ?? ''}`.toLowerCase();
+        if (texto.includes(q)) this.searchIds.push(id);
+      }
+    }
+    this.searchListener?.();
+    this.dirty = true;
+    return [...this.searchIds];
+  }
+
+  /** Avança (dir=1) ou volta (dir=-1) para o próximo match e voa até ele. */
+  gotoSearchMatch(dir: 1 | -1): void {
+    if (this.searchIds.length === 0) return;
+    this.searchIndex = (this.searchIndex + dir + this.searchIds.length) % this.searchIds.length;
+    const e = this.entries.get(this.searchIds[this.searchIndex]);
+    if (e) {
+      const s = this.camera.getState();
+      this.searchAnim = {
+        fromTarget: { ...s.target },
+        toTarget: { ...e.data.pose.position },
+        d0: s.distance,
+        d1: Math.max(70, Math.min(s.distance, 110)),
+        p: 0,
+      };
+    }
+    this.searchListener?.();
+    this.dirty = true;
+  }
+
+  /** Estado da busca p/ o onRender montar os destaques (null = inativa). */
+  getSearchState(): { ids: string[]; index: number; query: string } | null {
+    if (this.searchIds.length === 0 && this.searchQuery === '') return null;
+    return { ids: [...this.searchIds], index: this.searchIndex, query: this.searchQuery };
+  }
+
+  /** Fecha a busca e limpa os destaques. */
+  endSearch(): void {
+    this.searchIds = [];
+    this.searchIndex = -1;
+    this.searchQuery = '';
+    this.searchAnim = null;
+    this.searchListener?.();
+    this.dirty = true;
+  }
+
+  /** Avisa quando o conjunto de matches / índice muda. */
+  onSearchChanged(listener: (() => void) | null): void {
+    this.searchListener = listener;
+  }
+
   /** Estado do laço (p/ testes e overlay). */
   getLassoState(): { active: boolean; closed: boolean; crossTarget: { x: number; y: number } | null } {
     return { active: this.lassoing, closed: this.lassoClosed, crossTarget: this.lassoCrossTarget };
@@ -2565,6 +2641,27 @@ export class World {
       if (converged) this.wallFocus = null;
       this.deps.renderer.setCamera(s);
       this.dirty = true;
+    }
+
+    // PR18 — voar até o match da busca: pan suave com "dip" de zoom
+    // (afasta um pouco no meio do percurso e aproxima na nota)
+    if (this.searchAnim) {
+      const a = this.searchAnim;
+      a.p = Math.min(1, a.p + dt / 0.9);
+      const ease = a.p < 0.5 ? 2 * a.p * a.p : 1 - Math.pow(-2 * a.p + 2, 2) / 2;
+      const lerpN = (from: number, to: number, k: number) => from + (to - from) * k;
+      const target = {
+        x: lerpN(a.fromTarget.x, a.toTarget.x, ease),
+        y: lerpN(a.fromTarget.y, a.toTarget.y, ease),
+        z: lerpN(a.fromTarget.z, a.toTarget.z, ease),
+      };
+      const dip = 1 + 0.3 * Math.sin(a.p * Math.PI);
+      const dist = Math.max(40, lerpN(a.d0, a.d1, ease) * dip);
+      const s = this.camera.getState();
+      this.camera.moveTo(target, dist, s.azimuth, s.elevation, 1);
+      this.deps.renderer.setCamera(this.camera.getState());
+      this.dirty = true;
+      if (a.p >= 1) this.searchAnim = null;
     }
 
     const preStep = new Map<string, Vec3>();

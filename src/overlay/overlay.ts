@@ -118,6 +118,12 @@ export class DomOverlay implements IOverlay {
   private haloEl: HTMLDivElement | null = null;
   /** PR15 — botão "Modo laço" (seleção múltipla no toque). */
   private lassoBtn: HTMLButtonElement | null = null;
+  /** PR18 — busca nas notas: botão 🔍, barra e destaque por nota. */
+  private searchBtn: HTMLButtonElement | null = null;
+  private searchBar: HTMLDivElement | null = null;
+  private searchInput: HTMLInputElement | null = null;
+  private searchCount: HTMLSpanElement | null = null;
+  private searchMarks = new Map<string, HTMLElement>();
   private haloHovered = false;
   private haloActionCb: ((pileId: string, action: string) => void) | null = null;
   private haloCurrentPileId: string | null = null;
@@ -204,12 +210,148 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('lassomode', { bubbles: true }));
     });
     zoomWrap.appendChild(this.lassoBtn);
+    // PR18 — botão de BUSCA nas notas: abre o campo de busca; os matches
+    // ganham destaque na cena e a câmera "voa" de uma nota para a outra.
+    this.searchBtn = document.createElement('button');
+    this.searchBtn.type = 'button';
+    this.searchBtn.className = 'search-btn';
+    this.searchBtn.title = t('ui.searchNotes');
+    this.searchBtn.setAttribute('aria-label', t('ui.searchNotes'));
+    this.searchBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<circle cx="10.5" cy="10.5" r="6.2" stroke="currentColor" stroke-width="2.3"/>` +
+      `<line x1="15.2" y1="15.2" x2="20.4" y2="20.4" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>` +
+      `</svg>`;
+    this.searchBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('searchtoggle', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.searchBtn);
     this.root.appendChild(zoomWrap);
+
+    // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
+    this.searchBar = document.createElement('div');
+    this.searchBar.className = 'search-bar';
+    this.searchBar.style.display = 'none';
+    this.searchInput = document.createElement('input');
+    this.searchInput.type = 'text';
+    this.searchInput.className = 'search-input';
+    this.searchInput.placeholder = t('ui.searchNotes');
+    this.searchInput.setAttribute('aria-label', t('ui.searchNotes'));
+    let searchDebounce = 0;
+    this.searchInput.addEventListener('input', () => {
+      const input = this.searchInput;
+      if (!input) return;
+      window.clearTimeout(searchDebounce);
+      const value = input.value;
+      searchDebounce = window.setTimeout(() => {
+        this.root.dispatchEvent(new CustomEvent('searchquery', { detail: value, bubbles: true }));
+      }, 200);
+    });
+    this.searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.root.dispatchEvent(new CustomEvent('searchnext', { detail: 1, bubbles: true }));
+      }
+    });
+    const prevBtn = document.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = 'search-nav search-prev';
+    prevBtn.title = t('ui.searchPrev');
+    prevBtn.setAttribute('aria-label', t('ui.searchPrev'));
+    prevBtn.textContent = '‹';
+    prevBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('searchnext', { detail: -1, bubbles: true }));
+    });
+    this.searchCount = document.createElement('span');
+    this.searchCount.className = 'search-count';
+    this.searchCount.textContent = '0/0';
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'search-nav search-next';
+    nextBtn.title = t('ui.searchNext');
+    nextBtn.setAttribute('aria-label', t('ui.searchNext'));
+    nextBtn.textContent = '›';
+    nextBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('searchnext', { detail: 1, bubbles: true }));
+    });
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'search-close';
+    closeBtn.title = t('ui.close');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('searchclose', { bubbles: true }));
+    });
+    this.searchBar.appendChild(this.searchInput);
+    this.searchBar.appendChild(prevBtn);
+    this.searchBar.appendChild(this.searchCount);
+    this.searchBar.appendChild(nextBtn);
+    this.searchBar.appendChild(closeBtn);
+    this.root.appendChild(this.searchBar);
   }
 
   /** PR15 — estado visual do botão "Modo laço" (ligado = realçado). */
   setLassoModeActive(on: boolean): void {
     this.lassoBtn?.classList.toggle('sel', on);
+  }
+
+  // -------------------------------------------------------------------------
+  // PR18 — busca nas notas
+  // -------------------------------------------------------------------------
+
+  /** Abre/fecha a barra de busca (abrir já dá foco ao campo). */
+  showSearchBar(on: boolean): void {
+    if (!this.searchBar || !this.searchInput) return;
+    this.searchBar.style.display = on ? 'flex' : 'none';
+    this.searchBtn?.classList.toggle('sel', on);
+    if (on) {
+      this.searchInput.focus();
+    } else {
+      this.searchInput.value = '';
+    }
+  }
+
+  isSearchBarVisible(): boolean {
+    return !!this.searchBar && this.searchBar.style.display !== 'none';
+  }
+
+  /** Contador "atual/total" (0/n até o primeiro Enter/seta). */
+  setSearchCount(cur: number, total: number): void {
+    if (!this.searchCount || !this.searchBar) return;
+    this.searchCount.textContent = `${Math.max(0, cur)}/${total}`;
+    const prev = this.searchBar.querySelector('.search-prev');
+    const next = this.searchBar.querySelector('.search-next');
+    if (prev) (prev as HTMLButtonElement).disabled = total === 0;
+    if (next) (next as HTMLButtonElement).disabled = total === 0;
+  }
+
+  /** Destaques por frame: um anel amarelo sobre cada nota encontrada. */
+  setSearchMarkers(markers: Array<{ id: string; x: number; y: number; cur: boolean }> | null): void {
+    if (!markers || markers.length === 0) {
+      for (const el of this.searchMarks.values()) el.remove();
+      this.searchMarks.clear();
+      return;
+    }
+    const seen = new Set<string>();
+    for (const m of markers) {
+      seen.add(m.id);
+      let el = this.searchMarks.get(m.id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'search-hl';
+        this.root.appendChild(el);
+        this.searchMarks.set(m.id, el);
+      }
+      el.classList.toggle('cur', m.cur);
+      el.style.left = `${m.x}px`;
+      el.style.top = `${m.y}px`;
+    }
+    for (const [id, el] of this.searchMarks) {
+      if (!seen.has(id)) {
+        el.remove();
+        this.searchMarks.delete(id);
+      }
+    }
   }
 
   showContextMenu(screen: { x: number; y: number }, items: ContextMenuItem[]): void {
