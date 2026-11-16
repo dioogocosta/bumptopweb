@@ -1153,11 +1153,18 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           if (!he) continue;
           const s0 = renderer.projectToScreen(o.pose.position);
           if (!s0.visible) continue;
-          // 8 cantos da caixa rotacionados pela pose → envelope na tela
+          const esc = o.scale > 0 ? o.scale : 1;
+          // 4 cantos da FACE DE CIMA da nota (+he.y) rotacionados pela pose →
+          // envelope na tela (a face de baixo, projetada em perspectiva,
+          // deslocava o destaque para fora da nota)
           let minX = s0.x, maxX = s0.x, minY = s0.y, maxY = s0.y;
-          for (let c = 0; c < 8; c++) {
+          for (let c = 0; c < 4; c++) {
             const off = rotateVec3ByQuat(
-              { x: (c & 1 ? 1 : -1) * he.x, y: (c & 2 ? 1 : -1) * he.y, z: (c & 4 ? 1 : -1) * he.z },
+              {
+                x: (c & 1 ? 1 : -1) * he.x * esc,
+                y: he.y * esc,
+                z: (c & 2 ? 1 : -1) * he.z * esc,
+              },
               o.pose.rotation,
             );
             const s = renderer.projectToScreen({

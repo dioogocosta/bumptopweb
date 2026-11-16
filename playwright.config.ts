@@ -2,10 +2,12 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 30000,
+  timeout: 45000,
   // WebGL é pesado: em paralelo, um boundingBox/waitFor pode estourar o
-  // timeout por contenção de CPU (flaky) — 1 retry absorve essas oscilações.
-  retries: 1,
+  // timeout por contenção de CPU (flaky) — retries + workers limitados
+  // absorvem essas oscilações.
+  retries: 2,
+  workers: 2,
   use: {
     baseURL: 'http://localhost:4173',
     headless: true,

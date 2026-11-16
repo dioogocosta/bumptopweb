@@ -79,6 +79,7 @@ function makeRendererMock(): IRenderer {
     isVisible: vi.fn((h) => visible.get(h) ?? false),
     setHighlight: vi.fn(),
     setScale: vi.fn(),
+    setFolderShape: vi.fn(),
     remove: vi.fn((h) => visible.delete(h)),
     setCamera: vi.fn(),
     getCamera: vi.fn(() => ({

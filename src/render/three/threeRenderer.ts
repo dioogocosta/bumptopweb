@@ -28,6 +28,8 @@ export class ThreeRenderer implements IRenderer {
   private height = 1;
   private highlightMat = new Map<ObjectHandle, THREE.MeshLambertMaterial>();
   private topMat = new Map<ObjectHandle, THREE.MeshLambertMaterial>();
+  /** PR26 — handles com silhueta de pasta (setTexture pinta a face de cima). */
+  private folderHandles = new Set<ObjectHandle>();
   /** Painel de vidro da pilha aberta em grade (PR9). */
   private pilePanel: THREE.Mesh | null = null;
   private floorMat?: THREE.MeshLambertMaterial;
@@ -199,10 +201,113 @@ export class ThreeRenderer implements IRenderer {
     if (m && Number.isFinite(scale) && scale > 0) m.scale.setScalar(scale);
   }
 
+  /**
+   * PR26 — pasta com SILHUETA 3D de verdade (recortada, como no BumpTop
+   * original): substitui a geometria da caixa por corpo + ABA extrudados.
+   * As proporções seguem a textura pixel (aba = 4/26 da altura, faixa à
+   * esquerda ~6%..48% da largura), então a face pixelada casa com o recorte.
+   * A física continua na caixa original (visual levemente menor = ok).
+   */
+  setFolderShape(handle: ObjectHandle, halfExtents: Vec3): void {
+    const m = this.meshes.get(handle);
+    if (!m) return;
+    const W = halfExtents.x * 2;
+    const D = halfExtents.z * 2;
+    const T = Math.max(0.24, halfExtents.y * 2); // espessura do "papel"
+
+    // Contorno CCW: corpo + aba (mesmas proporções da textura pixel)
+    const x0 = -W / 2, x1 = W / 2, y0 = -D / 2, yTop = D / 2;
+    const bodyTop = yTop - D * (4 / 26);
+    const tabL = x0 + W * 0.0625, tabR = x0 + W * 0.4844;
+    const contour: Array<{ x: number; y: number }> = [
+      { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: bodyTop },
+      { x: tabR, y: bodyTop }, { x: tabR, y: yTop }, { x: tabL, y: yTop },
+      { x: tabL, y: bodyTop }, { x: x0, y: bodyTop },
+  ];
+    const tris = THREE.ShapeUtils.triangulateShape(
+      contour.map((p) => new THREE.Vector2(p.x, p.y)),
+      [],
+    );
+
+    // UV da face superior: casa o recorte com a textura pixel 32×32
+    // (o recorte cobre as linhas 2..27 da textura; v cresce de baixo p/ cima)
+    const uvFor = (x: number, y: number): [number, number] => {
+      const row = 2.5 + ((yTop - y) / D) * 25; // y=yTop → linha 2.5; y=y0 → 27.5
+      return [(x - x0) / W, (31 - row) / 32];
+    };
+
+    const pos: number[] = [];
+    const uvs: number[] = [];
+    const push = (p: { x: number; y: number }, z: number, uv: [number, number]) => {
+      pos.push(p.x, p.y, z);
+      uvs.push(uv[0], uv[1]);
+    };
+    // Face de cima (z=+T/2, material 0 — textura)
+    const topStart = 0;
+    for (const [a, b, c] of tris) {
+      for (const i of [a, b, c]) push(contour[i], T / 2, uvFor(contour[i].x, contour[i].y));
+    }
+    const topCount = pos.length / 3;
+    // Face de baixo (z=−T/2, material 1) — mesma silhueta, ordem invertida
+    for (const [a, b, c] of tris) {
+      for (const i of [a, c, b]) push(contour[i], -T / 2, [0, 0]);
+    }
+    // Laterais (material 1): um quad por aresta do contorno
+    for (let i = 0; i < contour.length; i++) {
+      const p1 = contour[i], p2 = contour[(i + 1) % contour.length];
+      pos.push(p1.x, p1.y, -T / 2, p2.x, p2.y, -T / 2, p2.x, p2.y, T / 2);
+      uvs.push(0, 1, 1, 1, 1, 0);
+      pos.push(p1.x, p1.y, -T / 2, p2.x, p2.y, T / 2, p1.x, p1.y, T / 2);
+      uvs.push(0, 1, 1, 0, 0, 0);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.addGroup(topStart, topCount, 0); // face de cima → material 0
+    geo.addGroup(topCount, pos.length / 3 - topCount, 1); // baixo+laterais → 1
+    geo.computeVertexNormals();
+    geo.rotateX(-Math.PI / 2); // deita: contorno no chão, espessura p/ cima
+
+    m.geometry.dispose();
+    m.geometry = geo;
+    const top = new THREE.MeshLambertMaterial({ color: 0x5aa7e8 });
+    const side = new THREE.MeshLambertMaterial({ color: 0x123657 });
+    m.material = [top, side];
+    this.meshes.set(handle, m);
+    this.highlightMat.set(handle, top); // seleção (emissive) na face de cima
+    this.topMat.set(handle, top); // setTexture aplica a textura aqui
+    this.folderHandles.add(handle);
+  }
+
   /** Thumbnail (dataURL) na face de CIMA (+Y) da caixa; null remove a textura. */
   setTexture(handle: ObjectHandle, dataUrl: string | null): void {
     const m = this.meshes.get(handle);
     if (!m) return;
+    // PR26 — pasta: a textura vai direto no material da face de cima
+    if (this.folderHandles.has(handle)) {
+      const target = this.topMat.get(handle);
+      if (!target) return;
+      if (dataUrl === null) {
+        target.map?.dispose();
+        target.map = null;
+        target.needsUpdate = true;
+        return;
+      }
+      const loader = new THREE.TextureLoader();
+      loader.load(dataUrl, (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        // Pixel art: filtro NEAREST evita o blur de minificação
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.generateMipmaps = true;
+        target.map?.dispose();
+        target.map = tex;
+        target.color.setHex(0xffffff);
+        target.needsUpdate = true;
+      });
+      return;
+    }
     const mats = (
       Array.isArray(m.material) ? m.material : [m.material]
     ) as THREE.MeshLambertMaterial[];
@@ -254,6 +359,7 @@ export class ThreeRenderer implements IRenderer {
     this.meshes.delete(handle);
     this.highlightMat.delete(handle);
     this.topMat.delete(handle);
+    this.folderHandles.delete(handle);
   }
 
   /**
