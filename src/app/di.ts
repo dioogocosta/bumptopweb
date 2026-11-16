@@ -6,6 +6,7 @@
  */
 import { World } from '@core/world';
 import type { Vec3 } from '@core/model/types';
+import { rotateVec3ByQuat } from '@core/util/math';
 import type { ContextMenuItem, IFileSystem, IRepo, InputAction } from '@core/ports/index';
 import { isLang, setLang, t } from '@core/i18n/i18n';
 import { RapierPhysics } from '@physics/rapier/rapierPhysics';
@@ -1138,17 +1139,44 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.setScrubStrip(null);
       }
 
-      // PR18 — destaques da busca: um anel sobre cada nota encontrada;
-      // o match atual ganha o estilo `.cur` (voar até ele é do world)
+      // PR18/PR20 — destaques da busca: um retângulo na BORDA da nota;
+      // o match atual ganha o estilo `.cur` (voar até ele é do world).
+      // O tamanho vem dos 8 cantos da caixa projetados na tela — o destaque
+      // "veste" a nota em qualquer ângulo de câmera (chão/parede).
       const searchState = world.getSearchState();
       if (searchState && searchState.ids.length > 0) {
-        const markers: Array<{ id: string; x: number; y: number; cur: boolean }> = [];
+        const markers: Array<{ id: string; x: number; y: number; w: number; h: number; cur: boolean }> = [];
         for (let i = 0; i < searchState.ids.length; i++) {
           const o = world.getObject(searchState.ids[i]);
           if (!o) continue;
-          const s = renderer.projectToScreen(o.pose.position);
-          if (!s.visible) continue;
-          markers.push({ id: searchState.ids[i], x: s.x, y: s.y, cur: i === searchState.index });
+          const he = o.meta.halfExtents;
+          if (!he) continue;
+          const s0 = renderer.projectToScreen(o.pose.position);
+          if (!s0.visible) continue;
+          // 8 cantos da caixa rotacionados pela pose → envelope na tela
+          let minX = s0.x, maxX = s0.x, minY = s0.y, maxY = s0.y;
+          for (let c = 0; c < 8; c++) {
+            const off = rotateVec3ByQuat(
+              { x: (c & 1 ? 1 : -1) * he.x, y: (c & 2 ? 1 : -1) * he.y, z: (c & 4 ? 1 : -1) * he.z },
+              o.pose.rotation,
+            );
+            const s = renderer.projectToScreen({
+              x: o.pose.position.x + off.x,
+              y: o.pose.position.y + off.y,
+              z: o.pose.position.z + off.z,
+            });
+            if (!s.visible) continue;
+            minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x);
+            minY = Math.min(minY, s.y); maxY = Math.max(maxY, s.y);
+          }
+          markers.push({
+            id: searchState.ids[i],
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2,
+            w: maxX - minX,
+            h: maxY - minY,
+            cur: i === searchState.index,
+          });
         }
         overlay.setSearchMarkers(markers);
       } else {

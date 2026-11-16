@@ -246,14 +246,12 @@ body {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-/* Destaque (anel amarelo pulsante) sobre cada nota encontrada */
+/* PR20 — destaque (retângulo na borda) sobre cada nota encontrada */
 .search-hl {
   position: absolute;
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  border: 3px solid rgba(250, 204, 21, 0.85);
-  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.25), 0 0 16px rgba(250, 204, 21, 0.5);
+  border-radius: 4px;
+  border: 3px solid rgba(250, 204, 21, 0.9);
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.25), 0 0 14px rgba(250, 204, 21, 0.45);
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 20;
