@@ -827,6 +827,30 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     overlay.toast(t(on ? 'toast.lassoOn' : 'toast.lassoOff'));
   });
 
+  // PR18 — busca nas notas: campo abre/fecha pelo botão 🔍; digitar filtra
+  // (debounce no overlay), Enter/› voam para o próximo match, ‹ volta
+  overlayRoot.addEventListener('searchtoggle', () => {
+    const abrir = !overlay.isSearchBarVisible();
+    overlay.showSearchBar(abrir);
+    if (!abrir) world.endSearch();
+  });
+  overlayRoot.addEventListener('searchclose', () => {
+    overlay.showSearchBar(false);
+    world.endSearch();
+  });
+  overlayRoot.addEventListener('searchquery', (e) => {
+    const q = (e as CustomEvent).detail as string;
+    const ids = world.searchNotes(q);
+    const st = world.getSearchState();
+    overlay.setSearchCount(st ? Math.max(0, st.index + 1) : 0, ids.length);
+    if (q.trim() !== '' && ids.length === 0) overlay.toast(t('toast.searchNone', { q: q.trim() }));
+  });
+  overlayRoot.addEventListener('searchnext', (e) => {
+    world.gotoSearchMatch((e as CustomEvent).detail as 1 | -1);
+    const st = world.getSearchState();
+    if (st) overlay.setSearchCount(st.index + 1, st.ids.length);
+  });
+
   // Persistência: carrega cena salva ou cria cenário de demonstração
   const saved = await repo.loadScene();
   if (saved && saved.objects.length > 0) {
@@ -1112,6 +1136,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         }
       } else {
         overlay.setScrubStrip(null);
+      }
+
+      // PR18 — destaques da busca: um anel sobre cada nota encontrada;
+      // o match atual ganha o estilo `.cur` (voar até ele é do world)
+      const searchState = world.getSearchState();
+      if (searchState && searchState.ids.length > 0) {
+        const markers: Array<{ id: string; x: number; y: number; cur: boolean }> = [];
+        for (let i = 0; i < searchState.ids.length; i++) {
+          const o = world.getObject(searchState.ids[i]);
+          if (!o) continue;
+          const s = renderer.projectToScreen(o.pose.position);
+          if (!s.visible) continue;
+          markers.push({ id: searchState.ids[i], x: s.x, y: s.y, cur: i === searchState.index });
+        }
+        overlay.setSearchMarkers(markers);
+      } else {
+        overlay.setSearchMarkers(null);
       }
     },
     onFlush: flushNow,

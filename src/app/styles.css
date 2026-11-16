@@ -182,10 +182,90 @@ body {
 .zoom-controls button:active {
   transform: scale(0.92);
 }
-/* PR15 — botão "Modo laço" (mesma barra dos controles de zoom) */
-.zoom-controls .lasso-btn.sel {
+/* PR15 — botão "Modo laço" / PR18 — botão de busca (mesma barra dos zooms) */
+.zoom-controls .lasso-btn.sel,
+.zoom-controls .search-btn.sel {
   background: #2f6fed;
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+/* PR18 — barra de busca (campo + navegação), logo abaixo dos zooms */
+.search-bar {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 40px);
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.92);
+  border-radius: 10px;
+  padding: 5px 8px;
+  z-index: 40;
+  pointer-events: auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+.search-input {
+  width: 132px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+  padding: 2px 4px;
+  min-width: 0;
+}
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.search-nav,
+.search-close {
+  border: none;
+  background: transparent;
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.search-nav:hover,
+.search-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.search-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.search-count {
+  color: #cbd5e1;
+  font-size: 12px;
+  min-width: 36px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* Destaque (anel amarelo pulsante) sobre cada nota encontrada */
+.search-hl {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 3px solid rgba(250, 204, 21, 0.85);
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.25), 0 0 16px rgba(250, 204, 21, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 20;
+  animation: search-pulse 1.4s ease-in-out infinite;
+}
+.search-hl.cur {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.35), 0 0 24px rgba(245, 158, 11, 0.7);
+}
+@keyframes search-pulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
 }
 
 /* ===== PR12 — Editor rico de nota (modal grande estilo Keep) ===== */

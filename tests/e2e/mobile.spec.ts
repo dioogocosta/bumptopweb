@@ -196,3 +196,59 @@ test('PR17: editor da nota em folha tela-cheia no mobile + meta resizes-content'
   await expect(modal).toHaveCount(0);
   await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
 });
+
+// -------------------------------------------------------------------------
+// PR18 — busca nas notas: botão 🔍 abre o campo; digitar destaca as notas;
+// Enter vai para a 1ª (zoom in) e as setas ‹ › navegam com contador.
+// -------------------------------------------------------------------------
+test('PR18: busca nas notas — destaque, voo até a nota e navegação', async ({ page }) => {
+  const [a, b] = await page.evaluate(() => {
+    const w = window.__bumptop!.world;
+    for (const o of w.listObjects()) {
+      if (((o.meta?.noteText as string) || '').includes('P18BUSCA')) w.removeObject(o.id);
+    }
+    return [
+      w.addStickyNote({ x: -18, y: 1.6, z: -18 }, 'P18BUSCA primeira nota'),
+      w.addStickyNote({ x: 18, y: 1.6, z: 14 }, 'P18BUSCA segunda nota'),
+    ];
+  });
+  await page.waitForTimeout(400);
+
+  // 1) Toque no 🔍 abre o campo
+  await page.locator('.search-btn').click();
+  await expect(page.locator('.search-bar')).toBeVisible();
+  await expect(page.locator('.search-btn.sel')).toBeVisible();
+
+  // 2) Digitar → destaca as 2 notas + contador 0/2
+  await page.locator('.search-input').fill('P18BUSCA');
+  await page.waitForTimeout(700); // debounce + frame
+  await expect(page.locator('.search-hl')).toHaveCount(2);
+  await expect(page.locator('.search-count')).toHaveText('0/2');
+
+  // 3) Enter → voa para a 1ª nota (contador 1/2, câmera aproxima)
+  const cam0 = await page.evaluate(() => window.__bumptop!.world.getCamera());
+  await page.locator('.search-input').press('Enter');
+  await page.waitForTimeout(1400);
+  const cam1 = await page.evaluate(() => window.__bumptop!.world.getCamera());
+  await expect(page.locator('.search-count')).toHaveText('1/2');
+  expect(cam1.distance).toBeLessThan(cam0.distance * 0.8);
+
+  // 4) Setas: › → 2/2, ‹ → 1/2
+  await page.locator('.search-next').click();
+  await page.waitForTimeout(1300);
+  await expect(page.locator('.search-count')).toHaveText('2/2');
+  await page.locator('.search-prev').click();
+  await page.waitForTimeout(1300);
+  await expect(page.locator('.search-count')).toHaveText('1/2');
+
+  // 5) ✕ fecha e limpa
+  await page.locator('.search-close').click();
+  await page.waitForTimeout(300);
+  await expect(page.locator('.search-hl')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__bumptop!.world.getSearchState() === null)).toBe(true);
+
+  await page.evaluate((ids) => {
+    const w = window.__bumptop!.world;
+    for (const id of ids) if (w.getObject(id)) w.removeObject(id);
+  }, [a, b]);
+});
