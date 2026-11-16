@@ -29,6 +29,19 @@ export const clamp = (v: number, lo: number, hi: number): number =>
 
 export const identityQuat = (): Quat => ({ x: 0, y: 0, z: 0, w: 1 });
 
+/** Aplica a rotação do quaternion `q` ao vetor `v` (v' = q * v * q⁻¹). */
+export const rotateVec3ByQuat = (v: Vec3, q: Quat): Vec3 => {
+  // t = 2 * (q_v × v)
+  const tx = 2 * (q.y * v.z - q.z * v.y);
+  const ty = 2 * (q.z * v.x - q.x * v.z);
+  const tz = 2 * (q.x * v.y - q.y * v.x);
+  return {
+    x: v.x + q.w * tx + (q.y * tz - q.z * ty),
+    y: v.y + q.w * ty + (q.z * tx - q.x * tz),
+    z: v.z + q.w * tz + (q.x * ty - q.y * tx),
+  };
+};
+
 /** Sub-passo de integração de velocidade (usado no toss e no spring). */
 export const integrate = (pos: Vec3, vel: Vec3, dt: number): Vec3 =>
   add(pos, scale(vel, dt));

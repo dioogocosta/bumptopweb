@@ -325,8 +325,10 @@ export class DomOverlay implements IOverlay {
     if (next) (next as HTMLButtonElement).disabled = total === 0;
   }
 
-  /** Destaques por frame: um anel amarelo sobre cada nota encontrada. */
-  setSearchMarkers(markers: Array<{ id: string; x: number; y: number; cur: boolean }> | null): void {
+  /** Destaques por frame: um retângulo na borda de cada nota encontrada. */
+  setSearchMarkers(
+    markers: Array<{ id: string; x: number; y: number; w: number; h: number; cur: boolean }> | null,
+  ): void {
     if (!markers || markers.length === 0) {
       for (const el of this.searchMarks.values()) el.remove();
       this.searchMarks.clear();
@@ -345,6 +347,11 @@ export class DomOverlay implements IOverlay {
       el.classList.toggle('cur', m.cur);
       el.style.left = `${m.x}px`;
       el.style.top = `${m.y}px`;
+      // PR20 — o destaque "veste" a nota: retângulo do envelope na tela
+      const w = Math.max(34, m.w + 8); // +8px = respiro ao redor da borda
+      const h = Math.max(34, m.h + 8);
+      el.style.width = `${w}px`;
+      el.style.height = `${h}px`;
     }
     for (const [id, el] of this.searchMarks) {
       if (!seen.has(id)) {
