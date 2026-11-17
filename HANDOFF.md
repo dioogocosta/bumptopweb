@@ -119,7 +119,11 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 - Unitários do adapter: `tests/auth/cloudflareAuth.test.ts` (7 testes).
 
 ### Pendências abertas (pós-PR27)
-1. **PR28+ (item 4 do dono — Control Manager)**: torre diagonal de caixas (referência horizonx.so), dashboard lateral, engrenagem com menu de vidro (4.1), CRUD de caixas (4.2), tipos ROOT/Kanban/Backlog (4.3) e integração Taiga depois.
+1. **Control Manager (item 4 do dono) — EM ANDAMENTO por fases**: ref. horizonx.so (Energy Command Dashboard: torre diagonal de blocos selecionáveis + dashboard lateral de vidro).
+   - **PR4a ✅ (merge 8067872)**: engrenagem `.settings-btn` na barra dos zooms + painel de vidro `.boxes-*` listando as caixas (`world.listObjects().filter(o => o.meta.isDir)`) + `World.flyToObject(id)` (reusa a animação da busca do PR18). Sonda: `scripts/validate-pr4a.mjs` (6/6). Fechamento por ✕/Esc/clique no fundo.
+   - **PR4.2 — CRUD**: criar/excluir (com confirmação: esvaziar na mesa vs excluir tudo)/pesquisar/renomear no painel; estado via `meta` da cena (persistente).
+   - **PR4.3 — Tipos de caixa**: `meta.boxType` (campo novo dentro de `meta` é seguro — `loadSnapshot` tolerante, sem bump de `schemaVersion`): ROOT (dashboard pixel-voxel em parede, textura canvas com dirty flag), Comum (atual), Kanban (raias no chão), Backlog (Taiga, PR próprio depois).
 2. Reset/backup por usuário: a cena vai em UMA linha por usuário (sem histórico de versões) — merge de mudanças offline não existe (nuvem manda).
 3. Rate limit global (KV/DO) e verificação de e-mail: não implementados (v1).
 4. PWA: cache do SW pode servir bundle velho — Ctrl+F5; após bind do D1, o re-deploy é o que ativa o binding das Functions.
+5. **Quebra pré-existente na `main` (nov 2026)**: teste E2E PR10 "item pregado desliza na parede" (mobile) falha SEM nenhuma mudança local (reproduzido no stash, ambiente SwiftShader) — investigar física/pendência separada.
