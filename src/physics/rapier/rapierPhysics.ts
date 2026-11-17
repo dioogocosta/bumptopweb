@@ -55,12 +55,15 @@ export class RapierPhysics implements IPhysics {
 
   createRoom(room: RoomConfig): void {
     const { halfSize, wallHeight, wallThickness } = room;
+    // PR4a — caixas lado a lado: corpos deslocados para o centro da caixa
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
     const f = this.config.friction;
     const r = this.config.restitution;
 
     // Piso (plano estático grande)
     const floorBody = this.world.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0),
+      RAPIER.RigidBodyDesc.fixed().setTranslation(ox, -0.5, oz),
     );
     this.world.createCollider(
       RAPIER.ColliderDesc.cuboid(halfSize * 4, 0.5, halfSize * 4)
@@ -75,11 +78,11 @@ export class RapierPhysics implements IPhysics {
     const h = Math.max(wallHeight * 8, 400);
     const span = halfSize + wallThickness;
     const wallDefs: Array<{ pos: Vec3; half: Vec3 }> = [
-      { pos: { x: 0, y: h / 2, z: -halfSize }, half: { x: span, y: h / 2, z: wallThickness / 2 } },
-      { pos: { x: 0, y: h / 2, z: halfSize }, half: { x: span, y: h / 2, z: wallThickness / 2 } },
-      { pos: { x: -halfSize, y: h / 2, z: 0 }, half: { x: wallThickness / 2, y: h / 2, z: span } },
-      { pos: { x: halfSize, y: h / 2, z: 0 }, half: { x: wallThickness / 2, y: h / 2, z: span } },
-      { pos: { x: 0, y: h + wallThickness / 2, z: 0 }, half: { x: span, y: wallThickness / 2, z: span } },
+      { pos: { x: ox, y: h / 2, z: oz - halfSize }, half: { x: span, y: h / 2, z: wallThickness / 2 } },
+      { pos: { x: ox, y: h / 2, z: oz + halfSize }, half: { x: span, y: h / 2, z: wallThickness / 2 } },
+      { pos: { x: ox - halfSize, y: h / 2, z: oz }, half: { x: wallThickness / 2, y: h / 2, z: span } },
+      { pos: { x: ox + halfSize, y: h / 2, z: oz }, half: { x: wallThickness / 2, y: h / 2, z: span } },
+      { pos: { x: ox, y: h + wallThickness / 2, z: oz }, half: { x: span, y: wallThickness / 2, z: span } },
     ];
     for (const w of wallDefs) {
       const b = this.world.createRigidBody(

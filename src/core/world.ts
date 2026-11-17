@@ -9,6 +9,7 @@
  * mas em código puro e testável sem DOM/WebGL.
  */
 import type {
+  BoxEntityData,
   BumpObjectData,
   CameraState,
   PhysicsConfig,
@@ -95,8 +96,15 @@ export class World {
   private entries = new Map<string, Entry>();
   private camera: OrbitCameraController;
   private drag = new DampedSpringDrag();
-  private room: RoomConfig;
   private physicsConfig: PhysicsConfig;
+
+  // PR4a — Control Manager: as CAIXAS do mundo (espaço chão+4 paredes onde
+  // pastas/arquivos/notas acontecem). A caixa padrão é a sala original
+  // (centro do mundo) — mundos antigos (sem `boxes` no snapshot) migram
+  // para ela automaticamente. Itens pertencem à caixa via `meta.boxId`.
+  private boxes = new Map<string, BoxEntityData>();
+  private currentBoxId = 'box-default';
+  private roomsCreated = new Set<string>();
 
   private pickedId: string | null = null;
   private dragHeight = 0;
@@ -177,21 +185,133 @@ export class World {
 
   constructor(deps: WorldDeps, opts?: { room?: RoomConfig; physics?: PhysicsConfig; spring?: Partial<SpringConfig> }) {
     this.deps = deps;
-    this.room = opts?.room ?? DEFAULT_ROOM;
+    const room = opts?.room ?? DEFAULT_ROOM;
     this.physicsConfig = opts?.physics ?? DEFAULT_PHYSICS;
     this.physicsLevel = this.physicsConfig.level ?? 2;
     this.camera = new OrbitCameraController();
     // O limiar de toss vem das constantes reais do original (ground-truth).
     this.drag.setConfig({ minTossVelocitySq: this.physicsConfig.minStartTossVelocitySq });
     if (opts?.spring) this.drag.setConfig(opts.spring);
+    // PR4a — a caixa padrão é a sala original no centro do mundo; o nome
+    // só é sobrescrito no loadSnapshot quando o snapshot tem caixas salvas.
+    this.boxes.set('box-default', {
+      id: 'box-default',
+      name: t('box.default'),
+      type: 'comum',
+      pos: { x: 0, z: 0 },
+      halfSize: room.halfSize,
+      wallHeight: room.wallHeight,
+      wallThickness: room.wallThickness,
+    });
+    this.applyPanBounds();
   }
 
   async init(): Promise<void> {
-    await this.deps.physics.init(this.physicsConfig, this.room);
-    this.deps.physics.createRoom(this.room);
-    this.deps.renderer.addRoom(this.room);
+    await this.deps.physics.init(this.physicsConfig, this.roomOf(this.currentBox()));
+    this.ensureBoxRoom(this.currentBox());
     this.deps.renderer.setCamera(this.camera.getState());
     this.dirty = true;
+  }
+
+  // -------------------------------------------------------------------------
+  // PR4a — caixas (Control Manager): o espaço onde tudo acontece
+  // -------------------------------------------------------------------------
+
+  /** RoomConfig da caixa (com o centro dela como origem). */
+  private roomOf(box: BoxEntityData): RoomConfig {
+    return {
+      halfSize: box.halfSize,
+      wallHeight: box.wallHeight,
+      wallThickness: box.wallThickness,
+      origin: { x: box.pos.x, z: box.pos.z },
+    };
+  }
+
+  /** Cria chão+4 paredes (física + render) de uma caixa, uma única vez. */
+  private ensureBoxRoom(box: BoxEntityData): void {
+    if (this.roomsCreated.has(box.id)) return;
+    this.roomsCreated.add(box.id);
+    this.deps.physics.createRoom(this.roomOf(box));
+    this.deps.renderer.addRoom(this.roomOf(box));
+  }
+
+  /** Pan da câmera limitado à caixa atual. */
+  private applyPanBounds(): void {
+    const b = this.currentBox();
+    this.camera.setPanBounds({ x: b.pos.x, z: b.pos.z }, b.halfSize);
+  }
+
+  currentBox(): BoxEntityData {
+    return this.boxes.get(this.currentBoxId) ?? this.boxes.get('box-default')!;
+  }
+
+  listBoxes(): BoxEntityData[] {
+    return [...this.boxes.values()];
+  }
+
+  getBox(id: string): BoxEntityData | null {
+    return this.boxes.get(id) ?? null;
+  }
+
+  getCurrentBoxId(): string {
+    return this.currentBoxId;
+  }
+
+  /** Define a caixa ativa (onde novas pastas/notas nascem + limites de pan). */
+  setCurrentBox(id: string): boolean {
+    const box = this.boxes.get(id);
+    if (!box) return false;
+    this.currentBoxId = id;
+    this.applyPanBounds();
+    this.dirty = true;
+    return true;
+  }
+
+  /**
+   * PR4a/4.2 — cria uma nova caixa no mundo (chão + 4 paredes próprios).
+   * `pos` é o centro; vira a caixa ativa. Nome único garantido pelo chamador.
+   */
+  addBoxEntity(name: string, pos: { x: number; z: number }, type: BoxEntityData['type'] = 'comum'): BoxEntityData {
+    let n = 1;
+    let id = `box_${Date.now().toString(36)}_${n}`;
+    while (this.boxes.has(id)) id = `box_${Date.now().toString(36)}_${++n}`;
+    const room = this.roomOf(this.currentBox());
+    const box: BoxEntityData = {
+      id,
+      name,
+      type,
+      pos: { ...pos },
+      halfSize: room.halfSize,
+      wallHeight: room.wallHeight,
+      wallThickness: room.wallThickness,
+    };
+    this.boxes.set(id, box);
+    this.ensureBoxRoom(box);
+    this.setCurrentBox(id);
+    this.dirty = true;
+    return box;
+  }
+
+  /** Caixa de um item (pelo `meta.boxId`; item antigo sem boxId = caixa padrão). */
+  private boxOfEntry(e: Entry): BoxEntityData {
+    const id = e.data.meta?.boxId;
+    return (typeof id === 'string' && this.boxes.get(id)) || this.currentBox();
+  }
+
+  /** Voa até o CENTRO de uma caixa (animação da busca). false se não existe. */
+  flyToBox(id: string): boolean {
+    const box = this.boxes.get(id);
+    if (!box) return false;
+    const s = this.camera.getState();
+    this.searchAnim = {
+      fromTarget: { ...s.target },
+      toTarget: { x: box.pos.x, y: 0, z: box.pos.z },
+      d0: s.distance,
+      d1: Math.max(70, Math.min(s.distance, 110)),
+      p: 0,
+    };
+    this.dirty = true;
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -208,10 +328,16 @@ export class World {
   ): string {
     const id = newId();
     halfExtents = asSheet(halfExtents);
-    const inner = this.innerWall();
+    // PR4a — item nasce na CAIXA ATUAL (clamped dentro das paredes dela)
+    const box = this.currentBox();
+    const inner = this.innerWallOf(box);
     const mx = Math.max(0, inner - halfExtents.x);
     const mz = Math.max(0, inner - halfExtents.z);
-    pos = { x: clamp(pos.x, -mx, mx), y: Math.max(halfExtents.y, pos.y), z: clamp(pos.z, -mz, mz) };
+    pos = {
+      x: box.pos.x + clamp(pos.x - box.pos.x, -mx, mx),
+      y: Math.max(halfExtents.y, pos.y),
+      z: box.pos.z + clamp(pos.z - box.pos.z, -mz, mz),
+    };
     const body = this.deps.physics.createBox(id, pos, halfExtents);
     const render = this.deps.renderer.addBox(id, halfExtents, color);
     // PR26 — pastas ganham silhueta 3D recortada (corpo + aba)
@@ -232,6 +358,7 @@ export class World {
       meta: {
         halfExtents,
         color,
+        boxId: box.id,
         ...(opts?.fsPath !== undefined ? { fsPath: opts.fsPath } : {}),
         ...(opts?.isDir !== undefined ? { isDir: opts.isDir } : {}),
         ...(opts?.thumb !== undefined ? { thumb: opts.thumb } : {}),
@@ -1569,11 +1696,15 @@ export class World {
     const h = this.scaledHalf(e);
     const pos = targetPos ?? e.data.pose.position;
 
-    const targetX = Math.round(pos.x / GRID_SNAP) * GRID_SNAP;
-    const targetZ = Math.round(pos.z / GRID_SNAP) * GRID_SNAP;
+    // PR4a — alinhamento RELATIVO ao centro da caixa do item (paredes dela)
+    const box = this.boxOfEntry(e);
+    const relX = pos.x - box.pos.x;
+    const relZ = pos.z - box.pos.z;
+    const targetX = Math.round(relX / GRID_SNAP) * GRID_SNAP;
+    const targetZ = Math.round(relZ / GRID_SNAP) * GRID_SNAP;
 
-    const hs = this.room.halfSize;
-    const thickness = this.room.wallThickness;
+    const hs = box.halfSize;
+    const thickness = box.wallThickness;
     const maxX = hs - thickness - h.x;
     const maxZ = hs - thickness - h.z;
 
@@ -1581,12 +1712,15 @@ export class World {
     const clampedZ = Math.max(-maxZ, Math.min(maxZ, targetZ));
 
     // Se estiver ocupado por outro item próximo, tenta células adjacentes
-    const isOccupied = (x: number, z: number): boolean => {
+    // (isOccupied compara em coordenadas ABSOLUTAS do mundo)
+    const abs = (rx: number, rz: number) => ({ x: box.pos.x + rx, z: box.pos.z + rz });
+    const isOccupied = (rx: number, rz: number): boolean => {
+      const a = abs(rx, rz);
       for (const other of this.entries.values()) {
         if (other.data.id === e.data.id) continue;
         if (other.data.pinnedWall != null) continue;
         const op = other.data.pose.position;
-        if (Math.hypot(op.x - x, op.z - z) < 8.0) return true;
+        if (Math.hypot(op.x - a.x, op.z - a.z) < 8.0) return true;
       }
       return false;
     };
@@ -1612,7 +1746,8 @@ export class World {
       if (!found) return false;
     }
 
-    const alignedPos: Vec3 = { x: finalX, y: h.y, z: finalZ };
+    const aligned = abs(finalX, finalZ);
+    const alignedPos: Vec3 = { x: aligned.x, y: h.y, z: aligned.z };
     this.placeAt(e, alignedPos);
     // Alinha a rotação ao plano horizontal padrão (0° yaw)
     e.data.pose.rotation = { x: 0, y: 0, z: 0, w: 1 };
@@ -1687,32 +1822,36 @@ export class World {
       this.dirty = true;
       return;
     }
-    const inner = this.innerWall();
+    const box = this.boxOfEntry(e);
+    const bx = box.pos.x;
+    const bz = box.pos.z;
+    const inner = this.innerWallOf(box);
     const lowest = he.z + 2;
-    const highest = Math.max(lowest, this.room.wallHeight - he.z - 2);
+    const highest = Math.max(lowest, box.wallHeight - he.z - 2);
     const y = keepPose
       ? clamp(e.data.pose.position.y, lowest, highest)
-      : clamp(Math.max(e.data.pose.position.y, this.room.wallHeight * 0.4), lowest, highest);
+      : clamp(Math.max(e.data.pose.position.y, box.wallHeight * 0.4), lowest, highest);
     const off = inner - he.y - 0.5;
-    const alongX = clamp(e.data.pose.position.x, -(inner - he.x), inner - he.x);
-    const alongZ = clamp(e.data.pose.position.z, -(inner - he.x), inner - he.x);
+    // Coordenadas RELATIVAS ao centro da caixa (paredes dela)
+    const alongX = clamp(e.data.pose.position.x - bx, -(inner - he.x), inner - he.x);
+    const alongZ = clamp(e.data.pose.position.z - bz, -(inner - he.x), inner - he.x);
     let pos: Vec3;
     let rot: Pose['rotation'];
     switch (wall) {
       case 0:
-        pos = { x: alongX, y, z: -off };
+        pos = { x: bx + alongX, y, z: bz - off };
         rot = { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 };
         break;
       case 1:
-        pos = { x: alongX, y, z: off };
+        pos = { x: bx + alongX, y, z: bz + off };
         rot = { x: 0, y: Math.SQRT1_2, z: -Math.SQRT1_2, w: 0 };
         break;
       case 2:
-        pos = { x: -off, y, z: alongZ };
+        pos = { x: bx - off, y, z: bz + alongZ };
         rot = { x: 0.5, y: 0.5, z: -0.5, w: 0.5 };
         break;
       case 3:
-        pos = { x: off, y, z: alongZ };
+        pos = { x: bx + off, y, z: bz + alongZ };
         rot = { x: 0.5, y: -0.5, z: 0.5, w: 0.5 };
         break;
       default:
@@ -1761,9 +1900,12 @@ export class World {
     e: Entry,
   ): Vec3 | null {
     const he = this.scaledHalf(e);
-    const inner = this.innerWall();
+    const box = this.boxOfEntry(e);
+    const bx = box.pos.x;
+    const bz = box.pos.z;
+    const inner = this.innerWallOf(box);
     const lowest = he.z + 2;
-    const highest = Math.max(lowest, this.room.wallHeight - he.z - 2);
+    const highest = Math.max(lowest, box.wallHeight - he.z - 2);
     const ray = this.deps.renderer.screenToRay(screen);
     const o = ray.origin;
     const d = ray.direction;
@@ -1792,11 +1934,12 @@ export class World {
 
     const y = clamp(hitP.y, lowest, highest);
     if (planeZ) {
-      const alongX = clamp(hitP.x, -(inner - he.x), inner - he.x);
-      return { x: alongX, y, z: planeVal };
+      // `hitP` é absoluto — clampa o ALONG no espaço relativo ao centro da caixa
+      const alongX = clamp(hitP.x - bx, -(inner - he.x), inner - he.x);
+      return { x: bx + alongX, y, z: planeVal };
     }
-    const alongZ = clamp(hitP.z, -(inner - he.x), inner - he.x);
-    return { x: planeVal, y, z: alongZ };
+    const alongZ = clamp(hitP.z - bz, -(inner - he.x), inner - he.x);
+    return { x: planeVal, y, z: bz + alongZ };
   }
 
   isPinned(objectId: string): boolean {
@@ -1811,9 +1954,14 @@ export class World {
    */
   private wallContact(e: Entry): number | null {
     const CONTACT = 2.5;
-    const inner = this.innerWall();
+    const box = this.boxOfEntry(e);
+    const inner = this.innerWallOf(box);
     const { ex, ez } = this.floorExtents(e);
-    const p = e.data.pose.position;
+    // Posição RELATIVA ao centro da caixa (paredes dela)
+    const p = {
+      x: e.data.pose.position.x - box.pos.x,
+      z: e.data.pose.position.z - box.pos.z,
+    };
 
     const faceN = -inner + ez + CONTACT;
     const faceS = inner - ez - CONTACT;
@@ -1834,11 +1982,14 @@ export class World {
    * de `wallContact`: 0=norte, 1=sul, 2=oeste, 3=leste.
    */
   pickWall(p: Vec3): number | null {
-    const inner = this.innerWall();
-    if (p.z <= -inner) return 0;
-    if (p.z >= inner) return 1;
-    if (p.x <= -inner) return 2;
-    if (p.x >= inner) return 3;
+    const box = this.currentBox();
+    const inner = this.innerWallOf(box);
+    const x = p.x - box.pos.x;
+    const z = p.z - box.pos.z;
+    if (z <= -inner) return 0;
+    if (z >= inner) return 1;
+    if (x <= -inner) return 2;
+    if (x >= inner) return 3;
     return null;
   }
 
@@ -1860,7 +2011,7 @@ export class World {
       azimuth,
       elevation: 0.45,
       distance: 240,
-      target: { x: 0, y: 14, z: 0 },
+      target: { x: this.currentBox().pos.x, y: 14, z: this.currentBox().pos.z },
     };
     this.dirty = true;
   }
@@ -1996,32 +2147,38 @@ export class World {
     return { ex: c * he.x + sn * he.z, ez: sn * he.x + c * he.z };
   }
 
-  /** Face interna das paredes (distância do centro da sala). */
-  private innerWall(): number {
-    return this.room.halfSize - this.room.wallThickness / 2;
+  /** Face interna das paredes da caixa (distância do centro DELA). */
+  private innerWallOf(box: BoxEntityData): number {
+    return box.halfSize - box.wallThickness / 2;
   }
 
-  /** Posição mais próxima de `p` em que o item cabe inteiro dentro da sala. */
+  /** Posição mais próxima de `p` em que o item cabe inteiro dentro da PRÓPRIA caixa. */
   private clampToRoom(e: Entry, p: Vec3): Vec3 {
-    const inner = this.innerWall();
+    const box = this.boxOfEntry(e);
+    const inner = this.innerWallOf(box);
     const { ex, ez } = this.floorExtents(e);
     const mx = Math.max(0, inner - ex);
     const mz = Math.max(0, inner - ez);
     return {
-      x: clamp(p.x, -mx, mx),
+      x: box.pos.x + clamp(p.x - box.pos.x, -mx, mx),
       y: Math.max(this.scaledHalf(e).y, p.y),
-      z: clamp(p.z, -mz, mz),
+      z: box.pos.z + clamp(p.z - box.pos.z, -mz, mz),
     };
   }
 
-  /** True se o item está inteiro dentro da sala (com folga numérica). */
+  /** True se o item está inteiro dentro da PRÓPRIA caixa (com folga numérica). */
   isInsideRoom(id: string): boolean {
     const e = this.entries.get(id);
     if (!e) return false;
+    const box = this.boxOfEntry(e);
+    const inner = this.innerWallOf(box);
     const p = e.data.pose.position;
     if (e.data.pinnedWall != null) {
-      const inner = this.innerWall();
-      return Math.abs(p.x) <= inner && Math.abs(p.z) <= inner && p.y >= 0;
+      return (
+        Math.abs(p.x - box.pos.x) <= inner &&
+        Math.abs(p.z - box.pos.z) <= inner &&
+        p.y >= 0
+      );
     }
     const c = this.clampToRoom(e, p);
     return (
@@ -2745,7 +2902,6 @@ export class World {
   private checkWallToss(dt: number, preStep: Map<string, Vec3>): void {
     if (this.recentToss.size === 0) return;
     const CONTACT = 2.5; // tolerância de contato com a face interna da parede
-    const inner = this.innerWall();
 
     for (const [id, ttl] of [...this.recentToss]) {
       const remaining = ttl - dt; // decai com o timestep
@@ -2765,16 +2921,23 @@ export class World {
       if (speed < 40) continue; // devagar demais = não foi um toss em voo
 
       const p = this.deps.physics.getPose(e.body).position;
+      const box = this.boxOfEntry(e);
+      const bx = box.pos.x;
+      const bz = box.pos.z;
+      const inner = this.innerWallOf(box);
       const { ex, ez } = this.floorExtents(e);
+      // Faces RELATIVAS ao centro da caixa do item (paredes dela)
+      const relX = p.x - bx;
+      const relZ = p.z - bz;
       const faceN = -inner + ez + CONTACT;
       const faceS = inner - ez - CONTACT;
       const faceW = -inner + ex + CONTACT;
       const faceE = inner - ex - CONTACT;
 
-      if (p.z <= faceN && v.z < -20) this.pinToss(id, 0);
-      else if (p.z >= faceS && v.z > 20) this.pinToss(id, 1);
-      else if (p.x <= faceW && v.x < -20) this.pinToss(id, 2);
-      else if (p.x >= faceE && v.x > 20) this.pinToss(id, 3);
+      if (relZ <= faceN && v.z < -20) this.pinToss(id, 0);
+      else if (relZ >= faceS && v.z > 20) this.pinToss(id, 1);
+      else if (relX <= faceW && v.x < -20) this.pinToss(id, 2);
+      else if (relX >= faceE && v.x > 20) this.pinToss(id, 3);
     }
   }
 
@@ -2860,6 +3023,8 @@ export class World {
   toSnapshot(): SceneSnapshot {
     return {
       schemaVersion: 1,
+      boxes: this.listBoxes(),
+      currentBoxId: this.currentBoxId,
       objects: [...this.entries.values()].map((e) => ({ ...e.data, pose: { ...e.data.pose } })),
       camera: this.camera.getState(),
       piles: this.piles.serialize(),
@@ -2868,11 +3033,56 @@ export class World {
 
   /** Restaura o estado a partir de um snapshot (após carregar do repo). */
   loadSnapshot(snap: SceneSnapshot): void {
+    // ------------------------------------------------------------------
+    // PR4a — CAIXAS: mundos antigos (sem `boxes`) migram p/ a caixa padrão
+    // (a sala original no centro). Novos: recria cada caixa (chão+paredes).
+    // ------------------------------------------------------------------
+    this.boxes.clear();
+    this.roomsCreated.clear();
+    const boxes = Array.isArray(snap.boxes) && snap.boxes.length > 0 ? snap.boxes : null;
+    if (boxes) {
+      for (const b of boxes) {
+        if (!b || typeof b.id !== 'string') continue;
+        this.boxes.set(b.id, {
+          id: b.id,
+          name: typeof b.name === 'string' && b.name ? b.name : t('box.default'),
+          type: b.type ?? 'comum',
+          pos: { x: Number(b.pos?.x) || 0, z: Number(b.pos?.z) || 0 },
+          halfSize: Number(b.halfSize) || DEFAULT_ROOM.halfSize,
+          wallHeight: Number(b.wallHeight) || DEFAULT_ROOM.wallHeight,
+          wallThickness: Number(b.wallThickness) || DEFAULT_ROOM.wallThickness,
+        });
+      }
+    }
+    if (this.boxes.size === 0) {
+      this.boxes.set('box-default', {
+        id: 'box-default',
+        name: t('box.default'),
+        type: 'comum',
+        pos: { x: 0, z: 0 },
+        halfSize: DEFAULT_ROOM.halfSize,
+        wallHeight: DEFAULT_ROOM.wallHeight,
+        wallThickness: DEFAULT_ROOM.wallThickness,
+      });
+    }
+    if (snap.currentBoxId && this.boxes.has(snap.currentBoxId)) {
+      this.currentBoxId = snap.currentBoxId;
+    } else if (!this.boxes.has(this.currentBoxId)) {
+      this.currentBoxId = this.boxes.keys().next().value as string;
+    }
+    this.applyPanBounds();
+
     // Remove existentes
     for (const id of [...this.entries.keys()]) this.removeObject(id);
+    // Física/render das caixas: a da init já existe; as novas são criadas aqui
+    for (const b of this.boxes.values()) this.ensureBoxRoom(b);
     for (const o of snap.objects) {
       // Normaliza metadados de snapshots antigos (sem halfExtents/scale)
       o.meta.halfExtents = asSheet(o.meta.halfExtents ?? vec3(3, 0.6, 3));
+      // PR4a — item sem caixa (mundo antigo) pertence à caixa padrão
+      if (typeof o.meta.boxId !== 'string' || !this.boxes.has(o.meta.boxId)) {
+        o.meta.boxId = this.currentBoxId;
+      }
       if (!(o.scale > 0)) o.scale = 1;
       const halfExtents = o.meta.halfExtents;
       const scale = o.scale;

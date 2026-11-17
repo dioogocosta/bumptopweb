@@ -100,6 +100,14 @@ export interface SceneSnapshot {
   camera: CameraState;
   /** Pose de cada pilha é derivada dos filhos; aqui guardamos layout. */
   piles: Record<string, { layout: PileLayout; page: number }>;
+  /**
+   * PR4a (Control Manager) — as CAIXAS do mundo (espaço com chão + 4 paredes
+   * onde pastas/arquivos/notas acontecem). Opcional p/ compatibilidade:
+   * snapshot sem `boxes` = mundo antigo → vira 1 caixa padrão no centro.
+   */
+  boxes?: BoxEntityData[];
+  /** PR4a — caixa ativa (onde novas pastas/notas nascem). Opcional (mundo antigo). */
+  currentBoxId?: string;
 }
 
 export interface CameraState {
@@ -153,6 +161,11 @@ export interface RoomConfig {
   /** Altura das paredes. */
   wallHeight: number;
   wallThickness: number;
+  /**
+   * PR4a — centro da caixa no mundo (vários boxes lado a lado no mesmo
+   * mundo 3D). Ausente = {0,0} (caixa original no centro).
+   */
+  origin?: { x: number; z: number };
 }
 
 export const DEFAULT_ROOM: RoomConfig = {
@@ -160,3 +173,21 @@ export const DEFAULT_ROOM: RoomConfig = {
   wallHeight: 55,
   wallThickness: 10,
 };
+
+/** PR4a — tipos de caixa. 'root'/'kanban'/'backlog' entram no PR 4.3. */
+export type BoxType = 'comum' | 'root' | 'kanban' | 'backlog';
+
+/**
+ * PR4a — uma CAIXA do Control Manager: o espaço (chão + 4 paredes) onde
+ * tudo acontece. Pastas/arquivos/notas ficam DENTRO dela (`meta.boxId`).
+ */
+export interface BoxEntityData {
+  id: string;
+  name: string;
+  type: BoxType;
+  /** Centro da caixa no chão do mundo. */
+  pos: { x: number; z: number };
+  halfSize: number;
+  wallHeight: number;
+  wallThickness: number;
+}

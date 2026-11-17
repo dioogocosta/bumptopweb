@@ -14,10 +14,13 @@ const MIN_ELEVATION = 0.05; // nunca olha de baixo do piso
 const MAX_ELEVATION = 1.45; // quase top-down
 const MIN_DISTANCE = 24;
 const MAX_DISTANCE = 460; // sala ~130 de meia-distância
-const PAN_BOUNDS = 140; // limita o pan dentro da sala
+const PAN_BOUNDS = 140; // limita o pan dentro da sala (default)
 
 export class OrbitCameraController {
   private state: CameraState;
+  /** PR4a — limites do pan seguem a CAIXA atual (centro + meia-distância). */
+  private panCenter = { x: 0, z: 0 };
+  private panHalf = PAN_BOUNDS;
 
   constructor(initial?: Partial<CameraState>) {
     this.state = {
@@ -27,6 +30,12 @@ export class OrbitCameraController {
       elevation: initial?.elevation ?? 1.08,
       fov: initial?.fov ?? 48,
     };
+  }
+
+  /** PR4a — redefine a área de pan p/ a caixa atual (chamado pelo World). */
+  setPanBounds(center: { x: number; z: number }, half: number): void {
+    this.panCenter = { ...center };
+    this.panHalf = Math.max(PAN_BOUNDS, half);
   }
 
   getState(): CameraState {
@@ -61,13 +70,21 @@ export class OrbitCameraController {
     this.state.distance = clamp(this.state.distance * factor, MIN_DISTANCE, MAX_DISTANCE);
   }
 
-  /** Pan do pivot (limitado à sala). */
+  /** Pan do pivot (limitado à caixa atual). */
   pan(dx: number, dy: number): void {
     const sin = Math.sin(this.state.azimuth);
     const cos = Math.cos(this.state.azimuth);
     // Pan relativo à orientação da câmera
-    this.state.target.x = clamp(this.state.target.x + (dx * cos - dy * sin), -PAN_BOUNDS, PAN_BOUNDS);
-    this.state.target.z = clamp(this.state.target.z + (dx * sin + dy * cos), -PAN_BOUNDS, PAN_BOUNDS);
+    this.state.target.x = clamp(
+      this.state.target.x + (dx * cos - dy * sin),
+      this.panCenter.x - this.panHalf,
+      this.panCenter.x + this.panHalf,
+    );
+    this.state.target.z = clamp(
+      this.state.target.z + (dx * sin + dy * cos),
+      this.panCenter.z - this.panHalf,
+      this.panCenter.z + this.panHalf,
+    );
   }
 
   /** Interpola suave até um preset (transições de "parede" do original). */

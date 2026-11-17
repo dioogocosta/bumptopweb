@@ -466,6 +466,75 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     expect(cam.distance).toBeGreaterThanOrEqual(70);
   });
 
+  it('PR4a: caixa padrão existe, itens nascem nela e snapshot faz roundtrip', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    expect(world.listBoxes()).toHaveLength(1);
+    expect(world.getCurrentBoxId()).toBe('box-default');
+    const nota = world.addStickyNote({ x: 5, y: 1.2, z: 5 }, 'oi');
+    expect(world.getObject(nota)!.meta.boxId).toBe('box-default');
+
+    const snap = world.toSnapshot();
+    expect(snap.boxes).toHaveLength(1);
+    expect(snap.currentBoxId).toBe('box-default');
+
+    // Roundtrip: outro mundo restaura as caixas e o pertencimento dos itens
+    const physics2 = makePhysicsMock();
+    const renderer2 = makeRendererMock();
+    const w2 = new World({ physics: physics2, renderer: renderer2 });
+    await w2.init();
+    w2.loadSnapshot(snap);
+    expect(w2.listBoxes()).toHaveLength(1);
+    expect(w2.getObject(nota)!.meta.boxId).toBe('box-default');
+    expect(w2.getCurrentBoxId()).toBe('box-default');
+  });
+
+  it('PR4a: mundo antigo (snapshot SEM boxes) migra para a caixa padrão', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const nota = world.addStickyNote({ x: 5, y: 1.2, z: 5 }, 'do mundo antigo');
+    const snap = world.toSnapshot();
+    delete (snap as { boxes?: unknown }).boxes;
+    delete (snap as { currentBoxId?: unknown }).currentBoxId;
+
+    const { world: w2 } = await makeWorld(makeOverlayMock());
+    w2.loadSnapshot(snap);
+    expect(w2.listBoxes()).toHaveLength(1);
+    expect(w2.listBoxes()[0].id).toBe('box-default');
+    expect(w2.getObject(nota)!.meta.boxId).toBe('box-default');
+  });
+
+  it('PR4a: addBoxEntity cria caixa nova (vira ativa) e itens nascem clampados NELA', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const b2 = world.addBoxEntity('P4A Dois', { x: 400, z: 0 });
+    expect(world.listBoxes()).toHaveLength(2);
+    expect(world.getCurrentBoxId()).toBe(b2.id);
+
+    // Item criado longe é clampado para dentro das paredes da caixa 2
+    const nota = world.addStickyNote({ x: 400 + 500, y: 1.2, z: 0 }, 'na b2');
+    const p = world.getObject(nota)!.pose.position;
+    expect(Math.abs(p.x - 400)).toBeLessThanOrEqual(124); // inner 125 - he 6 ≈ 119
+    expect(Math.abs(p.z)).toBeLessThanOrEqual(124);
+    expect(world.getObject(nota)!.meta.boxId).toBe(b2.id);
+
+    // Itens da caixa 1 continuam no lugar (clamped à caixa DELA)
+    const nota1 = world.addStickyNote({ x: 9999, y: 1.2, z: 0 }, 'fora'); // criada na b2 (ativa)
+    const p1 = world.getObject(nota1)!.pose.position;
+    expect(Math.abs(p1.x - 400)).toBeLessThanOrEqual(124);
+  });
+
+  it('PR4a: setCurrentBox inválida = false; flyToBox voa até o centro da caixa', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    expect(world.setCurrentBox('nao-existe')).toBe(false);
+    expect(world.flyToBox('nao-existe')).toBe(false);
+
+    const b2 = world.addBoxEntity('Voar', { x: 400, z: -300 });
+    expect(world.flyToBox(b2.id)).toBe(true);
+    for (let i = 0; i < 40; i++) world.update(1 / 30);
+    const cam = world.getCamera();
+    expect(cam.target.x).toBeCloseTo(400, 0);
+    expect(cam.target.z).toBeCloseTo(-300, 0);
+  });
+
   it('PR15: modo laço p/ TOQUE — arrastar o dedo no chão vazio desenha o laço', async () => {
     const overlay = makeOverlayMock();
     const { world, renderer } = await makeWorld(overlay);

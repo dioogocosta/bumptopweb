@@ -354,20 +354,22 @@ export class DomOverlay implements IOverlay {
   // -------------------------------------------------------------------------
 
   /**
-   * Painel de vidro listando as caixas (pastas) da cena. `boxes` = lista
-   * leve {id, label} (o chamador filtra `meta.isDir` no world — o overlay
-   * NÃO conhece o core). Eventos no root: `boxgoto` {id}, `boxesclose`.
+   * Painel de vidro listando as CAIXAS (espaços chão+4 paredes onde as
+   * pastas/arquivos/notas acontecem). `boxes` = {id, label, current} —
+   * o chamador lê do world (o overlay NÃO conhece o core). Eventos no
+   * root: `boxgoto` {id}, `boxesclose`.
    */
-  showBoxesPanel(boxes: Array<{ id: string; label: string }>): void {
+  showBoxesPanel(boxes: Array<{ id: string; label: string; current?: boolean }>): void {
     if (!this.boxesModal) this.buildBoxesModal();
     const list = this.boxesList!;
     list.textContent = '';
     for (const b of boxes) {
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'boxes-item';
+      item.className = b.current ? 'boxes-item cur' : 'boxes-item';
       item.textContent = b.label || t('ui.boxesUnnamed');
       item.title = b.label || t('ui.boxesUnnamed');
+      if (b.current) item.setAttribute('aria-current', 'true');
       item.addEventListener('click', () => {
         this.hideBoxesPanel();
         this.root.dispatchEvent(new CustomEvent('boxgoto', { detail: b.id, bubbles: true }));
