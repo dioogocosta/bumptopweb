@@ -2,7 +2,8 @@
  * PR27 — Helpers compartilhados das Pages Functions de auth/cena.
  *
  * SEGURANÇA (spec rígida — não desviar):
- * - Senha: PBKDF2-SHA256 via WebCrypto do Worker, 150.000 iterações,
+ * - Senha: PBKDF2-SHA256 via WebCrypto do Worker, 100.000 iterações (mínimo
+ *   da spec; 150k estourava o limite de CPU do plano free em produção),
  *   salt aleatório de 16 bytes POR usuário. A senha nunca é armazenada.
  * - Sessão: token aleatório de 32 bytes; o browser recebe o token em cookie
  *   HttpOnly + Secure + SameSite=Strict (30 dias); no banco vai SÓ o SHA-256
@@ -99,7 +100,13 @@ export async function ensureSchema(db: D1Like): Promise<void> {
 // Criptografia (WebCrypto do Worker)
 // ---------------------------------------------------------------------------
 
-const PBKDF2_ITER = 150_000;
+// PR27 — 100k iterações = mínimo da spec (PROMPT-GEMINI.md: ≥100.000). A
+// versão inicial com 150k estourava o limite de CPU do plano free do Workers
+// (10 ms por invocação) em produção: signup/login com PBKDF2 → 500. O
+// wrangler local (miniflare) NÃO aplica esse limite — por isso passava lá.
+// O PBKDF2 do Workers é nativo (BoringSSL), mas ~100k × HMAC-SHA256 ainda
+// consome bastante; se 100k também estourar, plano B: PBKDF2 no CLIENTE.
+const PBKDF2_ITER = 100_000;
 
 function bytesToHex(b: Uint8Array): string {
   let s = '';
