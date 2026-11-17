@@ -171,7 +171,9 @@ try {
       !t.includes('X-Frame') &&
       !t.includes('401') &&
       !t.includes('Unauthorized') &&
-      !t.includes('400 (Bad Request)') &&
+      // 400 de console = os POSTs dummy da própria sonda (login fake/UI) —
+      // texto varia por versão do Chromium ("400 (Bad Request)" ou só "400 ()")
+      !/status of 400/.test(t) &&
       // 503 = D1 ainda não bindado pelo dono (degradação esperada em produção)
       !t.includes('503'),
   );
