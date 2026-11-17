@@ -54,8 +54,6 @@ export const onRequestPost = async (ctx: FnCtx<EnvLike>): Promise<Response> => {
     return json({ ok: true, email }, 200, { 'Set-Cookie': cookie });
   } catch (e) {
     console.warn('signup error', e);
-    // TEMP (diagnóstico CPU): expõe a mensagem do erro no 500. REMOVER após o diagnóstico.
-    const detail = String((e as Error)?.message ?? e).slice(0, 80);
-    return json({ error: 'AUTH_UNAVAILABLE', detail }, 500);
+    return json({ error: 'AUTH_UNAVAILABLE' }, 500);
   }
 };
