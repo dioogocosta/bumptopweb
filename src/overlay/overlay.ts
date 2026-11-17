@@ -171,6 +171,9 @@ export class DomOverlay implements IOverlay {
   private boxesList: HTMLElement | null = null;
   private boxesEmpty: HTMLElement | null = null;
   private boxesCleanup: (() => void) | null = null;
+  /** PR4.2 — CRUD: dados do painel (p/ refiltrar/re-render) + campo busca. */
+  private boxesData: Array<{ id: string; label: string; current?: boolean }> = [];
+  private boxesSearch: HTMLInputElement | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -357,39 +360,144 @@ export class DomOverlay implements IOverlay {
    * Painel de vidro listando as CAIXAS (espaços chão+4 paredes onde as
    * pastas/arquivos/notas acontecem). `boxes` = {id, label, current} —
    * o chamador lê do world (o overlay NÃO conhece o core). Eventos no
-   * root: `boxgoto` {id}, `boxesclose`.
+   * root: `boxgoto` {id}, `boxcreate`, `boxrename` {id, name},
+   * `boxdelete` {id}, `boxesclose`.
    */
   showBoxesPanel(boxes: Array<{ id: string; label: string; current?: boolean }>): void {
     if (!this.boxesModal) this.buildBoxesModal();
-    const list = this.boxesList!;
-    list.textContent = '';
-    for (const b of boxes) {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = b.current ? 'boxes-item cur' : 'boxes-item';
-      item.textContent = b.label || t('ui.boxesUnnamed');
-      item.title = b.label || t('ui.boxesUnnamed');
-      if (b.current) item.setAttribute('aria-current', 'true');
-      item.addEventListener('click', () => {
-        this.hideBoxesPanel();
-        this.root.dispatchEvent(new CustomEvent('boxgoto', { detail: b.id, bubbles: true }));
-      });
-      list.appendChild(item);
-    }
-    this.boxesEmpty!.style.display = boxes.length === 0 ? 'block' : 'none';
+    this.boxesData = boxes;
     const m = this.boxesModal!;
     m.style.display = 'flex';
     this.settingsBtn?.classList.add('sel');
+    this.renderBoxesList();
     // Esc fecha (cleanup guardado p/ o hide)
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') this.hideBoxesPanel();
+    if (!this.boxesCleanup) {
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') this.hideBoxesPanel();
+      };
+      document.addEventListener('keydown', onKey);
+      this.boxesCleanup = () => document.removeEventListener('keydown', onKey);
+    }
+  }
+
+  /** PR4.2 — (re)desenha a lista com o filtro de pesquisa aplicado. */
+  private renderBoxesList(): void {
+    const list = this.boxesList!;
+    const q = (this.boxesSearch?.value ?? '').trim().toLowerCase();
+    list.textContent = '';
+    const filtradas = this.boxesData.filter((b) =>
+      q === '' ? true : (b.label || '').toLowerCase().includes(q),
+    );
+    for (const b of filtradas) {
+      const item = document.createElement('div');
+      item.className = b.current ? 'boxes-item cur' : 'boxes-item';
+      const nome = document.createElement('button');
+      nome.type = 'button';
+      nome.className = 'boxes-item-name';
+      nome.textContent = b.label || t('ui.boxesUnnamed');
+      nome.title = b.label || t('ui.boxesUnnamed');
+      nome.addEventListener('click', () => {
+        this.hideBoxesPanel();
+        this.root.dispatchEvent(new CustomEvent('boxgoto', { detail: b.id, bubbles: true }));
+      });
+      item.appendChild(nome);
+      // Ações (PR4.2): renomear ✏️ + excluir 🗑 (a caixa padrão não exclui)
+      const actions = document.createElement('span');
+      actions.className = 'boxes-item-actions';
+      const ren = document.createElement('button');
+      ren.type = 'button';
+      ren.className = 'boxes-act boxes-act-ren';
+      ren.textContent = '✏️';
+      ren.title = t('ui.boxesRename');
+      ren.setAttribute('aria-label', t('ui.boxesRename'));
+      ren.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.startBoxRename(item, b);
+      });
+      actions.appendChild(ren);
+      // PR4.2 — a caixa padrão NÃO exclui (a ativa pode: volta p/ a Comum)
+      if (b.id !== 'box-default') {
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'boxes-act boxes-act-del';
+        del.textContent = '🗑️';
+        del.title = t('ui.boxesDelete');
+        del.setAttribute('aria-label', t('ui.boxesDelete'));
+        del.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          this.confirmBoxDelete(item, b);
+        });
+        actions.appendChild(del);
+      }
+      item.appendChild(actions);
+      list.appendChild(item);
+    }
+    this.boxesEmpty!.style.display = filtradas.length === 0 ? 'block' : 'none';
+  }
+
+  /** PR4.2 — renomear inline: troca o nome por input; Enter/blur commita. */
+  private startBoxRename(item: HTMLElement, b: { id: string; label: string }): void {
+    const nome = item.querySelector('.boxes-item-name') as HTMLElement | null;
+    if (!nome || item.querySelector('.boxes-rename')) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'boxes-rename';
+    input.maxLength = 60;
+    input.value = b.label || '';
+    input.setAttribute('aria-label', t('ui.boxesRename'));
+    nome.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => {
+      const value = input.value.trim();
+      if (value && value !== b.label) {
+        this.root.dispatchEvent(
+          new CustomEvent('boxrename', { detail: { id: b.id, name: value }, bubbles: true }),
+        );
+      } else {
+        this.renderBoxesList(); // volta ao normal sem mudar nada
+      }
     };
-    document.addEventListener('keydown', onKey);
-    this.boxesCleanup = () => document.removeEventListener('keydown', onKey);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      } else if (e.key === 'Escape') {
+        input.value = b.label || '';
+        input.blur();
+      }
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  /** PR4.2 — confirmação de excluir dentro do próprio item. */
+  private confirmBoxDelete(item: HTMLElement, b: { id: string; label: string }): void {
+    if (item.querySelector('.boxes-confirm')) return;
+    item.textContent = '';
+    item.classList.add('confirming');
+    const msg = document.createElement('span');
+    msg.className = 'boxes-confirm-msg';
+    msg.textContent = t('ui.boxesDeleteConfirm');
+    const yes = document.createElement('button');
+    yes.type = 'button';
+    yes.className = 'boxes-act boxes-yes';
+    yes.textContent = t('ui.boxesYes');
+    yes.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('boxdelete', { detail: b.id, bubbles: true }));
+    });
+    const no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'boxes-act boxes-no';
+    no.textContent = t('ui.boxesNo');
+    no.addEventListener('click', () => this.renderBoxesList());
+    item.appendChild(msg);
+    item.appendChild(yes);
+    item.appendChild(no);
   }
 
   hideBoxesPanel(): void {
     if (this.boxesModal) this.boxesModal.style.display = 'none';
+    if (this.boxesSearch) this.boxesSearch.value = '';
     this.settingsBtn?.classList.remove('sel');
     this.boxesCleanup?.();
     this.boxesCleanup = null;
@@ -419,12 +527,33 @@ export class DomOverlay implements IOverlay {
       this.hideBoxesPanel();
       this.root.dispatchEvent(new CustomEvent('boxesclose', { bubbles: true }));
     });
+    const head = document.createElement('div');
+    head.className = 'boxes-head';
     const title = document.createElement('h2');
     title.className = 'boxes-title';
     title.textContent = t('ui.boxesTitle');
+    head.appendChild(title);
+    // PR4.2 — botão "+ Nova caixa"
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'boxes-add';
+    add.textContent = `+ ${t('ui.boxesAdd')}`;
+    add.title = t('ui.boxesAdd');
+    add.setAttribute('aria-label', t('ui.boxesAdd'));
+    add.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('boxcreate', { bubbles: true }));
+    });
+    head.appendChild(add);
     const hint = document.createElement('div');
     hint.className = 'boxes-hint';
     hint.textContent = t('ui.boxesHint');
+    // PR4.2 — pesquisa de caixas por nome (filtro local, sem tocar no core)
+    this.boxesSearch = document.createElement('input');
+    this.boxesSearch.type = 'text';
+    this.boxesSearch.className = 'boxes-search';
+    this.boxesSearch.placeholder = t('ui.boxesSearch');
+    this.boxesSearch.setAttribute('aria-label', t('ui.boxesSearch'));
+    this.boxesSearch.addEventListener('input', () => this.renderBoxesList());
     this.boxesList = document.createElement('div');
     this.boxesList.className = 'boxes-list';
     this.boxesEmpty = document.createElement('div');
@@ -432,8 +561,9 @@ export class DomOverlay implements IOverlay {
     this.boxesEmpty.textContent = t('ui.boxesEmpty');
     this.boxesEmpty.style.display = 'none';
     card.appendChild(close);
-    card.appendChild(title);
+    card.appendChild(head);
     card.appendChild(hint);
+    card.appendChild(this.boxesSearch);
     card.appendChild(this.boxesList);
     card.appendChild(this.boxesEmpty);
     m.appendChild(card);

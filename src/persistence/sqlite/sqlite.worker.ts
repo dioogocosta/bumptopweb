@@ -218,9 +218,17 @@ async function handle(method: string, params: unknown[]): Promise<unknown> {
           ]);
         }
         prepareRun(
-          `INSERT INTO scene (id, schema_ver, camera_json, updated_at) VALUES (1,?,?,?)
-           ON CONFLICT(id) DO UPDATE SET camera_json=excluded.camera_json, updated_at=excluded.updated_at, schema_ver=excluded.schema_ver`,
-          [snapshot.schemaVersion, JSON.stringify(snapshot.camera), Date.now()],
+          `INSERT INTO scene (id, schema_ver, camera_json, updated_at, boxes_json, current_box_id) VALUES (1,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET camera_json=excluded.camera_json, updated_at=excluded.updated_at, schema_ver=excluded.schema_ver,
+             boxes_json=excluded.boxes_json, current_box_id=excluded.current_box_id`,
+          [
+            snapshot.schemaVersion,
+            JSON.stringify(snapshot.camera),
+            Date.now(),
+            // PR4.2 — caixas: só grava quando existem (null = legado, 1 caixa)
+            snapshot.boxes && snapshot.boxes.length > 0 ? JSON.stringify(snapshot.boxes) : null,
+            snapshot.currentBoxId ?? null,
+          ],
         );
         db.exec('COMMIT');
       } catch (e) {
@@ -232,7 +240,7 @@ async function handle(method: string, params: unknown[]): Promise<unknown> {
     }
 
     case 'loadScene': {
-      const stmt = db.prepare('SELECT schema_ver, camera_json FROM scene WHERE id = 1');
+      const stmt = db.prepare('SELECT schema_ver, camera_json, boxes_json, current_box_id FROM scene WHERE id = 1');
       if (!stmt.step()) {
         stmt.reset();
         stmt.finalize();
@@ -240,6 +248,8 @@ async function handle(method: string, params: unknown[]): Promise<unknown> {
       }
       const schemaVer = stmt.get(0) as number;
       const cameraJson = stmt.get(1) as string;
+      const boxesJson = stmt.get(2) as string | null;
+      const currentBoxId = stmt.get(3) as string | null;
       stmt.reset();
       stmt.finalize();
 
@@ -252,6 +262,15 @@ async function handle(method: string, params: unknown[]): Promise<unknown> {
         camera: JSON.parse(cameraJson),
         piles,
       };
+      // PR4.2 — caixas salvas (legado sem boxes = mundo de 1 caixa, o core migra)
+      if (boxesJson) {
+        try {
+          snapshot.boxes = JSON.parse(boxesJson);
+          snapshot.currentBoxId = currentBoxId ?? undefined;
+        } catch {
+          // JSON corrompido: ignora e deixa o core migrar p/ box-default
+        }
+      }
       return snapshot;
     }
 

@@ -269,18 +269,22 @@ export class World {
 
   /**
    * PR4a/4.2 — cria uma nova caixa no mundo (chão + 4 paredes próprios).
-   * `pos` é o centro; vira a caixa ativa. Nome único garantido pelo chamador.
+   * Sem `pos`, escolhe o próximo slot na DIAGONAL da torre (ref. HorizonX).
+   * Vira a caixa ativa. Nome único garantido pelo chamador.
    */
-  addBoxEntity(name: string, pos: { x: number; z: number }, type: BoxEntityData['type'] = 'comum'): BoxEntityData {
+  addBoxEntity(name: string, pos?: { x: number; z: number }, type: BoxEntityData['type'] = 'comum'): BoxEntityData {
     let n = 1;
     let id = `box_${Date.now().toString(36)}_${n}`;
     while (this.boxes.has(id)) id = `box_${Date.now().toString(36)}_${++n}`;
     const room = this.roomOf(this.currentBox());
+    // Diagonal: cada caixa nova fica NE da anterior (fora da anterior)
+    const k = this.boxes.size;
+    const finalPos = pos ?? { x: 340 * k, z: -340 * k };
     const box: BoxEntityData = {
       id,
       name,
       type,
-      pos: { ...pos },
+      pos: { ...finalPos },
       halfSize: room.halfSize,
       wallHeight: room.wallHeight,
       wallThickness: room.wallThickness,
@@ -290,6 +294,51 @@ export class World {
     this.setCurrentBox(id);
     this.dirty = true;
     return box;
+  }
+
+  /** PR4.2 — renomeia a caixa (painel). false se o id não existe. */
+  renameBox(id: string, name: string): boolean {
+    const box = this.boxes.get(id);
+    const next = name.trim().slice(0, 60);
+    if (!box || !next) return false;
+    box.name = next;
+    this.dirty = true;
+    return true;
+  }
+
+  /**
+   * PR4.2 — exclui a caixa: os ITENS DENTRO dela voltam para a caixa
+   * destino (padrão: a Caixa Comum), clampados dentro das paredes dela;
+   * física/render da sala removidos. NÃO exclui a caixa padrão.
+   * Retorna a qtd. de itens movidos, ou null se não pode excluir.
+   */
+  removeBoxEntity(id: string, destId?: string): number | null {
+    const box = this.boxes.get(id);
+    if (!box || id === 'box-default') return null;
+    const dest = (destId && this.boxes.get(destId)) || this.boxes.get('box-default')!;
+    if (dest.id === id) return null;
+    let moved = 0;
+    for (const e of this.entries.values()) {
+      if (e.data.meta?.boxId !== id) continue;
+      // Pregado na parede da caixa excluída → volta ao chão da caixa destino
+      if (e.data.pinnedWall != null) {
+        e.data.pinnedWall = null;
+        e.data.pose.rotation = identityQuat();
+        this.deps.physics.setFrozen(e.body, false);
+        this.deps.physics.setRotation(e.body, e.data.pose.rotation);
+      }
+      e.data.meta.boxId = dest.id;
+      const c = this.clampToRoom(e, e.data.pose.position);
+      this.placeAt(e, c);
+      moved++;
+    }
+    this.boxes.delete(id);
+    this.roomsCreated.delete(id);
+    this.deps.physics.removeRoom(this.roomOf(box));
+    this.deps.renderer.removeRoom(this.roomOf(box));
+    if (this.currentBoxId === id) this.setCurrentBox(dest.id);
+    this.dirty = true;
+    return moved;
   }
 
   /** Caixa de um item (pelo `meta.boxId`; item antigo sem boxId = caixa padrão). */

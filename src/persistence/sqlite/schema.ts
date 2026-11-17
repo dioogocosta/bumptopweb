@@ -71,6 +71,15 @@ export const MIGRATIONS: Migration[] = [
       CREATE TABLE theme_state (key TEXT PRIMARY KEY, value_json TEXT NOT NULL);
     `,
   },
+  {
+    // PR4.2 — as CAIXAS (BoxEntityData) + a caixa ativa viram parte da cena
+    version: 2,
+    name: 'boxes',
+    sql: `
+      ALTER TABLE scene ADD COLUMN boxes_json     TEXT;
+      ALTER TABLE scene ADD COLUMN current_box_id TEXT;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

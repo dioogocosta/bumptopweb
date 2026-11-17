@@ -39,6 +39,8 @@ const WALL_COLLIDES = groups(GROUP_WALL, GROUP_DYNAMIC);
 export class RapierPhysics implements IPhysics {
   private world!: RAPIER.World;
   private bodies = new Map<BodyHandle, RAPIER.RigidBody>();
+  /** PR4.2 — corpos por sala (chão + 4 paredes + teto), p/ excluir a caixa. */
+  private roomBodies = new Map<string, RAPIER.RigidBody[]>();
   private nextHandle = 1;
   private config!: PhysicsConfig;
   private itemColliders = new Map<BodyHandle, RAPIER.Collider>();
@@ -84,6 +86,7 @@ export class RapierPhysics implements IPhysics {
       { pos: { x: ox + halfSize, y: h / 2, z: oz }, half: { x: wallThickness / 2, y: h / 2, z: span } },
       { pos: { x: ox, y: h + wallThickness / 2, z: oz }, half: { x: span, y: wallThickness / 2, z: span } },
     ];
+    const roomBodies: RAPIER.RigidBody[] = [floorBody];
     for (const w of wallDefs) {
       const b = this.world.createRigidBody(
         RAPIER.RigidBodyDesc.fixed().setTranslation(w.pos.x, w.pos.y, w.pos.z),
@@ -95,7 +98,20 @@ export class RapierPhysics implements IPhysics {
           .setCollisionGroups(WALL_COLLIDES),
         b,
       );
+      roomBodies.push(b);
     }
+    // PR4.2 — rastreia os corpos da sala p/ remover tudo ao excluir a caixa
+    this.roomBodies.set(`${ox}|${oz}`, roomBodies);
+  }
+
+  /** PR4.2 — remove TODOS os corpos (piso + paredes + teto) da caixa. */
+  removeRoom(room: RoomConfig): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const bodies = this.roomBodies.get(`${ox}|${oz}`);
+    if (!bodies) return;
+    for (const b of bodies) this.world.removeRigidBody(b);
+    this.roomBodies.delete(`${ox}|${oz}`);
   }
 
   createBox(id: string, position: Vec3, halfExtents: Vec3): BodyHandle {

@@ -34,6 +34,7 @@ function makePhysicsMock(): IPhysics {
       return h;
     }),
     createRoom: vi.fn(),
+    removeRoom: vi.fn(),
     removeBody: vi.fn((h) => {
       poses.delete(h);
       frozen.delete(h);
@@ -78,6 +79,7 @@ function makeRendererMock(): IRenderer {
     }),
     setTexture: vi.fn(),
     addRoom: vi.fn(),
+    removeRoom: vi.fn(),
     setPose: vi.fn(),
     setVisible: vi.fn((h, v) => visible.set(h, v)),
     isVisible: vi.fn((h) => visible.get(h) ?? false),

@@ -28,6 +28,7 @@ function makePhysicsMock(): IPhysics {
       return h;
     }),
     createRoom: vi.fn(),
+    removeRoom: vi.fn(),
     removeBody: vi.fn((h) => {
       poses.delete(h);
       frozen.delete(h);
@@ -74,6 +75,7 @@ function makeRendererMock(): IRenderer {
     }),
     setTexture: vi.fn(),
     addRoom: vi.fn(),
+    removeRoom: vi.fn(),
     setPose: vi.fn(),
     setVisible: vi.fn((h, v) => visible.set(h, v)),
     isVisible: vi.fn((h) => visible.get(h) ?? false),
@@ -533,6 +535,77 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     const cam = world.getCamera();
     expect(cam.target.x).toBeCloseTo(400, 0);
     expect(cam.target.z).toBeCloseTo(-300, 0);
+  });
+
+  it('PR4.2: renameBox muda o nome (snapshot carrega o novo)', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const b2 = world.addBoxEntity('Velha', { x: 400, z: 0 });
+    expect(world.renameBox(b2.id, '  Projetos  ')).toBe(true);
+    expect(world.getBox(b2.id)!.name).toBe('Projetos');
+    // id desconhecido / nome vazio = false
+    expect(world.renameBox('x', 'y')).toBe(false);
+    expect(world.renameBox(b2.id, '   ')).toBe(false);
+    // roundtrip persiste o nome
+    const snap = world.toSnapshot();
+    expect(snap.boxes!.find((b) => b.id === b2.id)!.name).toBe('Projetos');
+  });
+
+  it('PR4.2: removeBoxEntity move os itens p/ a Caixa Comum (clampados) e remove a sala', async () => {
+    const overlay = makeOverlayMock();
+    const { world, physics, renderer } = await makeWorld(overlay);
+    const b2 = world.addBoxEntity('Temp', { x: 400, z: 0 });
+    const nota = world.addStickyNote({ x: 405, y: 1.2, z: 5 }, 'dentro');
+    expect(world.getObject(nota)!.meta.boxId).toBe(b2.id);
+
+    // caixa padrão NÃO pode ser excluída
+    expect(world.removeBoxEntity('box-default')).toBeNull();
+
+    const moved = world.removeBoxEntity(b2.id);
+    expect(moved).toBe(1);
+    expect(world.listBoxes()).toHaveLength(1); // só a padrão
+    expect(world.getBox(b2.id)).toBeNull();
+    // item voltou p/ a padrão, dentro das paredes dela
+    const p = world.getObject(nota)!.pose.position;
+    expect(world.getObject(nota)!.meta.boxId).toBe('box-default');
+    expect(Math.abs(p.x)).toBeLessThanOrEqual(124);
+    // física e render da sala removidos
+    expect(physics.removeRoom).toHaveBeenCalled();
+    expect(renderer.removeRoom).toHaveBeenCalled();
+    // caixa ativa voltou a ser a padrão
+    expect(world.getCurrentBoxId()).toBe('box-default');
+  });
+
+  it('PR4.2: excluir a caixa ATIVA devolve itens pregados ao chão da destino', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const b2 = world.addBoxEntity('Temp', { x: 400, z: 0 });
+    const item = world.addBox({ x: 405, y: 1.6, z: -120 }, { x: 7, y: 1.6, z: 8.5 }, '#51cf66', 'pin');
+    world.pinToWall(item, 0); // prega na parede norte da caixa b2
+    expect(world.isPinned(item)).toBe(true);
+
+    const moved = world.removeBoxEntity(b2.id);
+    expect(moved).toBe(1);
+    // despregou e caiu dentro da Caixa Comum
+    expect(world.isPinned(item)).toBe(false);
+    const o = world.getObject(item)!;
+    expect(o.meta.boxId).toBe('box-default');
+    expect(Math.abs(o.pose.position.x)).toBeLessThanOrEqual(124);
+    expect(o.pose.position.y).toBeGreaterThanOrEqual(0);
+  });
+
+  it('PR4.2: addBoxEntity sem pos usa a diagonal da torre (slots sem colisão)', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const a = world.addBoxEntity('A');
+    const b = world.addBoxEntity('B');
+    const c = world.addBoxEntity('C');
+    // diagonal: cada centro mais NE, distância entre centros > 2*halfSize
+    for (const [p, q] of [[a, b], [b, c], [a, c]] as const) {
+      const pb = world.getBox(p.id)!.pos;
+      const qb = world.getBox(q.id)!.pos;
+      const d = Math.hypot(pb.x - qb.x, pb.z - qb.z);
+      expect(d).toBeGreaterThanOrEqual(260);
+    }
+    expect(world.getBox(a.id)!.pos).toEqual({ x: 340, z: -340 }); // k=1 na diagonal
+    expect(world.getBox(b.id)!.pos).toEqual({ x: 680, z: -680 });
   });
 
   it('PR15: modo laço p/ TOQUE — arrastar o dedo no chão vazio desenha o laço', async () => {

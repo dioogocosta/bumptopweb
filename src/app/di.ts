@@ -893,6 +893,32 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     world.setCurrentBox(id);
     world.flyToBox(id);
   });
+  // PR4.2 — CRUD de caixas: criar (nome automático "Caixa n"), renomear,
+  // excluir (itens voltam p/ a Caixa Comum) — o painel re-renderiza em cima
+  const reopenBoxesPanel = () => {
+    if (!overlay.isBoxesPanelVisible()) return;
+    const cur = world.getCurrentBoxId();
+    overlay.showBoxesPanel(
+      world.listBoxes().map((b) => ({ id: b.id, label: b.name, current: b.id === cur })),
+    );
+  };
+  overlayRoot.addEventListener('boxcreate', () => {
+    const n = world.listBoxes().length;
+    const box = world.addBoxEntity(t('ui.boxNewName', { n }));
+    overlay.toast(t('toast.boxCreated', { name: box.name }));
+    reopenBoxesPanel();
+  });
+  overlayRoot.addEventListener('boxrename', (e) => {
+    const { id, name } = (e as CustomEvent).detail as { id: string; name: string };
+    world.renameBox(id, name);
+    reopenBoxesPanel();
+  });
+  overlayRoot.addEventListener('boxdelete', (e) => {
+    const id = (e as CustomEvent).detail as string;
+    const moved = world.removeBoxEntity(id);
+    if (moved !== null) overlay.toast(t('toast.boxDeleted', { n: moved }));
+    reopenBoxesPanel();
+  });
 
   // =========================================================================
   // PR27 — Conta (login/cadastro com Cloudflare D1) + sync da cena na nuvem
