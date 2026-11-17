@@ -32,8 +32,8 @@ export class ThreeRenderer implements IRenderer {
   private folderHandles = new Set<ObjectHandle>();
   /** Painel de vidro da pilha aberta em grade (PR9). */
   private pilePanel: THREE.Mesh | null = null;
-  private floorMat?: THREE.MeshLambertMaterial;
-  private wallMat?: THREE.MeshLambertMaterial;
+  private roomGroups = new Map<string, THREE.Group>();
+  private roomMats = new Map<string, { floor: THREE.MeshLambertMaterial; wall: THREE.MeshLambertMaterial }>();
 
   async init(sceneRoot: HTMLElement, room: RoomConfig): Promise<void> {
     this.scene = new THREE.Scene();
@@ -75,30 +75,51 @@ export class ThreeRenderer implements IRenderer {
     // chão + 4 paredes); origem ausente = caixa original no centro.
     const ox = room.origin?.x ?? 0;
     const oz = room.origin?.z ?? 0;
+    // PR4.2 — cada caixa num Group (removível ao excluir a caixa)
+    const group = new THREE.Group();
+    group.name = `room:${ox}|${oz}`;
+    this.roomGroups.set(group.name, group);
     // Piso com textura clássica BumpTop (círculos concêntricos + feixe de luz)
     const floorGeo = new THREE.PlaneGeometry(halfSize * 2, halfSize * 2);
     const floorTexture = this.createBumpTopFloorTexture();
     const floorMat = new THREE.MeshLambertMaterial({ map: floorTexture, color: 0xffffff });
-    this.floorMat = floorMat;
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.set(ox, 0, oz);
     floor.receiveShadow = true;
-    this.scene.add(floor);
+    group.add(floor);
 
     // 4 paredes — tom azul ardósia clássico BumpTop
     const wallMat = new THREE.MeshLambertMaterial({ color: 0x3d648f });
-    this.wallMat = wallMat;
     const mkWall = (w: number, h: number, d: number, x: number, z: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
       m.position.set(ox + x, h / 2, oz + z);
       m.receiveShadow = true;
-      this.scene.add(m);
+      group.add(m);
     };
     mkWall(halfSize * 2, wallHeight, wallThickness, 0, -halfSize);
     mkWall(halfSize * 2, wallHeight, wallThickness, 0, halfSize);
     mkWall(wallThickness, wallHeight, halfSize * 2, -halfSize, 0);
     mkWall(wallThickness, wallHeight, halfSize * 2, halfSize, 0);
+    this.scene.add(group);
+    // PR4.2 — materiais por caixa (o setTheme pinta TODAS as caixas)
+    this.roomMats.set(group.name, { floor: floorMat, wall: wallMat });
+  }
+
+  /** PR4.2 — remove o chão + 4 paredes da caixa (meshes + materiais). */
+  removeRoom(room: RoomConfig): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const group = this.roomGroups.get(key);
+    if (!group) return;
+    this.scene.remove(group);
+    for (const child of group.children) {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry?.dispose?.();
+    }
+    this.roomGroups.delete(key);
+    this.roomMats.delete(key);
   }
 
   private createBumpTopFloorTexture(): THREE.CanvasTexture {
@@ -416,12 +437,12 @@ export class ThreeRenderer implements IRenderer {
 
   setTheme(theme: Theme): void {
     this.scene.background = new THREE.Color(theme.background);
-    if (theme.name === 'BumpTop') {
-      this.floorMat?.color.setHex(0xffffff); // Mantém o degradê claro e o feixe de luz sem escurecer
-    } else {
-      this.floorMat?.color.setHex(theme.floor);
+    const floorColor = theme.name === 'BumpTop' ? 0xffffff : theme.floor;
+    // PR4.2 — pinta o chão/paredes de TODAS as caixas
+    for (const { floor, wall } of this.roomMats.values()) {
+      floor.color.setHex(floorColor);
+      wall.color.setHex(theme.wall);
     }
-    this.wallMat?.color.setHex(theme.wall);
   }
 
   private applyCamera(): void {

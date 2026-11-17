@@ -55,6 +55,8 @@ export interface IPhysics {
   createBox(id: string, position: Vec3, halfExtents: Vec3): BodyHandle;
   /** Cria o piso + 4 paredes estáticas. */
   createRoom(room: RoomConfig): void;
+  /** PR4.2 — remove TODOS os corpos da caixa (ao excluí-la). */
+  removeRoom(room: RoomConfig): void;
   removeBody(handle: BodyHandle): void;
   getPose(handle: BodyHandle): Pose;
   getVelocity(handle: BodyHandle): Vec3;
@@ -97,6 +99,8 @@ export interface IRenderer {
   /** Aplica uma textura (thumbnail dataURL) ao objeto; remove com null. */
   setTexture(handle: ObjectHandle, dataUrl: string | null): void;
   addRoom(room: RoomConfig): void;
+  /** PR4.2 — remove chão + 4 paredes da caixa (ao excluí-la). */
+  removeRoom(room: RoomConfig): void;
   setPose(handle: ObjectHandle, pose: Pose): void;
   setVisible(handle: ObjectHandle, visible: boolean): void;
   isVisible(handle: ObjectHandle): boolean;
