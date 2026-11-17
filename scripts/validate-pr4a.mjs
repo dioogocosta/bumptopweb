@@ -63,7 +63,7 @@ try {
   await sleep(300);
   const visivel = await page.locator('.boxes-modal').isVisible();
   const tituloTxt = (await page.locator('.boxes-title').textContent()) ?? '';
-  const nomes = await page.locator('.boxes-item').allTextContents();
+  const nomes = await page.locator('.boxes-item-name').allTextContents();
   const comumOk = nomes.includes('Caixa Comum') && nomes.includes('P4A Caixa Dois');
   const curOk = (await page.locator('.boxes-item.cur').textContent())?.includes('Caixa Comum') ?? false;
   check('P4a-abre', visivel && tituloTxt === 'Caixas' && comumOk && curOk,
