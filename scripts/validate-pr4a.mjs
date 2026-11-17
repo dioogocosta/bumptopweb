@@ -1,8 +1,9 @@
-/** Sonda PR4a — Control Manager (engrenagem + painel de caixas):
+/** Sonda PR4a — Control Manager (engrenagem + painel de CAIXAS):
  *
  *  P4a-botao   engrenagem na barra (SVG + título "Control Manager")
- *  P4a-abre    painel de vidro abre: título "Caixas" + lista com as pastas
- *  P4a-voo     clicar numa caixa fecha o painel e a câmera voa até ela
+ *  P4a-abre    painel de vidro abre: "Caixa Comum" (ativa) + caixa criada
+ *  P4a-entra   clicar numa caixa fecha o painel, vira a ATIVA e voa até ela;
+ *              nota nova nasce DENTRO dela (meta.boxId + posição clampada)
  *  P4a-esc     Esc fecha o painel
  *  P4a-fundo   clique no fundo (fora do card) fecha
  *  P4a-console zero erros de console
@@ -33,25 +34,24 @@ try {
   page.on('pageerror', (e) => erros.push(String(e)));
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.__bumptop?.files?.createFolder, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.__bumptop?.world?.listBoxes, null, { timeout: 30000 });
   await page.waitForFunction(() => {
     const w = window.__bumptop?.world;
     return w.listObjects().length >= 3 && w.listObjects().every((o) => o.pose.position.y <= 2.2);
   }, { timeout: 20000 });
 
-  // 2 caixas (pastas) para o painel listar (limpa as de execuções anteriores)
-  const [c1, c2] = await page.evaluate(async () => {
-    const f = window.__bumptop.files;
-    for (const o of window.__bumptop.world.listObjects()) {
-      if (o.meta?.isDir === true && (o.label === 'P4A Caixa Um' || o.label === 'P4A Caixa Dois')) {
-        window.__bumptop.world.removeObject(o.id);
-      }
+  // Caixa nova ao lado da original (o CRUD pela UI entra no 4.2)
+  const box2 = await page.evaluate(() => {
+    const w = window.__bumptop.world;
+    // limpa execução anterior (mundo persiste entre reloads no preview)
+    for (const b of w.listBoxes()) {
+      if (b.name === 'P4A Caixa Dois') w.removeObjectSafe?.(b.id);
     }
-    const a = await f.createFolder('P4A Caixa Um', { x: 40, y: 1.6, z: -30 });
-    const b = await f.createFolder('P4A Caixa Dois', { x: -40, y: 1.6, z: 30 });
-    return [a, b];
+    w.setCurrentBox('box-default');
+    return w.addBoxEntity('P4A Caixa Dois', { x: 400, z: 0 });
   });
-  await sleep(500);
+  await page.evaluate(() => window.__bumptop.world.setCurrentBox('box-default'));
+  await sleep(400);
 
   // ---------- P4a-botao ----------
   const svgOk = (await page.locator('.zoom-controls .settings-btn svg').count()) === 1;
@@ -63,25 +63,35 @@ try {
   await sleep(300);
   const visivel = await page.locator('.boxes-modal').isVisible();
   const tituloTxt = (await page.locator('.boxes-title').textContent()) ?? '';
-  const itens = await page.locator('.boxes-item').count();
   const nomes = await page.locator('.boxes-item').allTextContents();
-  check('P4a-abre', visivel && tituloTxt === 'Caixas' && itens === 2 &&
-    nomes.includes('P4A Caixa Um') && nomes.includes('P4A Caixa Dois'),
-    `painel=true título="${tituloTxt}" itens=${itens} [${nomes.join(' | ')}]`);
+  const comumOk = nomes.includes('Caixa Comum') && nomes.includes('P4A Caixa Dois');
+  const curOk = (await page.locator('.boxes-item.cur').textContent())?.includes('Caixa Comum') ?? false;
+  check('P4a-abre', visivel && tituloTxt === 'Caixas' && comumOk && curOk,
+    `painel=true título="${tituloTxt}" caixas=[${nomes.join(' | ')}] ativa="Caixa Comum"=${curOk}`);
 
-  // ---------- P4a-voo ----------
-  const alvo = await page.evaluate((id) => window.__bumptop.world.getObject(id).pose.position, c1.id);
-  await page.locator('.boxes-item', { hasText: 'P4A Caixa Um' }).click();
+  // ---------- P4a-entra ----------
+  await page.locator('.boxes-item', { hasText: 'P4A Caixa Dois' }).click();
   await sleep(250);
   const fechou = !(await page.locator('.boxes-modal').isVisible());
   await sleep(1800); // animação de voo (0,9 s) + folga
-  const cam = await page.evaluate(() => {
-    const c = window.__bumptop.world.getCamera();
-    return { x: c.target.x, z: c.target.z, d: c.distance };
-  });
-  const perto = Math.hypot(cam.x - alvo.x, cam.z - alvo.z) < 8;
-  check('P4a-voo', fechou && perto && cam.d < 130,
-    `painel fechou=${fechou} câmera perto da caixa=${perto} (${cam.x.toFixed(0)},${cam.z.toFixed(0)}) dist=${cam.d.toFixed(0)}`);
+  const estado = await page.evaluate((id) => {
+    const w = window.__bumptop.world;
+    const cam = w.getCamera();
+    const nota = w.addStickyNote({ x: 400 + 500, y: 1.2, z: 0 }, 'P4ADENTRO');
+    const p = w.getObject(nota).pose.position;
+    return {
+      ativa: w.getCurrentBoxId() === id,
+      camX: cam.target.x,
+      camZ: cam.target.z,
+      boxId: w.getObject(nota).meta.boxId === id,
+      dentro: Math.abs(p.x - 400) <= 124 && Math.abs(p.z) <= 124,
+      notaId: nota,
+    };
+  }, box2.id);
+  await page.evaluate((id) => window.__bumptop.world.removeObject(id), estado.notaId);
+  const perto = Math.hypot(estado.camX - 400, estado.camZ - 0) < 12;
+  check('P4a-entra', fechou && estado.ativa && perto && estado.boxId && estado.dentro,
+    `painel fechou=${fechou} virou ativa=${estado.ativa} câmera perto=${perto} nota nasce nela=${estado.boxId} posição dentro=${estado.dentro}`);
 
   // ---------- P4a-esc ----------
   await page.locator('.settings-btn').click();

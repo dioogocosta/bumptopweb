@@ -873,22 +873,25 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   }
 
   // =========================================================================
-  // PR4a — Control Manager: engrenagem abre o painel com as CAIXAS da mesa;
-  // clicar numa caixa fecha o painel e voa até ela (anim. da busca, PR18)
+  // PR4a — Control Manager: engrenagem abre o painel com as CAIXAS (espaços
+  // chão+4 paredes onde pastas/arquivos/notas acontecem); clicar numa caixa
+  // fecha o painel, vira a caixa ATIVA e voa até ela (anim. da busca, PR18)
   // =========================================================================
   overlayRoot.addEventListener('settingstoggle', () => {
     if (overlay.isBoxesPanelVisible()) {
       overlay.hideBoxesPanel();
       return;
     }
+    const cur = world.getCurrentBoxId();
     const boxes = world
-      .listObjects()
-      .filter((o) => o.meta.isDir === true)
-      .map((o) => ({ id: o.id, label: o.label ?? '' }));
+      .listBoxes()
+      .map((b) => ({ id: b.id, label: b.name, current: b.id === cur }));
     overlay.showBoxesPanel(boxes);
   });
   overlayRoot.addEventListener('boxgoto', (e) => {
-    world.flyToObject((e as CustomEvent).detail as string);
+    const id = (e as CustomEvent).detail as string;
+    world.setCurrentBox(id);
+    world.flyToBox(id);
   });
 
   // =========================================================================

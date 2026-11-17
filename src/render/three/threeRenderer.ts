@@ -71,6 +71,10 @@ export class ThreeRenderer implements IRenderer {
 
   addRoom(room: RoomConfig): void {
     const { halfSize, wallHeight, wallThickness } = room;
+    // PR4a — várias caixas lado a lado no mesmo mundo (cada uma com o seu
+    // chão + 4 paredes); origem ausente = caixa original no centro.
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
     // Piso com textura clássica BumpTop (círculos concêntricos + feixe de luz)
     const floorGeo = new THREE.PlaneGeometry(halfSize * 2, halfSize * 2);
     const floorTexture = this.createBumpTopFloorTexture();
@@ -78,7 +82,7 @@ export class ThreeRenderer implements IRenderer {
     this.floorMat = floorMat;
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = 0;
+    floor.position.set(ox, 0, oz);
     floor.receiveShadow = true;
     this.scene.add(floor);
 
@@ -87,7 +91,7 @@ export class ThreeRenderer implements IRenderer {
     this.wallMat = wallMat;
     const mkWall = (w: number, h: number, d: number, x: number, z: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-      m.position.set(x, h / 2, z);
+      m.position.set(ox + x, h / 2, oz + z);
       m.receiveShadow = true;
       this.scene.add(m);
     };
