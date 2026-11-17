@@ -188,6 +188,34 @@ export interface IFileSystem {
 }
 
 // ---------------------------------------------------------------------------
+// Auth (PR27 — login/conta com Cloudflare D1)
+// ---------------------------------------------------------------------------
+
+/** Sessão do usuário vista pelo core (só o que a UI precisa exibir). */
+export interface AuthSession {
+  email: string;
+}
+
+/**
+ * Porta de autenticação. O core NUNCA conhece fetch/cookies/D1 — a
+ * implementação (fetch same-origin `/api/*`) vive num adapter fora do core
+ * (`src/auth/cloudflareAuth.ts`), ligado no composition root (`di.ts`).
+ * Sem a API, tudo degrada: o app continua 100% funcional em modo local.
+ */
+export interface IAuthPort {
+  /** Estado atual da sessão (null = deslogado). */
+  getSession(): Promise<AuthSession | null>;
+  /** Callbacks a cada mudança de sessão (login/logout). */
+  onChanged(cb: (session: AuthSession | null) => void): void;
+  /** Cria a conta (e já entra). Erros: códigos estáveis traduzidos no i18n. */
+  signUp(email: string, password: string): Promise<{ ok: boolean; error?: string }>;
+  /** Entra. Erros genéricos (nunca revela se a conta existe). */
+  signIn(email: string, password: string): Promise<{ ok: boolean; error?: string }>;
+  /** Sai (apaga a sessão no servidor + cookie). */
+  signOut(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // Input semântico
 // ---------------------------------------------------------------------------
 

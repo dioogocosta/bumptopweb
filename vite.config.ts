@@ -18,6 +18,7 @@ export default defineConfig({
       '@fs': `${root}/src/fs`,
       '@input': `${root}/src/input`,
       '@overlay': `${root}/src/overlay`,
+      '@auth': `${root}/src/auth`,
     },
   },
   // Rapier e SQLite são WASM; o COOP/COEP não é necessário com OpfsSAHPoolVfs,

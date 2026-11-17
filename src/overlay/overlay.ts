@@ -150,6 +150,20 @@ export class DomOverlay implements IOverlay {
   /** PR11 — botões de zoom na tela (topo). */
   private zoomCbIn: (() => void) | null = null;
   private zoomCbOut: (() => void) | null = null;
+  /** PR27 — botão de conta + modal de login. */
+  private authBtn: HTMLButtonElement | null = null;
+  private authModal: HTMLElement | null = null;
+  private authEmail: HTMLInputElement | null = null;
+  private authPassword: HTMLInputElement | null = null;
+  private authTitle: HTMLElement | null = null;
+  private authError: HTMLElement | null = null;
+  private authLogged: HTMLElement | null = null;
+  private authForm: HTMLElement | null = null;
+  private authSubmitBtn: HTMLButtonElement | null = null;
+  private authSwitchBtn: HTMLButtonElement | null = null;
+  private authMode: 'in' | 'up' = 'in';
+  private authEmailWrap: HTMLElement | null = null;
+  private authPassWrap: HTMLElement | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -226,6 +240,22 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('searchtoggle', { bubbles: true }));
     });
     zoomWrap.appendChild(this.searchBtn);
+    // PR27 — botão de CONTA (login com Cloudflare D1): abre o modal de
+    // entrar/criar conta; logado, mostra o e-mail + "Sair".
+    this.authBtn = document.createElement('button');
+    this.authBtn.type = 'button';
+    this.authBtn.className = 'auth-btn';
+    this.authBtn.title = t('ui.auth');
+    this.authBtn.setAttribute('aria-label', t('ui.auth'));
+    this.authBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<circle cx="12" cy="8.2" r="3.6" stroke="currentColor" stroke-width="2.2"/>` +
+      `<path d="M4.8 19.4c1.1-3.4 3.9-5.2 7.2-5.2s6.1 1.8 7.2 5.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>` +
+      `</svg>`;
+    this.authBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('authtoggle', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.authBtn);
     this.root.appendChild(zoomWrap);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
@@ -293,6 +323,182 @@ export class DomOverlay implements IOverlay {
   /** PR15 — estado visual do botão "Modo laço" (ligado = realçado). */
   setLassoModeActive(on: boolean): void {
     this.lassoBtn?.classList.toggle('sel', on);
+  }
+
+  // -------------------------------------------------------------------------
+  // PR27 — conta (login/cadastro com Cloudflare D1)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Modal de vidro (login/cadastro OU sessão ativa). `mode: 'in' | 'up' |
+   * 'logged'`. Eventos no root: `authsubmit` {email, password, mode},
+   * `authswitch`, `authsignout`, `authclose`.
+   */
+  showAuthModal(spec: { mode: 'in' | 'up' | 'logged'; email: string; error: string | null }): void {
+    if (!this.authModal) this.buildAuthModal();
+    const m = this.authModal!;
+    const form = this.authForm!;
+    const logged = this.authLogged!;
+    const email = this.authEmail!;
+    if (spec.mode === 'logged') {
+      form.style.display = 'none';
+      logged.style.display = 'flex';
+      // O campo de e-mail é reutilizado como display — religa no bloco "logado"
+      email.classList.remove('auth-logged-email');
+      logged.prepend(email);
+      this.authTitle!.textContent = t('ui.authLogged');
+      email.value = spec.email;
+      email.readOnly = true;
+      email.type = 'email';
+      this.authPassWrap!.style.display = 'none';
+    } else {
+      form.style.display = 'flex';
+      logged.style.display = 'none';
+      this.authEmailWrap!.appendChild(email); // volta p/ o formulário
+      email.readOnly = false;
+      email.type = 'email';
+      email.value = spec.email;
+      this.authPassWrap!.style.display = 'flex';
+      this.authMode = spec.mode;
+      this.authTitle!.textContent = spec.mode === 'up' ? t('ui.authTitleUp') : t('ui.authTitle');
+      this.authSubmitBtn!.textContent = spec.mode === 'up' ? t('ui.authSubmitUp') : t('ui.authSubmit');
+      this.authSwitchBtn!.textContent =
+        spec.mode === 'up' ? t('ui.authSwitchIn') : t('ui.authSwitchUp');
+    }
+    if (this.authError) {
+      this.authError.textContent = spec.error ?? '';
+      this.authError.style.display = spec.error ? 'block' : 'none';
+    }
+    m.style.display = 'flex';
+    this.authBtn?.classList.add('sel');
+    if (spec.mode !== 'logged') this.authEmail!.focus();
+  }
+
+  hideAuthModal(): void {
+    if (this.authModal) this.authModal.style.display = 'none';
+    if (this.authPassword) this.authPassword.value = '';
+    if (this.authError) this.authError.style.display = 'none';
+    this.authBtn?.classList.remove('sel');
+  }
+
+  isAuthModalVisible(): boolean {
+    return !!this.authModal && this.authModal.style.display !== 'none';
+  }
+
+  /** Modo atual do modal (p/ o botão de alternância entrar↔criar). */
+  getAuthMode(): 'in' | 'up' {
+    return this.authMode;
+  }
+
+  /** E-mail digitado (mantém o valor ao alternar entrar↔criar). */
+  getAuthEmail(): string {
+    return this.authEmail?.value ?? '';
+  }
+
+  /** Estado do botão na barra: logado → dica com o e-mail + pontinho. */
+  setAuthState(session: { email: string } | null): void {
+    if (!this.authBtn) return;
+    this.authBtn.classList.toggle('logged', !!session);
+    this.authBtn.title = session ? `${t('ui.authLogged')}: ${session.email}` : t('ui.auth');
+    this.authBtn.setAttribute('aria-label', this.authBtn.title);
+  }
+
+  private buildAuthModal(): void {
+    const m = document.createElement('div');
+    m.className = 'auth-modal';
+    this.authModal = m; // <-- campos this.* precisam ser atribuídos (showAuthModal usa this.authModal etc.)
+    const card = document.createElement('div');
+    card.className = 'auth-card';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'auth-close';
+    close.title = t('ui.close');
+    close.setAttribute('aria-label', t('ui.close'));
+    close.textContent = '✕';
+    close.addEventListener('click', () => {
+      this.hideAuthModal();
+      this.root.dispatchEvent(new CustomEvent('authclose', { bubbles: true }));
+    });
+    this.authTitle = document.createElement('h2');
+    this.authTitle.className = 'auth-title';
+    this.authError = document.createElement('div');
+    this.authError.className = 'auth-error';
+    this.authError.style.display = 'none';
+    this.authForm = document.createElement('div');
+    this.authForm.className = 'auth-form';
+    const emailWrap = document.createElement('label');
+    emailWrap.className = 'auth-field';
+    const emailLabel = document.createElement('span');
+    emailLabel.textContent = t('ui.authEmail');
+    this.authEmail = document.createElement('input');
+    this.authEmail.type = 'email';
+    this.authEmail.autocomplete = 'email';
+    this.authEmail.placeholder = 'voce@exemplo.com';
+    this.authEmailWrap = emailWrap;
+    const passWrap = document.createElement('label');
+    passWrap.className = 'auth-field';
+    const passLabel = document.createElement('span');
+    passLabel.textContent = t('ui.authPassword');
+    this.authPassword = document.createElement('input');
+    this.authPassword.type = 'password';
+    this.authPassword.autocomplete = 'current-password';
+    this.authPassword.placeholder = '••••••••';
+    this.authPassWrap = passWrap;
+    emailWrap.append(emailLabel, this.authEmail);
+    passWrap.append(passLabel, this.authPassword);
+    this.authSubmitBtn = document.createElement('button');
+    this.authSubmitBtn.type = 'button';
+    this.authSubmitBtn.className = 'auth-submit';
+    this.authSubmitBtn.addEventListener('click', () => this.emitSubmit());
+    this.authSwitchBtn = document.createElement('button');
+    this.authSwitchBtn.type = 'button';
+    this.authSwitchBtn.className = 'auth-switch';
+    this.authSwitchBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('authswitch', { bubbles: true }));
+    });
+    this.authForm.append(emailWrap, passWrap, this.authSubmitBtn, this.authSwitchBtn);
+    // Sessão ativa: e-mail + botão Sair
+    this.authLogged = document.createElement('div');
+    this.authLogged.className = 'auth-logged';
+    // O campo de e-mail é REUTILIZADO entre os dois estados (form ↔ display
+    // "logado"); quem o religa em cada modo é showAuthModal — aqui ele fica
+    // no formulário e o bloco "logado" só tem o botão Sair.
+    const outBtn = document.createElement('button');
+    outBtn.type = 'button';
+    outBtn.className = 'auth-submit';
+    outBtn.textContent = t('ui.authSignOut');
+    outBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('authsignout', { bubbles: true }));
+    });
+    this.authLogged.appendChild(outBtn);
+    card.append(close, this.authTitle, this.authError, this.authForm, this.authLogged);
+    m.appendChild(card);
+    // Clique no fundo escuro fecha (mesmo padrão do modal de pasta)
+    m.addEventListener('pointerdown', (e) => {
+      if (e.target === m) {
+        this.hideAuthModal();
+        this.root.dispatchEvent(new CustomEvent('authclose', { bubbles: true }));
+      }
+    });
+    this.root.appendChild(m);
+    // Enter envia (login/cadastro)
+    m.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.emitSubmit();
+      }
+    });
+  }
+
+  private emitSubmit(): void {
+    if (!this.authEmail || !this.authPassword || this.authMode === undefined) return;
+    const mode = this.authMode;
+    const email = this.authEmail.value;
+    const password = this.authPassword.value;
+    if (!email || !password) return;
+    this.root.dispatchEvent(
+      new CustomEvent('authsubmit', { detail: { email, password, mode }, bubbles: true }),
+    );
   }
 
   // -------------------------------------------------------------------------

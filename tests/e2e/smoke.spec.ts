@@ -32,7 +32,8 @@ declare global {
 test('app inicializa com canvas, SQLite e cena semeada', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (msg) => {
-    if (msg.type() === 'error') errors.push(msg.text());
+    // URL incluída p/ filtrar 404 esperado de /api/* no preview (PR27)
+    if (msg.type() === 'error') errors.push(`${msg.text()} [${msg.location()?.url ?? ''}]`);
   });
   page.on('pageerror', (err) => errors.push(String(err)));
 
@@ -53,9 +54,13 @@ test('app inicializa com canvas, SQLite e cena semeada', async ({ page }) => {
   const backend = await page.evaluate(() => window.__bumptop!.repo.backend());
   expect(['opfs-sqlite', 'idb-sqlite']).toContain(backend);
 
-  // Sem erros de console graves (ignora avisos de WebGL/software rendering)
+  // Sem erros de console graves (ignora avisos de WebGL/software rendering).
+  // PR27: no preview (:4173) as Pages Functions não existem — o 404 de
+  // /api/session é a detecção de "modo local" do adapter de auth (esperado).
   const fatal = errors.filter(
-    (e) => !/SwiftShader|GroupMarkerNotSet|Automatic fallback|GPU stall|WebGL.*software/i.test(e),
+    (e) =>
+      !/SwiftShader|GroupMarkerNotSet|Automatic fallback|GPU stall|WebGL.*software/i.test(e) &&
+      !/\/api\/(session|scene)/.test(e),
   );
   expect(fatal, `Erros de console:\n${fatal.join('\n')}`).toHaveLength(0);
 });
@@ -1375,7 +1380,7 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForTimeout(600);
     const svgs = await page.locator('.zoom-controls button svg').count();
-    expect(svgs).toBe(3); // PR18: zoom-in, zoom-out e o 🔍 da busca
+    expect(svgs).toBe(4); // zoom-in, zoom-out, busca 🔍 (PR18) e conta (PR27)
     // O "+" do zoom-in e o traço do zoom-out desenhados no SVG
     const zin = await page.locator('.zoom-controls button').first().locator('svg line').count();
     expect(zin).toBe(3); // alça + traços do +

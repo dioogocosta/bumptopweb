@@ -25,7 +25,8 @@
       "@persistence/*": ["./src/persistence/*"],
       "@fs/*": ["./src/fs/*"],
       "@input/*": ["./src/input/*"],
-      "@overlay/*": ["./src/overlay/*"]
+      "@overlay/*": ["./src/overlay/*"],
+      "@auth/*": ["./src/auth/*"]
     }
   },
   "include": ["src", "tests", "src/**/*.ts", "src/**/*.tsx"],
