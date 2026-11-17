@@ -92,3 +92,34 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 - Commits em Conventional Commits, em português.
 - Antes de publicar: `npm run typecheck && npm test && npm run lint:arch && npm run build`, mais o E2E quando mexer em UI.
 - O dono tem créditos limitados: priorize mudanças pequenas, verificadas e publicadas.
+
+## 8. PR27 — Login/conta com Cloudflare D1 + cena na nuvem (nov 2026)
+
+**Deploy principal: Cloudflare Pages (`bumptopweb.pages.dev`) — Netlify de produção pausado (sem créditos).**
+
+### Arquitetura da conta
+- **Backend**: `functions/api/*.ts` (Pages Functions same-origin, publicadas automaticamente pelo Cloudflare). Rotas: `POST /api/signup|login|logout`, `GET /api/session`, `GET|PUT /api/scene` (snapshot = formato do export JSON).
+- **Banco**: Cloudflare **D1**, bind **`DB`** (criado pelo dono: `bumptop-db`). O schema se auto-garante no 1º uso (`ensureSchema` em `_lib.ts`); `docs/d1-setup.sql` é a referência canônica.
+- **Porta**: `IAuthPort` em `src/core/ports/index.ts` — o core NUNCA vê fetch/D1. Adapter: `src/auth/cloudflareAuth.ts` (fora do core), ligado no `di.ts` (também faz o sync da cena).
+- **UI**: botão de conta na `.zoom-controls` + modal `.auth-*` (vidro); i18n `ui.auth*`/`toast.auth*`/`toast.cloud*` em pt-BR + en.
+
+### Regras duras (não desviar)
+- Senha: PBKDF2-SHA256 (150k iterações, salt 16 bytes por usuário) via WebCrypto do Worker; nunca armazenar a senha.
+- Sessão: token 32 bytes; no banco SÓ o SHA-256 do token; cookie HttpOnly+Secure+SameSite=Strict (30 dias).
+- `user_id` SEMPRE resolvido do cookie no servidor (`WHERE user_id = ?`) — o front nunca manda.
+- Erro genérico em login/signup (não revelar existência de conta). Rate limit por IP: 10 tentativas/5 min (em memória por isolate — best-effort; migrar p/ KV se precisar de limite global).
+
+### Comportamento de sync/degadação
+- Login: nuvem manda quando existe (restaura snapshot + salva local); conta vazia → SOBE a cena local (nada "some"); deslogar mantém a cena local.
+- Sync: a cada flush local (loop 2 s) agenda PUT com debounce 3 s — **não resetar o timer se já houver PUT agendado** (2 s < 3 s: senão nunca expira).
+- Sem API (404 — vite preview/dev/Netlify): adapter marca `apiDown` e corta `/api/*` — app 100% funcional em modo local (OPFS). Com D1 não bindado: 503 genérico.
+
+### Validação
+- Sonda: `BASE_URL=... node scripts/validate-pr27.mjs` — 13/13 com D1 local (`npx wrangler pages dev dist --d1 DB`); em produção o P27c só roda com o D1 bindado (sonda POST dummy: 503 → pula, 400 → roda).
+- Unitários do adapter: `tests/auth/cloudflareAuth.test.ts` (7 testes).
+
+### Pendências abertas (pós-PR27)
+1. **PR28+ (item 4 do dono — Control Manager)**: torre diagonal de caixas (referência horizonx.so), dashboard lateral, engrenagem com menu de vidro (4.1), CRUD de caixas (4.2), tipos ROOT/Kanban/Backlog (4.3) e integração Taiga depois.
+2. Reset/backup por usuário: a cena vai em UMA linha por usuário (sem histórico de versões) — merge de mudanças offline não existe (nuvem manda).
+3. Rate limit global (KV/DO) e verificação de e-mail: não implementados (v1).
+4. PWA: cache do SW pode servir bundle velho — Ctrl+F5; após bind do D1, o re-deploy é o que ativa o binding das Functions.
