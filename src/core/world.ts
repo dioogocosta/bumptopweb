@@ -2428,6 +2428,26 @@ export class World {
     return [...this.searchIds];
   }
 
+  /**
+   * PR4a (Control Manager) — voa até um objeto da cena (ex.: caixa/pasta
+   * escolhida no painel). Reusa a animação da busca (pan suave + dip de
+   * zoom). false se o id não existe (nada acontece).
+   */
+  flyToObject(id: string): boolean {
+    const e = this.entries.get(id);
+    if (!e) return false;
+    const s = this.camera.getState();
+    this.searchAnim = {
+      fromTarget: { ...s.target },
+      toTarget: { ...e.data.pose.position },
+      d0: s.distance,
+      d1: Math.max(70, Math.min(s.distance, 110)),
+      p: 0,
+    };
+    this.dirty = true;
+    return true;
+  }
+
   /** Avança (dir=1) ou volta (dir=-1) para o próximo match e voa até ele. */
   gotoSearchMatch(dir: 1 | -1): void {
     if (this.searchIds.length === 0) return;

@@ -165,6 +165,13 @@ export class DomOverlay implements IOverlay {
   private authEmailWrap: HTMLElement | null = null;
   private authPassWrap: HTMLElement | null = null;
 
+  /** PR4a (Control Manager) — engrenagem + painel de vidro com as CAIXAS. */
+  private settingsBtn: HTMLButtonElement | null = null;
+  private boxesModal: HTMLElement | null = null;
+  private boxesList: HTMLElement | null = null;
+  private boxesEmpty: HTMLElement | null = null;
+  private boxesCleanup: (() => void) | null = null;
+
   constructor(root: HTMLElement) {
     this.root = root;
     root.style.position = 'fixed';
@@ -240,6 +247,23 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('searchtoggle', { bubbles: true }));
     });
     zoomWrap.appendChild(this.searchBtn);
+    // PR4a (Control Manager) — ENGRENAGEM: abre o painel de vidro com a
+    // lista de CAIXAS (pastas) da mesa; clicar numa caixa voa até ela.
+    // (o CRUD completo entra no PR 4.2 — este PR é a porta de entrada)
+    this.settingsBtn = document.createElement('button');
+    this.settingsBtn.type = 'button';
+    this.settingsBtn.className = 'settings-btn';
+    this.settingsBtn.title = t('ui.boxes');
+    this.settingsBtn.setAttribute('aria-label', t('ui.boxes'));
+    this.settingsBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2.1"/>` +
+      `<path d="M12 2.8v3.1M12 18.1v3.1M21.2 12h-3.1M5.9 12H2.8M18.4 5.6l-2.2 2.2M7.8 16.2l-2.2 2.2M18.4 18.4l-2.2-2.2M7.8 7.8L5.6 5.6" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>` +
+      `</svg>`;
+    this.settingsBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('settingstoggle', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.settingsBtn);
     // PR27 — botão de CONTA (login com Cloudflare D1): abre o modal de
     // entrar/criar conta; logado, mostra o e-mail + "Sair".
     this.authBtn = document.createElement('button');
@@ -323,6 +347,95 @@ export class DomOverlay implements IOverlay {
   /** PR15 — estado visual do botão "Modo laço" (ligado = realçado). */
   setLassoModeActive(on: boolean): void {
     this.lassoBtn?.classList.toggle('sel', on);
+  }
+
+  // -------------------------------------------------------------------------
+  // PR4a — Control Manager: painel de vidro com as CAIXAS da mesa
+  // -------------------------------------------------------------------------
+
+  /**
+   * Painel de vidro listando as caixas (pastas) da cena. `boxes` = lista
+   * leve {id, label} (o chamador filtra `meta.isDir` no world — o overlay
+   * NÃO conhece o core). Eventos no root: `boxgoto` {id}, `boxesclose`.
+   */
+  showBoxesPanel(boxes: Array<{ id: string; label: string }>): void {
+    if (!this.boxesModal) this.buildBoxesModal();
+    const list = this.boxesList!;
+    list.textContent = '';
+    for (const b of boxes) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'boxes-item';
+      item.textContent = b.label || t('ui.boxesUnnamed');
+      item.title = b.label || t('ui.boxesUnnamed');
+      item.addEventListener('click', () => {
+        this.hideBoxesPanel();
+        this.root.dispatchEvent(new CustomEvent('boxgoto', { detail: b.id, bubbles: true }));
+      });
+      list.appendChild(item);
+    }
+    this.boxesEmpty!.style.display = boxes.length === 0 ? 'block' : 'none';
+    const m = this.boxesModal!;
+    m.style.display = 'flex';
+    this.settingsBtn?.classList.add('sel');
+    // Esc fecha (cleanup guardado p/ o hide)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') this.hideBoxesPanel();
+    };
+    document.addEventListener('keydown', onKey);
+    this.boxesCleanup = () => document.removeEventListener('keydown', onKey);
+  }
+
+  hideBoxesPanel(): void {
+    if (this.boxesModal) this.boxesModal.style.display = 'none';
+    this.settingsBtn?.classList.remove('sel');
+    this.boxesCleanup?.();
+    this.boxesCleanup = null;
+  }
+
+  isBoxesPanelVisible(): boolean {
+    return !!this.boxesModal && this.boxesModal.style.display !== 'none';
+  }
+
+  private buildBoxesModal(): void {
+    const m = document.createElement('div');
+    m.className = 'boxes-modal';
+    this.boxesModal = m;
+    // Clique no FUNDO (fora do card) também fecha
+    m.addEventListener('click', (e) => {
+      if (e.target === m) this.hideBoxesPanel();
+    });
+    const card = document.createElement('div');
+    card.className = 'boxes-card';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'boxes-close';
+    close.title = t('ui.close');
+    close.setAttribute('aria-label', t('ui.close'));
+    close.textContent = '✕';
+    close.addEventListener('click', () => {
+      this.hideBoxesPanel();
+      this.root.dispatchEvent(new CustomEvent('boxesclose', { bubbles: true }));
+    });
+    const title = document.createElement('h2');
+    title.className = 'boxes-title';
+    title.textContent = t('ui.boxesTitle');
+    const hint = document.createElement('div');
+    hint.className = 'boxes-hint';
+    hint.textContent = t('ui.boxesHint');
+    this.boxesList = document.createElement('div');
+    this.boxesList.className = 'boxes-list';
+    this.boxesEmpty = document.createElement('div');
+    this.boxesEmpty.className = 'boxes-empty';
+    this.boxesEmpty.textContent = t('ui.boxesEmpty');
+    this.boxesEmpty.style.display = 'none';
+    card.appendChild(close);
+    card.appendChild(title);
+    card.appendChild(hint);
+    card.appendChild(this.boxesList);
+    card.appendChild(this.boxesEmpty);
+    m.appendChild(card);
+    this.root.appendChild(m);
   }
 
   // -------------------------------------------------------------------------

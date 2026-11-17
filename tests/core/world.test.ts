@@ -442,6 +442,30 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     expect(world.getSearchState()).toBeNull();
   });
 
+  it('PR4a: flyToObject voa até uma caixa da cena (Control Manager)', async () => {
+    const overlay = makeOverlayMock();
+    const { world } = await makeWorld(overlay);
+    const caixa = world.addBox({ x: 40, y: 1.6, z: -30 }, { x: 7, y: 1.6, z: 7 }, '#51cf66', 'Caixa X');
+
+    // id inexistente → false e câmera intacta
+    const antes = world.getCamera();
+    expect(world.flyToObject('id-inexistente')).toBe(false);
+    const depois = world.getCamera();
+    expect(depois.target.x).toBe(antes.target.x);
+    expect(depois.target.z).toBe(antes.target.z);
+    expect(depois.distance).toBe(antes.distance);
+
+    // id válido → true; após frames a câmera converge para a posição da caixa
+    expect(world.flyToObject(caixa)).toBe(true);
+    for (let i = 0; i < 40; i++) world.update(1 / 30);
+    const cam = world.getCamera();
+    const alvo = world.getObject(caixa)!.pose.position;
+    expect(cam.target.x).toBeCloseTo(alvo.x, 0);
+    expect(cam.target.z).toBeCloseTo(alvo.z, 0);
+    expect(cam.distance).toBeLessThan(130);
+    expect(cam.distance).toBeGreaterThanOrEqual(70);
+  });
+
   it('PR15: modo laço p/ TOQUE — arrastar o dedo no chão vazio desenha o laço', async () => {
     const overlay = makeOverlayMock();
     const { world, renderer } = await makeWorld(overlay);

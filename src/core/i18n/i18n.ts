@@ -194,6 +194,12 @@ const ptBR: Dict = {
 
   // --- PR27 — conta (login/cadastro com Cloudflare D1) ---
   'ui.auth': 'Conta (entrar / sair)',
+  // PR4a — Control Manager (engrenagem + painel de caixas)
+  'ui.boxes': 'Control Manager (caixas)',
+  'ui.boxesTitle': 'Caixas',
+  'ui.boxesHint': 'Clique numa caixa para voar até ela.',
+  'ui.boxesEmpty': 'Nenhuma caixa na mesa ainda. Crie pastas para organizá-las aqui.',
+  'ui.boxesUnnamed': '(sem nome)',
   'ui.authTitle': 'Entrar',
   'ui.authTitleUp': 'Criar conta',
   'ui.authEmail': 'E-mail',
@@ -428,6 +434,12 @@ const en: Dict = {
 
   // --- PR27 — account (login/signup with Cloudflare D1) ---
   'ui.auth': 'Account (sign in / out)',
+  // PR4a — Control Manager (gear + boxes panel)
+  'ui.boxes': 'Control Manager (boxes)',
+  'ui.boxesTitle': 'Boxes',
+  'ui.boxesHint': 'Click a box to fly to it.',
+  'ui.boxesEmpty': 'No boxes on the desk yet. Create folders to organize them here.',
+  'ui.boxesUnnamed': '(unnamed)',
   'ui.authTitle': 'Sign in',
   'ui.authTitleUp': 'Create account',
   'ui.authEmail': 'E-mail',

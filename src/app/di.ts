@@ -873,6 +873,25 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   }
 
   // =========================================================================
+  // PR4a — Control Manager: engrenagem abre o painel com as CAIXAS da mesa;
+  // clicar numa caixa fecha o painel e voa até ela (anim. da busca, PR18)
+  // =========================================================================
+  overlayRoot.addEventListener('settingstoggle', () => {
+    if (overlay.isBoxesPanelVisible()) {
+      overlay.hideBoxesPanel();
+      return;
+    }
+    const boxes = world
+      .listObjects()
+      .filter((o) => o.meta.isDir === true)
+      .map((o) => ({ id: o.id, label: o.label ?? '' }));
+    overlay.showBoxesPanel(boxes);
+  });
+  overlayRoot.addEventListener('boxgoto', (e) => {
+    world.flyToObject((e as CustomEvent).detail as string);
+  });
+
+  // =========================================================================
   // PR27 — Conta (login/cadastro com Cloudflare D1) + sync da cena na nuvem
   // =========================================================================
   overlayRoot.addEventListener('authtoggle', () => {
