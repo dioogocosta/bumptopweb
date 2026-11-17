@@ -104,7 +104,7 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 - **UI**: botão de conta na `.zoom-controls` + modal `.auth-*` (vidro); i18n `ui.auth*`/`toast.auth*`/`toast.cloud*` em pt-BR + en.
 
 ### Regras duras (não desviar)
-- Senha: PBKDF2-SHA256 (150k iterações, salt 16 bytes por usuário) via WebCrypto do Worker; nunca armazenar a senha.
+- Senha: PBKDF2-SHA256 (100k iterações = mínimo da spec; 150k estourava o limite de CPU do plano free do Workers em produção → 500 no signup/login; wrangler local não aplica o limite), salt 16 bytes por usuário, via WebCrypto do Worker; nunca armazenar a senha.
 - Sessão: token 32 bytes; no banco SÓ o SHA-256 do token; cookie HttpOnly+Secure+SameSite=Strict (30 dias).
 - `user_id` SEMPRE resolvido do cookie no servidor (`WHERE user_id = ?`) — o front nunca manda.
 - Erro genérico em login/signup (não revelar existência de conta). Rate limit por IP: 10 tentativas/5 min (em memória por isolate — best-effort; migrar p/ KV se precisar de limite global).
