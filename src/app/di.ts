@@ -14,6 +14,7 @@ import { ThreeRenderer } from '@render/three/threeRenderer';
 import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
+import { CloudflareAuth } from '@auth/cloudflareAuth';
 import { makeNoteTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
@@ -31,6 +32,8 @@ export interface AppContext {
   files: FileService;
   renderer: ThreeRenderer;
   overlay: DomOverlay;
+  /** PR27 — auth/nuvem (Cloudflare D1 via Pages Functions same-origin). */
+  auth: CloudflareAuth;
   dispose(): void;
 }
 
@@ -108,6 +111,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   const fs: IFileSystem = new FsAccessFileSystem(new OpfsFileSystem());
   await fs.requestDirectory().catch(() => false);
   const files = new FileService(world, fs, repo);
+
+  // PR27 — auth (Cloudflare D1 via Pages Functions same-origin `/api/*`).
+  // Sem a API (D1 não configurado/offline), tudo degrada: o app segue 100%
+  // funcional em modo local (OPFS), como sempre.
+  const auth = new CloudflareAuth();
 
   // Input semântico: injeta o resolvedor de piso (sem three no adapter)
   const resolveFloor = makeFloorResolver(renderer);
@@ -864,6 +872,114 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     overlay.toast(t('toast.newScene', { backend: repo.backend() }));
   }
 
+  // =========================================================================
+  // PR27 — Conta (login/cadastro com Cloudflare D1) + sync da cena na nuvem
+  // =========================================================================
+  overlayRoot.addEventListener('authtoggle', () => {
+    const cur = auth.current();
+    if (cur) overlay.showAuthModal({ mode: 'logged', email: cur.email, error: null });
+    else overlay.showAuthModal({ mode: 'in', email: '', error: null });
+  });
+  overlayRoot.addEventListener('authswitch', () => {
+    const mode = overlay.getAuthMode() === 'in' ? 'up' : 'in';
+    overlay.showAuthModal({ mode, email: overlay.getAuthEmail(), error: null });
+  });
+  overlayRoot.addEventListener('authsubmit', (e) => {
+    void (async () => {
+      const { email, password, mode } = (e as CustomEvent).detail as {
+        email: string;
+        password: string;
+        mode: 'in' | 'up';
+      };
+      // Validação local (i18n imediato, sem roundtrip)
+      const clean = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+        overlay.showAuthModal({ mode, email, error: t('toast.authBadEmail') });
+        return;
+      }
+      if (password.length < 8) {
+        overlay.showAuthModal({ mode, email, error: t('toast.authBadPassword') });
+        return;
+      }
+      const res =
+        mode === 'up' ? await auth.signUp(clean, password) : await auth.signIn(clean, password);
+      if (!res.ok) {
+        const key =
+          res.error === 'AUTH_RATE'
+            ? 'toast.authRate'
+            : res.error === 'AUTH_BAD_EMAIL'
+              ? 'toast.authBadEmail'
+              : res.error === 'AUTH_BAD_PASSWORD'
+                ? 'toast.authBadPassword'
+                : res.error === 'AUTH_UNAVAILABLE'
+                  ? 'toast.authUnavailable'
+                  : 'toast.authFailed';
+        overlay.showAuthModal({ mode, email, error: t(key) });
+        return;
+      }
+      overlay.hideAuthModal();
+      overlay.setAuthState(auth.current());
+      overlay.toast(t('toast.authWelcome', { email: auth.current()!.email }));
+    })();
+  });
+  overlayRoot.addEventListener('authsignout', () => {
+    void (async () => {
+      await auth.signOut();
+      overlay.hideAuthModal();
+      overlay.setAuthState(null);
+      overlay.toast(t('toast.authBye'));
+    })();
+  });
+  // authclose: o modal já se esconde sozinho no overlay; nada a fazer aqui.
+
+  /**
+   * Login (aqui ou no resume abaixo): a NUVEM manda quando existe —
+   * restaura o snapshot da conta; conta vazia → sobe a cena local (1ª vez).
+   * Deslogar: mantém a cena local do browser (nada é apagado).
+   */
+  const onLogin = () => {
+    void (async () => {
+      const remote = await auth.getRemoteScene();
+      if (remote && Array.isArray(remote.objects) && remote.objects.length > 0) {
+        world.loadSnapshot(remote);
+        await repo.saveScene(world.toSnapshot()).catch(() => {});
+        overlay.toast(t('toast.cloudRestored', { n: remote.objects.length }));
+      } else {
+        const snap = world.toSnapshot();
+        const ok = await auth.putRemoteScene(snap);
+        if (ok) overlay.toast(t('toast.cloudUploaded', { n: snap.objects.length }));
+        else console.warn('sync inicial na nuvem falhou (segue em modo local)');
+      }
+    })();
+  };
+  auth.onChanged((session) => {
+    if (session) onLogin();
+  });
+  // Resume do cookie (recarregou a página logado): restaura a cena da conta
+  void auth.getSession().then((s) => {
+    overlay.setAuthState(s);
+    if (s) onLogin();
+  });
+
+  // Sync por snapshot (spec PR27): PUT com debounce. O flush do loop roda a
+  // cada 2 s, então NÃO resetamos o timer se já houver um PUT agendado —
+  // senão o timer nunca expiraria (2s < 3s) e a nuvem nunca receberia nada.
+  // O primeiro flush após uma mudança agenda o PUT para +3 s; flushs
+  // subsequentes são absorvidos (o snapshot é lido no momento do PUT).
+  let cloudSyncTimer = 0;
+  const queueCloudSync = () => {
+    if (!auth.current()) return;
+    if (cloudSyncTimer) return; // já há um PUT agendado — não resetar
+    cloudSyncTimer = window.setTimeout(() => {
+      cloudSyncTimer = 0;
+      void auth
+        .putRemoteScene(world.toSnapshot())
+        .then((ok) => {
+          if (!ok) console.warn('sync na nuvem falhou (seguindo em modo local)');
+        });
+    }, 3000);
+  };
+
   // A (resize por arraste): estado do gesto
   let resizeGesture: { startScale: number; center: { x: number; y: number; z: number }; dist0: number } | null = null;
 
@@ -999,13 +1115,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // só descobria a perda quando o F5 zerava a cena (bug do fallback idb-sqlite).
   let saveFailToastShown = false;
   const flushNow = () => {
-    repo.saveScene(world.toSnapshot()).catch((e) => {
-      console.warn('save falhou', e);
-      if (!saveFailToastShown) {
-        saveFailToastShown = true;
-        overlay.toast(t('toast.saveFailed'));
-      }
-    });
+    repo
+      .saveScene(world.toSnapshot())
+      .then(() => queueCloudSync())
+      .catch((e) => {
+        console.warn('save falhou', e);
+        if (!saveFailToastShown) {
+          saveFailToastShown = true;
+          overlay.toast(t('toast.saveFailed'));
+        }
+      });
   };
   const onVisibilityFlush = () => {
     if (document.visibilityState === 'hidden') flushNow();
@@ -1270,6 +1389,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     files,
     renderer,
     overlay,
+    auth,
     dispose() {
       loop.stop();
       window.clearInterval(watcher);

@@ -9,3 +9,6 @@ playwright-report/
 test-results/
 .playwright/
 *.zip
+
+# PR27 - estado local do wrangler/D1 (dev)
+.wrangler/

@@ -266,6 +266,161 @@ body {
   50% { opacity: 1; }
 }
 
+/* ===== PR27 — Conta (login/cadastro com Cloudflare D1) ===== */
+/* Botão de conta: mesmo estilo da barra; logado ganha pontinho verde */
+.zoom-controls .auth-btn.sel {
+  background: #2f6fed;
+  box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.zoom-controls .auth-btn.logged::after {
+  content: '';
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.8);
+}
+.zoom-controls .auth-btn {
+  position: relative;
+}
+/* Modal de vidro (efeito vidro + leve transparência) */
+.auth-modal {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 60;
+  pointer-events: auto;
+}
+.auth-card {
+  position: relative;
+  width: min(320px, calc(100vw - 32px));
+  padding: 20px 22px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(14px) saturate(1.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  color: #fff;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.auth-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+}
+.auth-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.auth-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.auth-error {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  color: #fecaca;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.auth-field span {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.auth-field input {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 14px;
+  outline: none;
+}
+.auth-field input:focus {
+  border-color: rgba(47, 111, 237, 0.75);
+  background: rgba(255, 255, 255, 0.1);
+}
+.auth-field input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+.auth-submit {
+  border: none;
+  border-radius: 9px;
+  background: #2f6fed;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.auth-submit:hover {
+  background: #3b7bff;
+}
+.auth-submit:active {
+  transform: scale(0.98);
+}
+.auth-switch {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 2px;
+}
+.auth-switch:hover {
+  color: #fff;
+}
+.auth-logged {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+.auth-logged-email {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 /* ===== PR12 — Editor rico de nota (modal grande estilo Keep) ===== */
 .note-rich-backdrop {
   position: fixed;
