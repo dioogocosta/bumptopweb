@@ -85,11 +85,18 @@ try {
   await sleep(200);
 
   // ------------------------------------------------------------------ C
-  // Fluxo real na nuvem (só com /api/* no ar + D1).
+  // Fluxo real na nuvem (só com /api/* no ar E D1 configurado).
+  // Sonda: POST dummy no login — sem D1 bindado → 503 AUTH_UNAVAILABLE;
+  // com D1 no ar → 400 AUTH_FAILED (login dummy errado, como esperado).
+  // (o /api/session responde 200 SEM sinal de erro quando DB é undefined)
   let apiOk = false;
   try {
-    const r = await fetch(`${BASE}/api/session`);
-    apiOk = r.ok;
+    const probe = await fetch(`${BASE}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'p27-probe@probe.invalid', password: 'p27-probe-pass' }),
+    });
+    apiOk = probe.status !== 503;
   } catch {
     apiOk = false;
   }
@@ -106,6 +113,10 @@ try {
     await sleep(2500);
     const logado = await page.evaluate(() => document.querySelector('.auth-btn')?.classList.contains('logged') ?? false);
     ok('P27c-signup', `conta criada e logada=${logado}`, logado);
+    if (!logado) {
+      // Signup falhou (ex.: D1 sem schema): fecha o modal p/ não bloquear o resto
+      if (await page.locator('.auth-modal').isVisible()) await page.locator('.auth-close').click();
+    }
     // C2: cena sobe automaticamente na 1ª vez (toast de upload) — nota nova
     // depois disso vai pelo sync com debounce (~3 s após o flush de 2 s).
     await sleep(5000); // deixa o sync inicial + debounce assentar
@@ -160,7 +171,9 @@ try {
       !t.includes('X-Frame') &&
       !t.includes('401') &&
       !t.includes('Unauthorized') &&
-      !t.includes('400 (Bad Request)'),
+      !t.includes('400 (Bad Request)') &&
+      // 503 = D1 ainda não bindado pelo dono (degradação esperada em produção)
+      !t.includes('503'),
   );
   if (errosReais.length > 0) {
     console.log('ERROS RESTANTES:');
