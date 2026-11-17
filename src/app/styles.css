@@ -182,9 +182,10 @@ body {
 .zoom-controls button:active {
   transform: scale(0.92);
 }
-/* PR15 — botão "Modo laço" / PR18 — botão de busca (mesma barra dos zooms) */
+/* PR15 — botão "Modo laço" / PR18 — busca / PR27 — conta / PR4a — engrenagem */
 .zoom-controls .lasso-btn.sel,
-.zoom-controls .search-btn.sel {
+.zoom-controls .search-btn.sel,
+.zoom-controls .settings-btn.sel {
   background: #2f6fed;
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5);
 }
@@ -286,6 +287,101 @@ body {
 .zoom-controls .auth-btn {
   position: relative;
 }
+/* ------------------------------------------------------------------ */
+/* PR4a — Control Manager: painel de vidro com as caixas (mesmo vidro  */
+/* do modal de conta; listagem rola, itens estilo "andares da torre")  */
+/* ------------------------------------------------------------------ */
+.boxes-modal {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 60;
+  pointer-events: auto;
+}
+.boxes-card {
+  position: relative;
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(70vh, 560px);
+  padding: 20px 22px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(14px) saturate(1.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  color: #fff;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.boxes-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+}
+.boxes-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.boxes-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.boxes-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.boxes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+/* Item = "andar" da torre: barra diagonal à esquerda lembra a torre
+   diagonal da referência (horizonx.so). Botão largo, alvo de toque ok. */
+.boxes-item {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 4px solid rgba(79, 156, 255, 0.75);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boxes-item:hover {
+  background: rgba(47, 111, 237, 0.22);
+  border-left-color: #4f9cff;
+}
+.boxes-item:active {
+  transform: scale(0.985);
+}
+.boxes-empty {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 8px 2px;
+}
+
 /* Modal de vidro (efeito vidro + leve transparência) */
 .auth-modal {
   position: absolute;
