@@ -127,11 +127,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   buildingView.setBoxes(world.listBoxes());
   buildingView.selectFloor(world.getCurrentBoxId());
 
-  // Para usuários reais, a primeira tela a ser renderizada é o prédio 3D
-  const isAutomatedTest =
-    typeof navigator !== 'undefined' &&
-    (navigator.webdriver || window.location.search.includes('nobuilding'));
-  if (!isAutomatedTest) {
+  // A primeira tela a ser renderizada é sempre o prédio 3D
+  const skipBuilding =
+    typeof window !== 'undefined' &&
+    window.location.search.includes('nobuilding=1');
+  if (!skipBuilding) {
     buildingView.show();
   }
   buildingView.onFloorClick((boxId) => {
