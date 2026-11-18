@@ -1187,7 +1187,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     world.setCamera({ ...world.getCamera(), distance });
   });
   // Inicializa o slider com a distância padrão do preset 1 (distance: 210)
-  overlay.setZoomSliderValue(210);
+  overlay.setZoomSliderValue(329);
   overlay.onPileCloseClick(() => {
     if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));
   });
