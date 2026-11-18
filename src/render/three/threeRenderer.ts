@@ -164,6 +164,21 @@ export class ThreeRenderer implements IRenderer {
     this.roomMats.set(group.name, { floor: floorMat, wall: wallMat, edges: wallEdgesList });
   }
 
+  /** Define a visibilidade do chão + 4 paredes de uma caixa. */
+  setRoomVisible(room: RoomConfig, visible: boolean): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const group = this.roomGroups.get(key);
+    if (group) group.visible = visible;
+    const lines = this.roomKanbanLines.get(key);
+    if (lines) {
+      for (const l of lines) l.visible = visible;
+    }
+    const dash = this.roomDashboards.get(key);
+    if (dash) dash.mesh.visible = visible;
+  }
+
   /** PR4.2 — remove o chão + 4 paredes da caixa (meshes + materiais). */
   removeRoom(room: RoomConfig): void {
     const ox = room.origin?.x ?? 0;

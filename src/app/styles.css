@@ -148,8 +148,7 @@ body {
   color: #fff;
 }
 
-/* Controles de zoom na tela (PR11): botões lupa + / lupa - (topo-esquerda,
- * longe do reset-cam (topo-dir) e do ponto de foco da parede (topo-centro)) */
+/* Controles de zoom na tela (PR11): barra deslizável de zoom (topo-esquerda) */
 .zoom-controls {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
@@ -181,6 +180,39 @@ body {
 }
 .zoom-controls button:active {
   transform: scale(0.92);
+}
+/* Barra deslizável de zoom */
+.zoom-slider-wrap {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 20px;
+  padding: 0 10px;
+  height: 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.zoom-slider-icon {
+  display: flex;
+  align-items: center;
+  color: #fff;
+  opacity: 0.75;
+  flex: none;
+}
+.zoom-slider {
+  width: 72px;
+  cursor: pointer;
+  accent-color: #38bdf8;
+  pointer-events: auto;
+}
+.zoom-value {
+  color: #fff;
+  font-size: 11px;
+  min-width: 20px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
 }
 /* PR15 — botão "Modo laço" / PR18 — busca / PR27 — conta / PR4a — engrenagem */
 .zoom-controls .lasso-btn.sel,

@@ -148,9 +148,10 @@ export class DomOverlay implements IOverlay {
   private rotateEl: HTMLDivElement | null = null;
   private rotateCb: ((e: PointerEvent) => void) | null = null;
 
-  /** PR11 — botões de zoom na tela (topo). */
-  private zoomCbIn: (() => void) | null = null;
-  private zoomCbOut: (() => void) | null = null;
+  /** PR11 — barra deslizável de zoom na tela (topo). */
+  private zoomSliderEl: HTMLInputElement | null = null;
+  private zoomValueEl: HTMLElement | null = null;
+  private zoomSliderCb: ((distance: number) => void) | null = null;
   /** PR27 — botão de conta + modal de login. */
   private authBtn: HTMLButtonElement | null = null;
   private authModal: HTMLElement | null = null;
@@ -209,21 +210,42 @@ export class DomOverlay implements IOverlay {
     const zoomWrap = document.createElement('div');
     zoomWrap.className = 'zoom-controls';
 
-    const btnIn = document.createElement('button');
-    btnIn.type = 'button';
-    btnIn.title = t('ui.zoomIn');
-    btnIn.setAttribute('aria-label', t('ui.zoomIn'));
-    btnIn.innerHTML = zoomSvg(true);
-    btnIn.addEventListener('click', () => this.zoomCbIn?.());
-    zoomWrap.appendChild(btnIn);
+    // Barra deslizável de zoom: arrastar para ajustar distância da câmera.
+    // Valor 50 = distância padrão (~210). Fórmula: dist = 460 - 4.36 * val
+    const zoomSliderWrap = document.createElement('div');
+    zoomSliderWrap.className = 'zoom-slider-wrap';
+    zoomSliderWrap.title = t('ui.zoomSlider') ?? 'Zoom';
 
-    const btnOut = document.createElement('button');
-    btnOut.type = 'button';
-    btnOut.title = t('ui.zoomOut');
-    btnOut.setAttribute('aria-label', t('ui.zoomOut'));
-    btnOut.innerHTML = zoomSvg(false);
-    btnOut.addEventListener('click', () => this.zoomCbOut?.());
-    zoomWrap.appendChild(btnOut);
+    const zoomIcon = document.createElement('span');
+    zoomIcon.innerHTML = zoomSvg(false);
+    zoomIcon.className = 'zoom-slider-icon';
+    zoomSliderWrap.appendChild(zoomIcon);
+
+    this.zoomSliderEl = document.createElement('input');
+    this.zoomSliderEl.type = 'range';
+    this.zoomSliderEl.className = 'zoom-slider';
+    this.zoomSliderEl.min = '0';
+    this.zoomSliderEl.max = '100';
+    this.zoomSliderEl.value = '50';
+    this.zoomSliderEl.step = '1';
+    this.zoomSliderEl.setAttribute('aria-label', t('ui.zoomSlider') ?? 'Zoom');
+    this.zoomSliderEl.addEventListener('input', () => {
+      const val = Number(this.zoomSliderEl!.value);
+      if (this.zoomValueEl) this.zoomValueEl.textContent = String(val);
+      // val=0 → distância máx (longe); val=100 → distância mín (perto)
+      const distance = Math.round(460 - 4.36 * val);
+      this.zoomSliderCb?.(distance);
+    });
+    // Impede que o arraste do slider seja capturado como drag da cena
+    this.zoomSliderEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+    zoomSliderWrap.appendChild(this.zoomSliderEl);
+
+    this.zoomValueEl = document.createElement('span');
+    this.zoomValueEl.className = 'zoom-value';
+    this.zoomValueEl.textContent = '50';
+    zoomSliderWrap.appendChild(this.zoomValueEl);
+
+    zoomWrap.appendChild(zoomSliderWrap);
 
     // Botão "Redefinir Câmera" como ícone
     const resetBtn = document.createElement('button');
@@ -1412,10 +1434,20 @@ export class DomOverlay implements IOverlay {
     this.rotateCb = cb;
   }
 
-  /** Registra callbacks dos botões de zoom na tela. */
-  onZoom(cbIn: () => void, cbOut: () => void): void {
-    this.zoomCbIn = cbIn;
-    this.zoomCbOut = cbOut;
+  /** Registra callback da barra deslizável de zoom (distância da câmera). */
+  onZoomSlider(cb: (distance: number) => void): void {
+    this.zoomSliderCb = cb;
+  }
+
+  /**
+   * Sincroniza a barra de zoom com a distância real da câmera.
+   * val = round((460 - distance) / 4.36), clamped 0–100.
+   */
+  setZoomSliderValue(distance: number): void {
+    const val = Math.round((460 - distance) / 4.36);
+    const clamped = Math.max(0, Math.min(100, val));
+    if (this.zoomSliderEl) this.zoomSliderEl.value = String(clamped);
+    if (this.zoomValueEl) this.zoomValueEl.textContent = String(clamped);
   }
 
   /**

@@ -105,6 +105,7 @@ function makeRendererMock(): IRenderer {
     // PR4.3
     setRoomType: vi.fn(),
     setRoomDashboard: vi.fn(),
+    setRoomVisible: vi.fn(),
   };
 }
 
