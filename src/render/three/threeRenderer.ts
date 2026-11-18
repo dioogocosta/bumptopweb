@@ -7,11 +7,13 @@
  */
 import * as THREE from 'three';
 import type {
+  BoxType,
   CameraState,
   IRenderer,
   ObjectHandle,
   Pose,
   RoomConfig,
+  RoomDashboardData,
   Theme,
   Vec3,
 } from '@core/ports/index';
@@ -34,6 +36,10 @@ export class ThreeRenderer implements IRenderer {
   private pilePanel: THREE.Mesh | null = null;
   private roomGroups = new Map<string, THREE.Group>();
   private roomMats = new Map<string, { floor: THREE.MeshLambertMaterial; wall: THREE.MeshLambertMaterial }>();
+  /** PR4.3 — raias Kanban por sala (chave room:ox|oz). */
+  private roomKanbanLines = new Map<string, THREE.Mesh[]>();
+  /** PR4.3 — dashboards ROOT por sala (canvas pixel-voxel na parede). */
+  private roomDashboards = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; texture: THREE.CanvasTexture; mesh: THREE.Mesh }>();
 
   async init(sceneRoot: HTMLElement, room: RoomConfig): Promise<void> {
     this.scene = new THREE.Scene();
@@ -120,6 +126,111 @@ export class ThreeRenderer implements IRenderer {
     }
     this.roomGroups.delete(key);
     this.roomMats.delete(key);
+  }
+
+  /** PR4.3 — aplica o visual especial de uma caixa pelo tipo. */
+  setRoomType(room: RoomConfig, type: BoxType): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const group = this.roomGroups.get(key);
+    if (!group) return;
+    this.clearRoomSpecials(key);
+    if (type === 'kanban') this.addKanbanLines(group, room);
+    else if (type === 'root') this.addDashboard(group, room);
+  }
+
+  private clearRoomSpecials(key: string): void {
+    const lines = this.roomKanbanLines.get(key);
+    if (lines) {
+      for (const m of lines) this.scene.remove(m);
+      this.roomKanbanLines.delete(key);
+    }
+    const dash = this.roomDashboards.get(key);
+    if (dash) {
+      this.scene.remove(dash.mesh);
+      dash.mesh.geometry.dispose();
+      dash.texture.dispose();
+      this.roomDashboards.delete(key);
+    }
+  }
+
+  private addKanbanLines(group: THREE.Group, room: RoomConfig): void {
+    const { halfSize, wallHeight } = room;
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const w = (halfSize * 2) / 3;
+    const color = 0x2a4a6e;
+    const mat = new THREE.MeshLambertMaterial({ color });
+    const lines: THREE.Mesh[] = [];
+    for (let i = 1; i <= 2; i++) {
+      const x = ox - halfSize + i * w;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.12, wallHeight * 0.9, halfSize * 2), mat);
+      m.position.set(x, wallHeight * 0.45, oz);
+      m.receiveShadow = true;
+      group.add(m);
+      lines.push(m);
+    }
+    this.roomKanbanLines.set(key, lines);
+  }
+
+  private addDashboard(group: THREE.Group, room: RoomConfig): void {
+    const { halfSize, wallHeight, wallThickness } = room;
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(halfSize * 1.6, wallHeight * 0.6), new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: 0.95 }));
+    mesh.position.set(ox, wallHeight * 0.55, oz - halfSize + wallThickness / 2 + 0.05);
+    mesh.lookAt(ox, wallHeight * 0.55, oz - halfSize - 10);
+    group.add(mesh);
+    this.roomDashboards.set(key, { canvas, ctx, texture, mesh });
+  }
+
+  /** PR4.3 — atualiza o texto do dashboard ROOT de uma sala. */
+  setRoomDashboard(room: RoomConfig, data: RoomDashboardData): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const dash = this.roomDashboards.get(key);
+    if (!dash) return;
+    const { canvas, ctx } = dash;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#0b1520';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#4a90e2';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, canvas.width - 4, canvas.height - 4);
+    ctx.fillStyle = '#e0e0e0';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(data.name, canvas.width / 2, 40);
+    ctx.font = '16px monospace';
+    const linhas = [
+      `Itens: ${data.itens}`,
+      `Pastas: ${data.pastas}`,
+      `Notas: ${data.notas}`,
+      `Pilhas: ${data.pilhas}`,
+    ];
+    let y = 90;
+    for (const l of linhas) {
+      ctx.fillText(l, canvas.width / 2, y);
+      y += 34;
+    }
+    dash.texture.needsUpdate = true;
+  }
+
+  /** PR4.3 — remove raias/dashboard de uma sala ao exclui-la. */
+  removeRoomSpecials(key: string): void {
+    this.clearRoomSpecials(key);
   }
 
   private createBumpTopFloorTexture(): THREE.CanvasTexture {

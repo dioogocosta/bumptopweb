@@ -102,6 +102,9 @@ function makeRendererMock(): IRenderer {
     render: vi.fn(),
     dispose: vi.fn(),
     setPilePanel: vi.fn(),
+    // PR4.3
+    setRoomType: vi.fn(),
+    setRoomDashboard: vi.fn(),
   };
 }
 

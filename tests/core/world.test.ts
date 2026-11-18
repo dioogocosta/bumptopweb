@@ -95,6 +95,9 @@ function makeRendererMock(): IRenderer {
     screenToRay: vi.fn(() => ({ origin: { x: 0, y: 50, z: 0 }, direction: { x: 0, y: -1, z: 0 } })),
     resize: vi.fn(),
     setPilePanel: vi.fn(),
+    // PR4.3
+    setRoomType: vi.fn(),
+    setRoomDashboard: vi.fn(),
     setTheme: vi.fn(),
     render: vi.fn(),
     dispose: vi.fn(),
@@ -606,6 +609,67 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     }
     expect(world.getBox(a.id)!.pos).toEqual({ x: 340, z: -340 }); // k=1 na diagonal
     expect(world.getBox(b.id)!.pos).toEqual({ x: 680, z: -680 });
+  });
+
+  it('PR4.3: setBoxType muda o tipo e chama renderer.setRoomType', async () => {
+    const { world, renderer } = await makeWorld(makeOverlayMock());
+    const b = world.addBoxEntity('Dash', { x: 400, z: 0 });
+    expect(world.setBoxType(b.id, 'root')).toBe(true);
+    expect(world.getBox(b.id)!.type).toBe('root');
+    expect(renderer.setRoomType).toHaveBeenCalledWith(expect.objectContaining({ origin: { x: 400, z: 0 } }), 'root');
+    // box-default não muda de tipo
+    expect(world.setBoxType('box-default', 'kanban')).toBe(false);
+    expect(world.getBox('box-default')!.type).toBe('comum');
+    // id inválido
+    expect(world.setBoxType('nao-existe', 'root')).toBe(false);
+  });
+
+  it('PR4.3: caixa kanban — nota ganha meta.kanbanLane conforme a posição x', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const b = world.addBoxEntity('Quadro', { x: 400, z: 0 }, 'kanban');
+    expect(world.getBox(b.id)!.type).toBe('kanban');
+    // esquerda → lane 0; centro → 1; direita → 2
+    const esq = world.addStickyNote({ x: 400 - 100, y: 1.2, z: 0 }, 'e');
+    const cen = world.addStickyNote({ x: 400, y: 1.2, z: 0 }, 'c');
+    const dir = world.addStickyNote({ x: 400 + 100, y: 1.2, z: 0 }, 'd');
+    expect(world.getObject(esq)!.meta.kanbanLane).toBe(0);
+    expect(world.getObject(cen)!.meta.kanbanLane).toBe(1);
+    expect(world.getObject(dir)!.meta.kanbanLane).toBe(2);
+    // mover para outra raia atualiza a lane
+    world.removeObject(cen);
+    const novo = world.addStickyNote({ x: 400 + 110, y: 1.2, z: 0 }, 'n');
+    expect(world.getObject(novo)!.meta.kanbanLane).toBe(2);
+    // caixa comum não tem lane (muda para a padrão antes)
+    world.setCurrentBox('box-default');
+    const comum = world.addStickyNote({ x: 10, y: 1.2, z: 10 }, 'x');
+    expect(world.getObject(comum)!.meta.kanbanLane).toBeUndefined();
+  });
+
+  it('PR4.3: dashboard ROOT — setRoomDashboard chamado com stats após update()', async () => {
+    const { world, renderer } = await makeWorld(makeOverlayMock());
+    const b = world.addBoxEntity('Dash', { x: 400, z: 0 }, 'root');
+    expect(world.getBox(b.id)!.type).toBe('root');
+    // limpa chamadas iniciais
+    (renderer.setRoomDashboard as ReturnType<typeof vi.fn>).mockClear();
+    // adiciona itens dentro da caixa root
+    world.addStickyNote({ x: 410, y: 1.2, z: 0 }, 'nota1');
+    world.addStickyNote({ x: 420, y: 1.2, z: 10 }, 'nota2');
+    world.update(1 / 30);
+    expect(renderer.setRoomDashboard).toHaveBeenCalledTimes(1);
+    const data = (renderer.setRoomDashboard as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(data.name).toBe('Dash');
+    expect(data.itens).toBe(2);
+    expect(data.notas).toBe(2);
+    // sem mudança → não chama de novo (dirty flag)
+    (renderer.setRoomDashboard as ReturnType<typeof vi.fn>).mockClear();
+    world.update(1 / 30);
+    expect(renderer.setRoomDashboard).not.toHaveBeenCalled();
+    // mudou → chama de novo
+    world.addStickyNote({ x: 430, y: 1.2, z: 20 }, 'nota3');
+    world.update(1 / 30);
+    expect(renderer.setRoomDashboard).toHaveBeenCalledTimes(1);
+    const data2 = (renderer.setRoomDashboard as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(data2.itens).toBe(3);
   });
 
   it('PR15: modo laço p/ TOQUE — arrastar o dedo no chão vazio desenha o laço', async () => {

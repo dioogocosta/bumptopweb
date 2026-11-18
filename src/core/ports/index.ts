@@ -6,6 +6,7 @@
  * engine ou rodar em Tauri/Electron sem tocar na lógica de domínio.
  */
 import type {
+  BoxType,
   BumpObjectData,
   CameraState,
   PhysicsConfig,
@@ -19,6 +20,7 @@ import type { Theme } from '../theme/theme';
 
 // Re-exporta os tipos de domínio p/ conveniência dos adapters.
 export type {
+  BoxType,
   BumpObjectData,
   CameraState,
   PhysicsConfig,
@@ -125,6 +127,25 @@ export interface IRenderer {
    * sobre o piso, sob os itens. null esconde.
    */
   setPilePanel(panel: { x: number; z: number; hw: number; hd: number } | null): void;
+  /**
+   * PR4.3 — visual especial da caixa pelo tipo: Kanban pinta raias no chão,
+   * Root cria o painel do dashboard na parede; 'comum' volta ao visual padrão.
+   */
+  setRoomType(room: RoomConfig, type: BoxType): void;
+  /**
+   * PR4.3 — dados do dashboard pixel-voxel de uma caixa ROOT (dirty flag do
+   * lado do core: só chega aqui quando os números mudam).
+   */
+  setRoomDashboard(room: RoomConfig, data: RoomDashboardData): void;
+}
+
+/** PR4.3 — estatísticas do dashboard de uma caixa ROOT. */
+export interface RoomDashboardData {
+  name: string;
+  itens: number;
+  pastas: number;
+  notas: number;
+  pilhas: number;
 }
 
 // ---------------------------------------------------------------------------
