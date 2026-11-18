@@ -47,6 +47,8 @@ export class ThreeRenderer implements IRenderer {
   private floorBuildingTexture: THREE.CanvasTexture | null = null;
   private infiniteFloorMesh: THREE.Mesh | null = null;
   private infiniteGridTexture: THREE.CanvasTexture | null = null;
+  /** Tema ativo (guardado para aplicar ao criar novas salas lazily). */
+  private activeTheme: Theme | null = null;
   /** PR4.3 — raias Kanban por sala (chave room:ox|oz). */
   private roomKanbanLines = new Map<string, THREE.Mesh[]>();
   /** PR4.3 — dashboards ROOT por sala (canvas pixel-voxel na parede). */
@@ -162,6 +164,23 @@ export class ThreeRenderer implements IRenderer {
     this.scene.add(group);
     // PR4.2 — materiais por caixa (o setTheme pinta TODAS as caixas)
     this.roomMats.set(group.name, { floor: floorMat, wall: wallMat, edges: wallEdgesList });
+    // Aplica o tema ativo imediatamente (evita sala nascendo com tema errado em lazy rendering)
+    if (this.activeTheme) this.setTheme(this.activeTheme);
+  }
+
+  /** Define a visibilidade do chão + 4 paredes de uma caixa. */
+  setRoomVisible(room: RoomConfig, visible: boolean): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const group = this.roomGroups.get(key);
+    if (group) group.visible = visible;
+    const lines = this.roomKanbanLines.get(key);
+    if (lines) {
+      for (const l of lines) l.visible = visible;
+    }
+    const dash = this.roomDashboards.get(key);
+    if (dash) dash.mesh.visible = visible;
   }
 
   /** PR4.2 — remove o chão + 4 paredes da caixa (meshes + materiais). */
@@ -779,6 +798,7 @@ export class ThreeRenderer implements IRenderer {
   }
 
   setTheme(theme: Theme): void {
+    this.activeTheme = theme;
     this.scene.background = new THREE.Color(theme.background);
     const isFloor = theme.name === 'Floor';
     const isBumpTop = theme.name === 'BumpTop';

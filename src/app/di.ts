@@ -152,6 +152,64 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   const skipBuilding =
     typeof window !== 'undefined' &&
     window.location.search.includes('nobuilding=1');
+
+  // ── Dashboard: stats, busca global e dots de match ───────────────────────
+  const updateBuildingStats = () => {
+    const rawStats = world.getBoxStats();
+    const boxes = world.listBoxes().map((box) => {
+      const s = rawStats.find((r) => r.boxId === box.id);
+      return {
+        boxId:     box.id,
+        notes:     s?.notes     ?? 0,
+        photos:    s?.photos    ?? 0,
+        documents: s?.documents ?? 0,
+        others:    s?.others    ?? 0,
+        noteItems: s?.noteItems ?? [],
+      };
+    });
+    buildingView.setStats({ boxes });
+  };
+  updateBuildingStats();
+
+  // Busca global no dashboard do prédio
+  buildingView.onSearch((query) => {
+    if (!query.trim()) {
+      buildingView.setSearchMatches([], '');
+      return;
+    }
+    const rawStats = world.getBoxStats();
+    const boxes = world.listBoxes();
+    const matches: import('../building/BuildingView').SearchMatch[] = [];
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i]!;
+      const s = rawStats.find((r) => r.boxId === box.id);
+      if (!s) continue;
+      const q = query.toLowerCase();
+      for (const note of s.noteItems) {
+        const hay = `${note.label}\n${note.text}`.toLowerCase();
+        if (hay.includes(q)) {
+          matches.push({ itemId: note.id, boxId: box.id, label: note.label, floorNum: i + 1 });
+        }
+      }
+    }
+    buildingView.setSearchMatches(matches, query);
+  });
+
+  // Clique em dot → navega até a nota específica
+  buildingView.onItemDotClick((itemId, boxId) => {
+    buildingView.hide(() => {
+      overlay.hideBuildingBack();
+      const box = world.getBox(boxId);
+      if (box) {
+        world.setCurrentBox(boxId);
+        world.flyToBox(boxId);
+        world.flyToObject(itemId);
+        overlay.showBuildingBack();
+        setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
+      }
+    });
+  });
+
   if (!skipBuilding) {
     buildingView.show();
   }
@@ -166,6 +224,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.toast(t('toast.buildingEntered', { name: box.name }));
         overlay.showBuildingBack();
         void syncBacklog(boxId); // PR4.5 — backlog: puxa as stories do Taiga
+        // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
+        setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
       }
     });
   });
@@ -866,7 +926,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   window.addEventListener('keydown', onKey);
 
   // Reset Camera (P0): botão na barra de ferramentas (overlay) → preset 1
-  const onResetCamera = () => world.setCameraPreset(1);
+  const onResetCamera = () => {
+    world.setCameraPreset(1);
+    // Sincroniza a barra de zoom com a nova distância
+    overlay.setZoomSliderValue(world.getCamera().distance);
+  };
   overlayRoot.addEventListener('resetcamera', onResetCamera);
 
   // Seleção de temas via menu suspenso do topo
@@ -950,11 +1014,14 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     world.setCurrentBox(id);
     world.flyToBox(id);
     void syncBacklog(id); // PR4.5 — backlog: atualiza as stories ao entrar
+    // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
+    setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
   });
   // PR4.2 — CRUD de caixas: criar (nome automático "Caixa n"), renomear,
   // excluir (itens voltam p/ a Caixa Comum) — o painel re-renderiza em cima
   const reopenBoxesPanel = () => {
     buildingView.setBoxes(world.listBoxes());
+    updateBuildingStats();
     if (!overlay.isBoxesPanelVisible()) return;
     const cur = world.getCurrentBoxId();
     overlay.showBoxesPanel(
@@ -996,6 +1063,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       buildingView.hide();
     } else {
       buildingView.setBoxes(world.listBoxes());
+      updateBuildingStats();
       buildingView.selectFloor(world.getCurrentBoxId());
       buildingView.show();
     }
@@ -1003,6 +1071,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   overlayRoot.addEventListener('buildingback', () => {
     overlay.hideBuildingBack();
     buildingView.setBoxes(world.listBoxes());
+    updateBuildingStats();
     buildingView.selectFloor(world.getCurrentBoxId());
     buildingView.show(() => {
       overlay.toast(t('toast.buildingBack'));
@@ -1207,11 +1276,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     e.stopPropagation();
   });
 
-  // PR11 — botões de zoom na tela (delta na escala do wheel)
-  overlay.onZoom(
-    () => { world.zoomCamera(-60); overlay.toast(t('toast.zoomIn')); },
-    () => { world.zoomCamera(60); overlay.toast(t('toast.zoomOut')); },
-  );
+  // PR11 — barra deslizável de zoom: converte distância ↔ slider
+  overlay.onZoomSlider((distance: number) => {
+    world.setCamera({ ...world.getCamera(), distance });
+  });
+  // Inicializa o slider com a distância padrão do preset 1 (distance: 210)
+  overlay.setZoomSliderValue(329);
   overlay.onPileCloseClick(() => {
     if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));
   });

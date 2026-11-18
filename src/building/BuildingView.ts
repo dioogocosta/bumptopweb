@@ -2,13 +2,40 @@
  * PR4.4 — BuildingView
  *
  * Renderiza as caixas (BoxEntityData) como andares empilhados de um prédio 3D.
- * Inspirado no ARC0050 (HorizonX) e portado para TypeScript puro + Three.js.
+ * Inclui dashboard com estatísticas, busca global e dots de match nos andares.
  */
 import * as THREE from 'three';
 import type { BoxType } from '@core/ports/index';
 import type { BoxEntityData } from '@core/model/types';
 
-// Cores por tipo de caixa
+// ── Tipos públicos ─────────────────────────────────────────────────────────
+
+export interface BoxStats {
+  boxId: string;
+  notes: number;
+  photos: number;
+  documents: number;
+  others: number;
+  noteItems: Array<{ id: string; label: string; text: string }>;
+}
+
+export interface BuildingStatsData {
+  boxes: BoxStats[];
+}
+
+export interface SearchMatch {
+  itemId: string;
+  boxId: string;
+  label: string;
+  floorNum: number;
+}
+
+export type FloorClickCallback  = (boxId: string)  => void;
+export type ItemClickCallback   = (itemId: string, boxId: string) => void;
+export type SearchQueryCallback = (query: string)  => void;
+
+// ── Constantes ────────────────────────────────────────────────────────────
+
 const FLOOR_COLOR: Record<BoxType, number> = {
   comum:   0x5a6a80,
   root:    0x22c55e,
@@ -16,70 +43,125 @@ const FLOOR_COLOR: Record<BoxType, number> = {
   backlog: 0x8b5cf6,
 };
 
-const FLOOR_HEIGHT     = 4.2;   // altura de cada andar
-const FLOOR_WIDTH      = 28;    // largura base
-const FLOOR_DEPTH      = 18;    // profundidade base
-const FLOOR_GAP        = 0.35;  // gap entre andares
+const FLOOR_HEIGHT     = 4.2;
+const FLOOR_WIDTH      = 28;
+const FLOOR_DEPTH      = 18;
+const FLOOR_GAP        = 0.35;
 const SELECTED_OPACITY = 0.95;
 const DEFAULT_OPACITY  = 0.45;
 const DIM_OPACITY      = 0.15;
 
-export type FloorClickCallback = (boxId: string) => void;
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  style: Partial<CSSStyleDeclaration> = {},
+  attrs: Record<string, string> = {},
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  Object.assign(e.style, style);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+
+function drawDonut(canvas: HTMLCanvasElement, slices: { value: number; color: string }[]): void {
+  const ctx = canvas.getContext('2d')!;
+  const cx = canvas.width / 2, cy = canvas.height / 2;
+  const r = Math.min(cx, cy) - 6;
+  const inner = r * 0.56;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const total = slices.reduce((s, v) => s + v.value, 0) || 1;
+  let start = -Math.PI / 2;
+  for (const sl of slices) {
+    const sweep = (sl.value / total) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, start + sweep);
+    ctx.closePath();
+    ctx.fillStyle = sl.color;
+    ctx.fill();
+    start += sweep;
+  }
+  // anel interno vazio
+  ctx.beginPath();
+  ctx.arc(cx, cy, inner, 0, Math.PI * 2);
+  ctx.fillStyle = '#0d1420';
+  ctx.fill();
+  // total no centro
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = `bold ${Math.round(r * 0.38)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(total), cx, cy);
+}
+
+// ── Classe principal ───────────────────────────────────────────────────────
 
 export class BuildingView {
-  private container!: HTMLDivElement;
-  private tooltip!:   HTMLDivElement;
-  private scene!:     THREE.Scene;
-  private camera!:    THREE.PerspectiveCamera;
-  private renderer!:  THREE.WebGLRenderer;
-  private group =     new THREE.Group();
+  private container!:  HTMLDivElement;
+  private tooltip!:    HTMLDivElement;
+  private scene!:      THREE.Scene;
+  private camera!:     THREE.PerspectiveCamera;
+  private renderer!:   THREE.WebGLRenderer;
+  private group =      new THREE.Group();
   private raf = 0;
 
-  // Câmera órbita — theta ~ 2.35 rad (135°) posiciona a câmera à frente dos textos de cada andar
+  // Câmera órbita
   private cam = { theta: 2.35, phi: 1.15, dist: 90, ty: 15 };
   private drag = { down: false, lx: 0, ly: 0 };
 
-  private rawBoxes: BoxEntityData[] = [];
+  private rawBoxes:        BoxEntityData[]  = [];
   private floors: Array<{ id: string; mesh: THREE.Mesh; edges: THREE.LineSegments; sprite?: THREE.Sprite }> = [];
   private clickableObjects: THREE.Object3D[] = [];
-  private selectedId: string | null = null;
-  private hoveredId: string | null = null;
-  private clickCb: FloorClickCallback | null = null;
+  private selectedId:  string | null = null;
+  private hoveredId:   string | null = null;
+  private clickCb:     FloorClickCallback  | null = null;
+  private itemClickCb: ItemClickCallback   | null = null;
+  private searchCb:    SearchQueryCallback | null = null;
 
-  private visible = false;
-  private fadeAlpha = 0;      // 0 = oculto, 1 = visível
-  private fadeDir   = 0;      // +1 = aparecendo, -1 = sumindo
-  private fadeCb: (() => void) | null = null;
+  private visible  = false;
+  private fadeAlpha = 0;
+  private fadeDir   = 0;
+  private fadeCb:  (() => void) | null = null;
 
-  // ── Mount ────────────────────────────────────────────────
+  // Dashboard
+  private statsData: BuildingStatsData | null = null;
+  private searchMatches: SearchMatch[] = [];
+
+  // Dashboard DOM nodes (criados em _createDashboard)
+  private dashOverlay!: HTMLDivElement;
+  private donutCanvas!: HTMLCanvasElement;
+  private statTotal!:   HTMLElement;
+  private statBoxes!:   HTMLElement;
+  private statNotes!:   HTMLElement;
+  private statPhotos!:  HTMLElement;
+  private statDocs!:    HTMLElement;
+  private floorListEl!: HTMLElement;
+  private searchInput!: HTMLInputElement;
+  private searchCountEl!: HTMLElement;
+  private dotsLayer!:  HTMLDivElement;
+  private dotEls: Array<{ el: HTMLDivElement; match: SearchMatch; floorY: number }> = [];
+
+  // ── Mount ──────────────────────────────────────────────────────────────
+
   mount(parent: HTMLElement): void {
-    this.container = document.createElement('div');
-    Object.assign(this.container.style, {
+    this.container = el('div', {
       position: 'absolute', inset: '0',
-      zIndex: '50',
-      opacity: '0',
-      pointerEvents: 'none',
-      transition: 'none',
+      zIndex: '50', opacity: '0',
+      pointerEvents: 'none', transition: 'none',
     });
     parent.appendChild(this.container);
 
     // Tooltip flutuante
-    this.tooltip = document.createElement('div');
-    this.tooltip.className = 'building-tooltip';
-    Object.assign(this.tooltip.style, {
-      position: 'absolute',
-      pointerEvents: 'none',
-      background: 'rgba(15, 23, 42, 0.92)',
-      border: '1px solid rgba(99, 179, 237, 0.4)',
-      color: '#e2e8f0',
-      borderRadius: '6px',
-      padding: '5px 10px',
-      fontSize: '12px',
-      fontFamily: 'sans-serif',
-      fontWeight: '500',
-      zIndex: '60',
-      display: 'none',
-      transform: 'translate(-50%, -140%)',
+    this.tooltip = el('div', {
+      position: 'absolute', pointerEvents: 'none',
+      background: 'rgba(15,23,42,0.92)',
+      border: '1px solid rgba(99,179,237,0.4)',
+      color: '#e2e8f0', borderRadius: '6px',
+      padding: '5px 10px', fontSize: '12px',
+      fontFamily: 'sans-serif', fontWeight: '500',
+      zIndex: '60', display: 'none',
+      transform: 'translate(-50%,-140%)',
       backdropFilter: 'blur(8px)',
       boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
       whiteSpace: 'nowrap',
@@ -105,7 +187,6 @@ export class BuildingView {
     const dir1 = new THREE.DirectionalLight(0xffffff, 0.85);
     dir1.position.set(60, 120, 80);
     this.scene.add(dir1);
-
     const dir2 = new THREE.DirectionalLight(0x63b3ed, 0.35);
     dir2.position.set(-60, 40, -80);
     this.scene.add(dir2);
@@ -116,11 +197,212 @@ export class BuildingView {
 
     this.scene.add(this.group);
 
+    // Dashboard DOM
+    this._createDashboard();
+
+    // Dots layer (sobre tudo)
+    this.dotsLayer = el('div', {
+      position: 'absolute', inset: '0',
+      pointerEvents: 'none', zIndex: '55',
+    });
+    this.container.appendChild(this.dotsLayer);
+
     this._bindEvents();
     this._tick();
   }
 
-  // ── Eventos ────────────────────────────────────────────────
+  // ── Dashboard DOM ──────────────────────────────────────────────────────
+
+  private _createDashboard(): void {
+    this.dashOverlay = el('div', {
+      position: 'absolute', inset: '0',
+      zIndex: '52', pointerEvents: 'none',
+      fontFamily: "'Inter',system-ui,sans-serif",
+    });
+    this.container.appendChild(this.dashOverlay);
+
+    // ── Painel Esquerdo ───────────────────────────────────
+    const leftPanel = el('div', {
+      position: 'absolute', top: '16px', left: '16px',
+      width: '200px',
+      background: 'rgba(10,15,22,0.82)',
+      border: '1px solid rgba(56,189,248,0.18)',
+      borderRadius: '14px', padding: '16px',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+      pointerEvents: 'auto', userSelect: 'none',
+    });
+
+    // Título
+    const title = el('div', {
+      color: '#38bdf8', fontWeight: '700',
+      fontSize: '11px', letterSpacing: '0.12em',
+      textTransform: 'uppercase', marginBottom: '12px',
+    });
+    title.textContent = '📊 Resumo';
+    leftPanel.appendChild(title);
+
+    // Grid de stats
+    const grid2 = el('div', {
+      display: 'grid', gridTemplateColumns: '1fr 1fr',
+      gap: '8px', marginBottom: '14px',
+    });
+
+    const mkStat = (label: string, val: string, accent: string): HTMLElement => {
+      const box = el('div', {
+        background: 'rgba(255,255,255,0.04)',
+        borderRadius: '8px', padding: '8px 10px',
+        border: `1px solid ${accent}22`,
+      });
+      const v = el('div', { color: accent, fontSize: '20px', fontWeight: '800', lineHeight: '1' });
+      v.textContent = val;
+      const l = el('div', { color: '#94a3b8', fontSize: '10px', marginTop: '3px' });
+      l.textContent = label;
+      box.appendChild(v); box.appendChild(l);
+      return box;
+    };
+
+    // Guardamos referências para atualizar depois
+    const boxStat  = mkStat('Andares', '0', '#38bdf8');
+    const totStat  = mkStat('Total', '0', '#a78bfa');
+    const noteStat = mkStat('Notas', '0', '#fbbf24');
+    const photoStat= mkStat('Fotos', '0', '#34d399');
+    const docStat  = mkStat('Docs', '0', '#f87171');
+    const otherStat= mkStat('Outros', '0', '#94a3b8');
+
+    this.statBoxes  = boxStat.firstElementChild  as HTMLElement;
+    this.statTotal  = totStat.firstElementChild  as HTMLElement;
+    this.statNotes  = noteStat.firstElementChild as HTMLElement;
+    this.statPhotos = photoStat.firstElementChild as HTMLElement;
+    this.statDocs   = docStat.firstElementChild  as HTMLElement;
+
+    grid2.appendChild(boxStat); grid2.appendChild(totStat);
+    grid2.appendChild(noteStat); grid2.appendChild(photoStat);
+    grid2.appendChild(docStat); grid2.appendChild(otherStat);
+    leftPanel.appendChild(grid2);
+
+    // Donut chart
+    const donutWrap = el('div', {
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', marginBottom: '10px',
+    });
+    this.donutCanvas = el('canvas', { width: '100px', height: '100px' }, { width: '100', height: '100' });
+    donutWrap.appendChild(this.donutCanvas);
+
+    // Legenda do donut
+    const legend = el('div', {
+      display: 'flex', flexWrap: 'wrap', gap: '6px 10px',
+      justifyContent: 'center', marginTop: '8px',
+    });
+    const mkLeg = (color: string, label: string) => {
+      const row = el('div', { display: 'flex', alignItems: 'center', gap: '4px' });
+      const dot = el('div', { width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: '0' });
+      const lbl = el('span', { color: '#94a3b8', fontSize: '10px' });
+      lbl.textContent = label;
+      row.appendChild(dot); row.appendChild(lbl);
+      return row;
+    };
+    legend.appendChild(mkLeg('#fbbf24', 'Notas'));
+    legend.appendChild(mkLeg('#34d399', 'Fotos'));
+    legend.appendChild(mkLeg('#f87171', 'Docs'));
+    legend.appendChild(mkLeg('#94a3b8', 'Outros'));
+    donutWrap.appendChild(legend);
+    leftPanel.appendChild(donutWrap);
+
+    // Barra de ocupação por andar (mini)
+    const barsLabel = el('div', {
+      color: '#64748b', fontSize: '10px', letterSpacing: '0.08em',
+      textTransform: 'uppercase', marginBottom: '6px',
+    });
+    barsLabel.textContent = 'Itens por andar';
+    leftPanel.appendChild(barsLabel);
+
+    // Container das barras (preenchido em setStats)
+    const barsWrap = el('div', { display: 'flex', flexDirection: 'column', gap: '4px' });
+    barsWrap.id = 'bv-bars';
+    leftPanel.appendChild(barsWrap);
+
+    this.dashOverlay.appendChild(leftPanel);
+
+    // ── Painel Direito (lista de andares) ─────────────────
+    const rightPanel = el('div', {
+      position: 'absolute', top: '16px', right: '16px',
+      width: '200px', maxHeight: 'calc(100vh - 100px)',
+      overflowY: 'auto',
+      background: 'rgba(10,15,22,0.82)',
+      border: '1px solid rgba(56,189,248,0.18)',
+      borderRadius: '14px', padding: '14px',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+      pointerEvents: 'auto',
+    });
+
+    const rTitle = el('div', {
+      color: '#38bdf8', fontWeight: '700',
+      fontSize: '11px', letterSpacing: '0.12em',
+      textTransform: 'uppercase', marginBottom: '10px',
+    });
+    rTitle.textContent = '🏢 Andares';
+    rightPanel.appendChild(rTitle);
+
+    this.floorListEl = el('div', { display: 'flex', flexDirection: 'column', gap: '5px' });
+    rightPanel.appendChild(this.floorListEl);
+
+    this.dashOverlay.appendChild(rightPanel);
+
+    // ── Barra de busca global (centro-baixo) ─────────────
+    const searchWrap = el('div', {
+      position: 'absolute', bottom: '20px',
+      left: '50%', transform: 'translateX(-50%)',
+      display: 'flex', alignItems: 'center', gap: '8px',
+      background: 'rgba(10,15,22,0.90)',
+      border: '1px solid rgba(56,189,248,0.3)',
+      borderRadius: '30px', padding: '8px 16px',
+      backdropFilter: 'blur(14px)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+      minWidth: '320px', pointerEvents: 'auto',
+    });
+
+    const searchIcon = el('span', { color: '#38bdf8', fontSize: '16px', flexShrink: '0' });
+    searchIcon.textContent = '🔍';
+    searchWrap.appendChild(searchIcon);
+
+    this.searchInput = el('input', {
+      background: 'transparent', border: 'none', outline: 'none',
+      color: '#e2e8f0', fontSize: '14px', flex: '1', minWidth: '0',
+    }, { type: 'text', placeholder: 'Buscar em todos os andares...' });
+    this.searchInput.style.setProperty('--placeholder-color', '#475569');
+
+    // Estilo placeholder via CSS injection
+    const style = document.createElement('style');
+    style.textContent = `.bv-search::placeholder { color: #475569; }`;
+    document.head.appendChild(style);
+    this.searchInput.classList.add('bv-search');
+
+    this.searchInput.addEventListener('input', () => {
+      const q = this.searchInput.value;
+      this.searchCb?.(q);
+    });
+    this.searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.searchInput.value = '';
+        this.searchCb?.('');
+      }
+    });
+    searchWrap.appendChild(this.searchInput);
+
+    this.searchCountEl = el('span', {
+      color: '#38bdf8', fontSize: '12px', flexShrink: '0',
+      minWidth: '48px', textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+    });
+    this.searchCountEl.textContent = '';
+    searchWrap.appendChild(this.searchCountEl);
+
+    this.dashOverlay.appendChild(searchWrap);
+  }
+
+  // ── Eventos ───────────────────────────────────────────────────────────
+
   private _bindEvents(): void {
     const cvs = this.renderer.domElement;
     cvs.style.cursor = 'grab';
@@ -155,8 +437,7 @@ export class BuildingView {
           hasDragged = true;
           this.tooltip.style.display = 'none';
         }
-        this.drag.lx = x;
-        this.drag.ly = y;
+        this.drag.lx = x; this.drag.ly = y;
         this.cam.theta -= dx * 0.005;
         this.cam.phi = Math.max(0.15, Math.min(Math.PI - 0.15, this.cam.phi - dy * 0.005));
       } else {
@@ -169,13 +450,12 @@ export class BuildingView {
       this.cam.dist = Math.max(30, Math.min(300, this.cam.dist + e.deltaY * 0.1));
     }, { passive: false });
 
-    // Click num andar
     cvs.addEventListener('click', (e) => {
-      if (hasDragged) return; // Arraste de câmera não aciona clique
+      if (hasDragged) return;
       const [x, y] = getXY(e);
       const rect = cvs.getBoundingClientRect();
-      const mx = ((x - rect.left) / rect.width) * 2 - 1;
-      const my = ((y - rect.top) / rect.height) * -2 + 1;
+      const mx = ((x - rect.left) / rect.width)  * 2 - 1;
+      const my = ((y - rect.top)  / rect.height) * -2 + 1;
 
       const ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2(mx, my), this.camera);
@@ -192,7 +472,6 @@ export class BuildingView {
       }
     });
 
-    // Resize
     window.addEventListener('resize', () => {
       const nw = this.container.clientWidth  || window.innerWidth;
       const nh = this.container.clientHeight || window.innerHeight;
@@ -202,39 +481,39 @@ export class BuildingView {
     });
   }
 
-  // ── Hover ────────────────────────────────────────────────
+  // ── Hover ─────────────────────────────────────────────────────────────
+
   private _handleHover(x: number, y: number, cvs: HTMLCanvasElement): void {
     const rect = cvs.getBoundingClientRect();
-    const mx = ((x - rect.left) / rect.width) * 2 - 1;
-    const my = ((y - rect.top) / rect.height) * -2 + 1;
+    const mx = ((x - rect.left) / rect.width)  * 2 - 1;
+    const my = ((y - rect.top)  / rect.height) * -2 + 1;
 
     const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2(mx, my), this.camera);
     const hits = ray.intersectObjects(this.clickableObjects, true);
 
     if (hits.length > 0) {
-      const hit = hits[0].object;
-      const boxId = hit.userData['boxId'] as string | undefined;
-      const boxName = hit.userData['boxName'] as string | undefined;
-      const floorNum = hit.userData['floorNum'] as number | undefined;
-
+      const hit   = hits[0].object;
+      const boxId = hit.userData['boxId']   as string | undefined;
+      const name  = hit.userData['boxName'] as string | undefined;
+      const num   = hit.userData['floorNum'] as number | undefined;
       if (boxId && boxId !== '__empty__') {
         this.hoveredId = boxId;
         cvs.style.cursor = 'pointer';
         this.tooltip.style.display = 'block';
         this.tooltip.style.left = `${x}px`;
-        this.tooltip.style.top = `${y}px`;
-        this.tooltip.textContent = `F${floorNum ?? 1} · ${boxName ?? 'Caixa'}`;
+        this.tooltip.style.top  = `${y}px`;
+        this.tooltip.textContent = `F${num ?? 1} · ${name ?? 'Caixa'}`;
         return;
       }
     }
-
     this.hoveredId = null;
     cvs.style.cursor = 'grab';
     this.tooltip.style.display = 'none';
   }
 
-  // ── Tick ─────────────────────────────────────────────────
+  // ── Tick ──────────────────────────────────────────────────────────────
+
   private _tick(): void {
     this.raf = requestAnimationFrame(() => this._tick());
 
@@ -254,7 +533,7 @@ export class BuildingView {
       }
     }
 
-    // Câmera órbita
+    // Câmera
     const c = this.cam;
     this.camera.position.set(
       c.dist * Math.sin(c.phi) * Math.cos(c.theta),
@@ -262,38 +541,46 @@ export class BuildingView {
       c.dist * Math.sin(c.phi) * Math.sin(c.theta),
     );
     this.camera.lookAt(0, c.ty, 0);
-
     this.renderer.render(this.scene, this.camera);
+
+    // Atualiza posição dos dots de busca
+    this._updateDots();
   }
 
-  // ── Setboxes ─────────────────────────────────────────────
+  // ── Dots de busca ─────────────────────────────────────────────────────
+
+  private _updateDots(): void {
+    if (this.dotEls.length === 0) return;
+    const w = this.container.clientWidth  || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+
+    for (const { el: dotEl, floorY } of this.dotEls) {
+      // Projeta o ponto 3D (centro do andar) para 2D
+      const v = new THREE.Vector3(0, floorY, 0);
+      v.project(this.camera);
+      const sx = ((v.x + 1) / 2) * w;
+      const sy = ((-v.y + 1) / 2) * h;
+      dotEl.style.left = `${sx - 6}px`;
+      dotEl.style.top  = `${sy - 6}px`;
+      dotEl.style.display = (v.z < 1) ? 'flex' : 'none';
+    }
+  }
+
+  // ── SetBoxes ──────────────────────────────────────────────────────────
+
   setBoxes(boxes: BoxEntityData[]): void {
     this.rawBoxes = [...boxes];
     this._rebuild();
   }
 
   private _rebuild(): void {
-    // Limpa objetos antigos de forma completa
     while (this.group.children.length > 0) {
       const c = this.group.children[0];
-      if ('geometry' in c && (c as THREE.Mesh).geometry) {
-        (c as THREE.Mesh).geometry.dispose();
-      }
+      if ('geometry' in c && (c as THREE.Mesh).geometry) (c as THREE.Mesh).geometry.dispose();
       if ('material' in c) {
         const m = (c as THREE.Mesh).material;
-        if (Array.isArray(m)) {
-          m.forEach((mat) => {
-            if ('map' in mat && (mat as { map?: THREE.Texture }).map) {
-              (mat as { map: THREE.Texture }).map.dispose();
-            }
-            mat.dispose();
-          });
-        } else if (m) {
-          if ('map' in m && (m as { map?: THREE.Texture }).map) {
-            (m as { map: THREE.Texture }).map.dispose();
-          }
-          m.dispose();
-        }
+        if (Array.isArray(m)) m.forEach(mat => mat.dispose());
+        else if (m) (m as THREE.Material).dispose();
       }
       this.group.remove(c);
     }
@@ -312,35 +599,23 @@ export class BuildingView {
       const item = items[i];
       const isSel = this.selectedId === item.id;
       const hasSelection = this.selectedId !== null;
-
       const baseColor = FLOOR_COLOR[item.type] ?? FLOOR_COLOR.comum;
-      const color = isSel
-        ? new THREE.Color(baseColor).multiplyScalar(1.5)
-        : new THREE.Color(baseColor);
-
+      const color = isSel ? new THREE.Color(baseColor).multiplyScalar(1.5) : new THREE.Color(baseColor);
       const opacity = isSel ? SELECTED_OPACITY : hasSelection ? DIM_OPACITY : DEFAULT_OPACITY;
 
       const mat = new THREE.MeshPhongMaterial({
-        color,
-        transparent: true,
-        opacity,
+        color, transparent: true, opacity,
+        emissive: new THREE.Color(0x000000),
         depthWrite: !hasSelection || isSel,
       });
 
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(0, y + (FLOOR_HEIGHT - FLOOR_GAP) / 2, 0);
-      mesh.userData = {
-        boxId: item.id,
-        boxName: item.name,
-        floorNum: i + 1,
-        boxType: item.type,
-      };
+      mesh.userData = { boxId: item.id, boxName: item.name, floorNum: i + 1, boxType: item.type };
 
-      // Wireframe edges
       const edgeMat = new THREE.LineBasicMaterial({
         color: isSel ? 0xffffff : baseColor,
-        transparent: true,
-        opacity: isSel ? 1 : 0.45,
+        transparent: true, opacity: isSel ? 1 : 0.45,
       });
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat);
       edges.position.copy(mesh.position);
@@ -348,58 +623,48 @@ export class BuildingView {
       this.group.add(mesh, edges);
       this.clickableObjects.push(mesh);
 
-      // Sprite de rótulo (F1, F2...) com nome da caixa
       const sprite = this._createLabelSprite(i + 1, item.name, item.id, isSel);
       sprite.position.set(-FLOOR_WIDTH / 2 - 3.5, mesh.position.y, 0);
-      sprite.userData = {
-        boxId: item.id,
-        boxName: item.name,
-        floorNum: i + 1,
-      };
+      sprite.userData = { boxId: item.id, boxName: item.name, floorNum: i + 1 };
       this.group.add(sprite);
       this.clickableObjects.push(sprite);
 
       this.floors.push({ id: item.id, mesh, edges, sprite });
-
       y += FLOOR_HEIGHT;
     }
 
-    // Enquadra a câmera perfeitamente no centro e altura do prédio
     const totalH = Math.max(1, items.length) * FLOOR_HEIGHT;
-    this.cam.ty = totalH / 2;
+    this.cam.ty   = totalH / 2;
     this.cam.dist = Math.max(48, Math.min(160, totalH * 2.6 + 36));
     this.cam.theta = 2.35;
-    this.cam.phi = 1.15;
+    this.cam.phi   = 1.15;
+
+    // Atualiza painel direito
+    this._updateFloorList();
   }
+
+  // ── Sprite de rótulo ──────────────────────────────────────────────────
 
   private _createLabelSprite(floor: number, name: string, _id: string, isSel: boolean): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 48;
+    canvas.width = 256; canvas.height = 48;
     const ctx = canvas.getContext('2d')!;
 
-    // Fundo pill
-    ctx.fillStyle = isSel ? 'rgba(232, 115, 58, 0.9)' : 'rgba(15, 23, 42, 0.85)';
-    ctx.strokeStyle = isSel ? '#ffffff' : 'rgba(99, 179, 237, 0.45)';
+    ctx.fillStyle = isSel ? 'rgba(232,115,58,0.9)' : 'rgba(15,23,42,0.85)';
+    ctx.strokeStyle = isSel ? '#ffffff' : 'rgba(99,179,237,0.45)';
     ctx.lineWidth = 2;
-
     const r = 8;
     ctx.beginPath();
     ctx.roundRect(4, 4, 248, 40, r);
-    ctx.fill();
-    ctx.stroke();
+    ctx.fill(); ctx.stroke();
 
-    // Texto
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 18px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-
-    const cleanName = (name || `Caixa ${floor}`).slice(0, 16);
-    ctx.fillText(`F${floor} · ${cleanName}`, 14, 24);
+    ctx.fillText(`F${floor} · ${(name || `Caixa ${floor}`).slice(0, 16)}`, 14, 24);
 
     const tex = new THREE.CanvasTexture(canvas);
-    // depthTest: false e renderOrder elevado garantem que os textos fiquem sempre legíveis na frente
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(mat);
     sprite.renderOrder = 999;
@@ -407,50 +672,256 @@ export class BuildingView {
     return sprite;
   }
 
+  // ── Highlight ─────────────────────────────────────────────────────────
+
   private _highlightSelected(): void {
     for (const f of this.floors) {
       const isSel = f.id === this.selectedId;
       const mat = f.mesh.material as THREE.MeshPhongMaterial;
       const type = (f.mesh.userData['boxType'] as BoxType) ?? 'comum';
       const baseColor = FLOOR_COLOR[type] ?? FLOOR_COLOR.comum;
-
-      if (isSel) {
-        mat.color.set(baseColor).multiplyScalar(1.5);
-        mat.opacity = SELECTED_OPACITY;
-      } else {
-        mat.color.set(baseColor);
-        mat.opacity = this.selectedId ? DIM_OPACITY : DEFAULT_OPACITY;
-      }
+      mat.color.set(baseColor).multiplyScalar(isSel ? 1.5 : 1);
+      mat.opacity = isSel ? SELECTED_OPACITY : this.selectedId ? DIM_OPACITY : DEFAULT_OPACITY;
     }
   }
 
-  // ── Visibilidade ─────────────────────────────────────────
+  // ── Painel direito: lista de andares ──────────────────────────────────
+
+  private _updateFloorList(): void {
+    if (!this.floorListEl) return;
+    this.floorListEl.innerHTML = '';
+
+    const items = this.rawBoxes.length > 0 ? this.rawBoxes : [];
+    for (let i = 0; i < items.length; i++) {
+      const box = items[i];
+      const stats = this.statsData?.boxes.find(s => s.boxId === box.id);
+      const matchCount = this.searchMatches.filter(m => m.boxId === box.id).length;
+      const hasMatch = matchCount > 0;
+
+      const row = el('div', {
+        display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '7px 10px', borderRadius: '8px', cursor: 'pointer',
+        background: hasMatch
+          ? 'rgba(56,189,248,0.12)'
+          : 'rgba(255,255,255,0.03)',
+        border: hasMatch
+          ? '1px solid rgba(56,189,248,0.4)'
+          : '1px solid transparent',
+        transition: 'all 0.2s',
+        boxShadow: hasMatch ? '0 0 12px rgba(56,189,248,0.25)' : 'none',
+      });
+      row.style.pointerEvents = 'auto';
+
+      // Badge de andar
+      const badge = el('div', {
+        background: `#${FLOOR_COLOR[box.type ?? 'comum'].toString(16).padStart(6, '0')}`,
+        color: '#fff', borderRadius: '5px',
+        padding: '2px 6px', fontSize: '10px', fontWeight: '700',
+        flexShrink: '0',
+      });
+      badge.textContent = `F${i + 1}`;
+
+      const nameEl = el('div', {
+        color: '#e2e8f0', fontSize: '12px', flex: '1',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      });
+      nameEl.textContent = box.name;
+
+      const info = el('div', { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' });
+      if (stats) {
+        const tot = el('div', { color: '#94a3b8', fontSize: '10px' });
+        tot.textContent = `${stats.notes + stats.photos + stats.documents + stats.others} itens`;
+        info.appendChild(tot);
+      }
+      if (hasMatch) {
+        const mc = el('div', { color: '#38bdf8', fontSize: '10px', fontWeight: '700' });
+        mc.textContent = `${matchCount} 🔍`;
+        info.appendChild(mc);
+      }
+
+      row.appendChild(badge); row.appendChild(nameEl); row.appendChild(info);
+
+      row.addEventListener('click', () => {
+        this.selectedId = box.id;
+        this._highlightSelected();
+        this.clickCb?.(box.id);
+      });
+      row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,0.07)'; });
+      row.addEventListener('mouseleave', () => {
+        row.style.background = hasMatch ? 'rgba(56,189,248,0.12)' : 'rgba(255,255,255,0.03)';
+      });
+
+      this.floorListEl.appendChild(row);
+    }
+  }
+
+  // ── API pública: Stats ─────────────────────────────────────────────────
+
+  setStats(data: BuildingStatsData): void {
+    this.statsData = data;
+
+    // Totais
+    const totalBoxes = this.rawBoxes.length;
+    let notes = 0, photos = 0, docs = 0, others = 0;
+    for (const b of data.boxes) {
+      notes  += b.notes;
+      photos += b.photos;
+      docs   += b.documents;
+      others += b.others;
+    }
+    const total = notes + photos + docs + others;
+
+    if (this.statBoxes)  this.statBoxes.textContent  = String(totalBoxes);
+    if (this.statTotal)  this.statTotal.textContent   = String(total);
+    if (this.statNotes)  this.statNotes.textContent   = String(notes);
+    if (this.statPhotos) this.statPhotos.textContent  = String(photos);
+    if (this.statDocs)   this.statDocs.textContent    = String(docs);
+
+    // Donut
+    drawDonut(this.donutCanvas, [
+      { value: notes,  color: '#fbbf24' },
+      { value: photos, color: '#34d399' },
+      { value: docs,   color: '#f87171' },
+      { value: others, color: '#475569' },
+    ]);
+
+    // Barras por andar
+    const barsWrap = this.dashOverlay.querySelector('#bv-bars') as HTMLElement | null;
+    if (barsWrap) {
+      barsWrap.innerHTML = '';
+      const maxItems = Math.max(1, ...data.boxes.map(b => b.notes + b.photos + b.documents + b.others));
+      for (let i = 0; i < this.rawBoxes.length; i++) {
+        const box = this.rawBoxes[i];
+        const st = data.boxes.find(s => s.boxId === box.id);
+        const cnt = st ? st.notes + st.photos + st.documents + st.others : 0;
+        const pct = (cnt / maxItems) * 100;
+
+        const row = el('div', { display: 'flex', alignItems: 'center', gap: '6px' });
+        const lbl = el('div', { color: '#64748b', fontSize: '10px', width: '28px', textAlign: 'right', flexShrink: '0' });
+        lbl.textContent = `F${i + 1}`;
+        const track = el('div', { flex: '1', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' });
+        const fill  = el('div', {
+          height: '100%', borderRadius: '3px',
+          background: `#${FLOOR_COLOR[box.type ?? 'comum'].toString(16).padStart(6, '0')}`,
+          width: `${pct}%`, transition: 'width 0.5s ease',
+        });
+        const cnt2 = el('div', { color: '#64748b', fontSize: '10px', width: '20px', flexShrink: '0' });
+        cnt2.textContent = String(cnt);
+        track.appendChild(fill);
+        row.appendChild(lbl); row.appendChild(track); row.appendChild(cnt2);
+        barsWrap.appendChild(row);
+      }
+    }
+
+    // Atualiza lista de andares com contagens
+    this._updateFloorList();
+  }
+
+  // ── API pública: Busca / matches ───────────────────────────────────────
+
+  setSearchMatches(matches: SearchMatch[], query: string): void {
+    this.searchMatches = matches;
+
+    // Glow nos andares com matches via emissive
+    for (const f of this.floors) {
+      const mat = f.mesh.material as THREE.MeshPhongMaterial;
+      const hasMatch = matches.some(m => m.boxId === f.id);
+      if (query && hasMatch) {
+        mat.emissive.setHex(0x1e4a6e);
+        mat.emissiveIntensity = 1;
+        // Aumenta opacidade do andar com match
+        const isSel = f.id === this.selectedId;
+        mat.opacity = isSel ? SELECTED_OPACITY : 0.75;
+      } else {
+        mat.emissive.setHex(0x000000);
+        mat.emissiveIntensity = 0;
+        const isSel = f.id === this.selectedId;
+        mat.opacity = isSel ? SELECTED_OPACITY : this.selectedId ? DIM_OPACITY : DEFAULT_OPACITY;
+      }
+    }
+
+    // Remove dots anteriores
+    this._clearDots();
+
+    // Cria dots para cada match
+    if (query && matches.length > 0) {
+      for (const match of matches) {
+        const floorIdx = this.rawBoxes.findIndex(b => b.id === match.boxId);
+        if (floorIdx < 0) continue;
+        // Y center do andar
+        const floorY = floorIdx * FLOOR_HEIGHT + (FLOOR_HEIGHT - FLOOR_GAP) / 2;
+        this._createDot(match, floorY);
+      }
+    }
+
+    // Atualiza contagem
+    if (query) {
+      this.searchCountEl.textContent = `${matches.length} resultado${matches.length !== 1 ? 's' : ''}`;
+    } else {
+      this.searchCountEl.textContent = '';
+    }
+
+    // Atualiza lista (glow no painel direito)
+    this._updateFloorList();
+  }
+
+  private _createDot(match: SearchMatch, floorY: number): void {
+    const dot = el('div', {
+      position: 'absolute', width: '12px', height: '12px',
+      borderRadius: '50%', background: '#38bdf8',
+      boxShadow: '0 0 8px 3px rgba(56,189,248,0.7)',
+      cursor: 'pointer', pointerEvents: 'auto',
+      zIndex: '56', display: 'flex',
+      alignItems: 'center', justifyContent: 'center',
+      fontSize: '7px', color: '#fff', fontWeight: '700',
+      transition: 'transform 0.15s',
+    });
+    dot.textContent = '●';
+    dot.title = match.label || 'Nota';
+
+    dot.addEventListener('mouseenter', () => { dot.style.transform = 'scale(1.5)'; });
+    dot.addEventListener('mouseleave', () => { dot.style.transform = 'scale(1)'; });
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.itemClickCb?.(match.itemId, match.boxId);
+    });
+
+    this.dotsLayer.appendChild(dot);
+    this.dotEls.push({ el: dot, match, floorY });
+  }
+
+  private _clearDots(): void {
+    for (const { el: d } of this.dotEls) d.remove();
+    this.dotEls = [];
+  }
+
+  // ── API pública: Visibilidade / callbacks ─────────────────────────────
+
   show(cb?: () => void): void {
     if (this.visible) { cb?.(); return; }
-    this.visible = true;
-    this.fadeDir = 1;
-    this.fadeCb  = cb ?? null;
+    this.visible  = true;
+    this.fadeDir  = 1;
+    this.fadeCb   = cb ?? null;
   }
 
   hide(cb?: () => void): void {
     if (!this.visible) { cb?.(); return; }
-    this.visible = false;
-    this.fadeDir = -1;
-    this.fadeCb  = cb ?? null;
+    this.visible  = false;
+    this.fadeDir  = -1;
+    this.fadeCb   = cb ?? null;
   }
 
   isVisible(): boolean { return this.visible; }
 
-  // ── Callback ─────────────────────────────────────────────
-  onFloorClick(cb: FloorClickCallback): void { this.clickCb = cb; }
+  onFloorClick(cb: FloorClickCallback):   void { this.clickCb     = cb; }
+  onItemDotClick(cb: ItemClickCallback):  void { this.itemClickCb = cb; }
+  onSearch(cb: SearchQueryCallback):       void { this.searchCb    = cb; }
 
-  // ── Select externo ───────────────────────────────────────
   selectFloor(id: string | null): void {
     this.selectedId = id;
     this._highlightSelected();
   }
 
-  // ── Dispose ──────────────────────────────────────────────
   dispose(): void {
     cancelAnimationFrame(this.raf);
     this.renderer.dispose();

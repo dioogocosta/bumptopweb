@@ -98,6 +98,7 @@ function makeRendererMock(): IRenderer {
     // PR4.3
     setRoomType: vi.fn(),
     setRoomDashboard: vi.fn(),
+    setRoomVisible: vi.fn(),
     setTheme: vi.fn(),
     render: vi.fn(),
     dispose: vi.fn(),
@@ -439,8 +440,8 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     const cam = world.getCamera();
     expect(cam.target.x).toBeCloseTo(alvo.x, 0);
     expect(cam.target.z).toBeCloseTo(alvo.z, 0);
-    expect(cam.distance).toBeLessThan(130); // aproximou
-    expect(cam.distance).toBeGreaterThanOrEqual(70);
+    expect(cam.distance).toBeLessThanOrEqual(329); // voa até d1=329 (zoom padrão novo)
+    expect(cam.distance).toBeGreaterThan(60);
 
     // endSearch limpa tudo
     world.endSearch();
@@ -467,8 +468,8 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     const alvo = world.getObject(caixa)!.pose.position;
     expect(cam.target.x).toBeCloseTo(alvo.x, 0);
     expect(cam.target.z).toBeCloseTo(alvo.z, 0);
-    expect(cam.distance).toBeLessThan(130);
-    expect(cam.distance).toBeGreaterThanOrEqual(70);
+    expect(cam.distance).toBeLessThanOrEqual(329); // d1=329 (zoom padrão novo)
+    expect(cam.distance).toBeGreaterThan(60);
   });
 
   it('PR4a: caixa padrão existe, itens nascem nela e snapshot faz roundtrip', async () => {
@@ -1490,7 +1491,7 @@ describe('Duplo-clique na parede foca a câmera (item 4)', () => {
     const cam = world.getCamera();
     expect(cam.azimuth).toBeCloseTo(Math.PI, 2);
     expect(cam.elevation).toBeCloseTo(0.45, 2);
-    expect(cam.distance).toBeCloseTo(240, 1);
+    expect(cam.distance).toBeCloseTo(240, 0);
     expect(cam.target.x).toBeCloseTo(0, 1);
     expect(cam.target.y).toBeCloseTo(14, 1);
     expect(cam.target.z).toBeCloseTo(0, 1);

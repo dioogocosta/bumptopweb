@@ -102,6 +102,8 @@ export interface IRenderer {
   /** Aplica uma textura (thumbnail dataURL) ao objeto; remove com null. */
   setTexture(handle: ObjectHandle, dataUrl: string | null): void;
   addRoom(room: RoomConfig): void;
+  /** Define a visibilidade do chão + 4 paredes de uma sala. */
+  setRoomVisible(room: RoomConfig, visible: boolean): void;
   /** PR4.2 — remove chão + 4 paredes da caixa (ao excluí-la). */
   removeRoom(room: RoomConfig): void;
   setPose(handle: ObjectHandle, pose: Pose): void;

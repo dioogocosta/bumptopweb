@@ -231,6 +231,26 @@ export class World {
     };
   }
 
+  /**
+   * Oculta todas as salas/itens exceto a caixa ativa.
+   * Chamado ao mudar de caixa (lazy rendering).
+   */
+  private showOnlyCurrentBox(): void {
+    for (const [id, box] of this.boxes) {
+      const visible = id === this.currentBoxId;
+      // Só alterna salas que já foram criadas
+      if (this.roomsCreated.has(id)) {
+        this.deps.renderer.setRoomVisible(this.roomOf(box), visible);
+      }
+      // Itens pertencentes a cada caixa
+      for (const e of this.entries.values()) {
+        if ((e.data.meta?.boxId ?? 'box-default') === id) {
+          this.deps.renderer.setVisible(e.render, visible);
+        }
+      }
+    }
+  }
+
   /** Cria chão+4 paredes (física + render) de uma caixa, uma única vez. */
   private ensureBoxRoom(box: BoxEntityData): void {
     if (this.roomsCreated.has(box.id)) return;
@@ -269,6 +289,7 @@ export class World {
     if (!box) return false;
     this.currentBoxId = id;
     this.applyPanBounds();
+    this.showOnlyCurrentBox();
     this.dirty = true;
     return true;
   }
@@ -435,7 +456,7 @@ export class World {
       fromTarget: { ...s.target },
       toTarget: { x: box.pos.x, y: 0, z: box.pos.z },
       d0: s.distance,
-      d1: Math.max(70, Math.min(s.distance, 110)),
+      d1: 329,
       p: 0,
     };
     this.dirty = true;
@@ -2745,7 +2766,7 @@ export class World {
       fromTarget: { ...s.target },
       toTarget: { ...e.data.pose.position },
       d0: s.distance,
-      d1: Math.max(70, Math.min(s.distance, 110)),
+      d1: 329,
       p: 0,
     };
     this.dirty = true;
@@ -2758,12 +2779,17 @@ export class World {
     this.searchIndex = (this.searchIndex + dir + this.searchIds.length) % this.searchIds.length;
     const e = this.entries.get(this.searchIds[this.searchIndex]);
     if (e) {
+      // Troca para a caixa do item encontrado (lazy rendering: torna o item visível)
+      const targetBoxId = (e.data.meta?.boxId as string | undefined) ?? this.currentBoxId;
+      if (targetBoxId !== this.currentBoxId && this.boxes.has(targetBoxId)) {
+        this.setCurrentBox(targetBoxId);
+      }
       const s = this.camera.getState();
       this.searchAnim = {
         fromTarget: { ...s.target },
         toTarget: { ...e.data.pose.position },
         d0: s.distance,
-        d1: Math.max(70, Math.min(s.distance, 110)),
+        d1: 329,
         p: 0,
       };
     }
@@ -3197,6 +3223,51 @@ export class World {
     this.dirty = false;
   }
 
+  /**
+   * Estatísticas por caixa para o dashboard do prédio.
+   * Retorna contagem de notas, fotos, documentos e outros por box.
+   */
+  getBoxStats(): Array<{
+    boxId: string;
+    notes: number;
+    photos: number;
+    documents: number;
+    others: number;
+    // Para busca: id + label de cada nota
+    noteItems: Array<{ id: string; label: string; text: string }>;
+  }> {
+    type Acc = {
+      notes: number; photos: number; documents: number; others: number;
+      noteItems: Array<{ id: string; label: string; text: string }>;
+    };
+    const map = new Map<string, Acc>();
+    for (const [id] of this.boxes) {
+      map.set(id, { notes: 0, photos: 0, documents: 0, others: 0, noteItems: [] });
+    }
+    for (const e of this.entries.values()) {
+      const boxId = (e.data.meta?.boxId as string | undefined) ?? 'box-default';
+      if (!map.has(boxId)) map.set(boxId, { notes: 0, photos: 0, documents: 0, others: 0, noteItems: [] });
+      const s = map.get(boxId)!;
+      const isNote = (e.data.typeFlags & TypeFlags.StickyNote) !== 0;
+      const fsPath = e.data.meta?.fsPath as string | undefined;
+      if (isNote) {
+        s.notes++;
+        s.noteItems.push({
+          id: e.data.id,
+          label: (e.data.meta?.noteTitle as string | undefined) ?? e.data.label ?? '',
+          text: (e.data.meta?.noteText as string | undefined) ?? '',
+        });
+      } else if (fsPath && /\.(jpg|jpeg|png|gif|webp|svg|heic|avif)$/i.test(fsPath)) {
+        s.photos++;
+      } else if (fsPath) {
+        s.documents++;
+      } else {
+        s.others++;
+      }
+    }
+    return [...map.entries()].map(([boxId, s]) => ({ boxId, ...s }));
+  }
+
   /** Serializa o estado atual (p/ repositório). */
   toSnapshot(): SceneSnapshot {
     return {
@@ -3313,6 +3384,8 @@ export class World {
       }
     }
     this.applyPileLayout();
+    // Lazy rendering: oculta todas as caixas/itens exceto a caixa ativa
+    this.showOnlyCurrentBox();
     this.dirty = true;
   }
 }

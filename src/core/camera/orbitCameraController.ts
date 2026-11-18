@@ -25,7 +25,7 @@ export class OrbitCameraController {
   constructor(initial?: Partial<CameraState>) {
     this.state = {
       target: initial?.target ?? vec3(0, 0, -10),
-      distance: initial?.distance ?? 210,
+      distance: initial?.distance ?? 329,
       azimuth: initial?.azimuth ?? 0,
       elevation: initial?.elevation ?? 1.08,
       fov: initial?.fov ?? 48,
@@ -108,7 +108,7 @@ export class OrbitCameraController {
       case 1:
         this.state.azimuth = 0;
         this.state.elevation = 1.08;
-        this.state.distance = 210;
+        this.state.distance = 329;
         this.state.target = vec3(0, 0, -10);
         break;
       case 2:
