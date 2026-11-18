@@ -6,7 +6,7 @@
 import { t } from '@core/i18n/i18n';
 import { THEMES } from '@core/theme/theme';
 import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
-import { fetchTaigaProjects, getTaigaToken, setTaigaToken, fetchTaigaMe } from '@taiga/taiga';
+import { fetchTaigaProjects, getTaigaToken, setTaigaToken, fetchTaigaMe, loginTaiga, TaigaError } from '@taiga/taiga';
 import type {
   ContextMenuItem,
   DwellRingData,
@@ -501,7 +501,7 @@ export class DomOverlay implements IOverlay {
     }
   }
 
-  /** PR4.7 — renderiza a barra de autenticação do Taiga com token JWT da sessão. */
+  /** PR4.7 — renderiza o painel de conexão/autenticação com Taiga (Login ou Token JWT). */
   private async renderTaigaAuthBar(container: HTMLElement, dl: HTMLDataListElement): Promise<void> {
     container.textContent = '';
     const token = getTaigaToken();
@@ -510,10 +510,10 @@ export class DomOverlay implements IOverlay {
       if (me) {
         const info = document.createElement('div');
         info.className = 'boxes-taiga-info';
-        info.innerHTML = `<span>🔑</span> <span>${t('ui.taiga.connected')} <strong>${me.fullName}</strong></span>`;
+        info.innerHTML = `<span>✓</span> <span>${t('ui.taiga.authSuccess')} <strong>${me.fullName}</strong>${me.email ? ` (${me.email})` : ''}</span>`;
         const logoutBtn = document.createElement('button');
         logoutBtn.type = 'button';
-        logoutBtn.className = 'boxes-taiga-btn boxes-taiga-btn-danger';
+        logoutBtn.className = 'boxes-taiga-btn-danger';
         logoutBtn.textContent = t('ui.taiga.disconnect');
         logoutBtn.addEventListener('click', () => {
           setTaigaToken(null);
@@ -530,39 +530,100 @@ export class DomOverlay implements IOverlay {
     }
 
     const form = document.createElement('div');
-    form.className = 'boxes-taiga-form';
-    const input = document.createElement('input');
-    input.type = 'password';
-    input.className = 'boxes-taiga-input';
-    input.placeholder = t('ui.taiga.tokenPh');
-    input.title = t('ui.taiga.tokenLabel');
+    form.className = 'boxes-taiga-form-card';
+
+    const title = document.createElement('div');
+    title.className = 'boxes-taiga-title';
+    title.innerHTML = `<strong>Taiga.io (Conexão Direta API / Auth)</strong>`;
+    form.appendChild(title);
+
+    const rowCreds = document.createElement('div');
+    rowCreds.className = 'boxes-taiga-row';
+
+    const userInput = document.createElement('input');
+    userInput.type = 'text';
+    userInput.className = 'boxes-taiga-input';
+    userInput.placeholder = t('ui.taiga.userPh');
+    userInput.title = t('ui.taiga.userLabel');
+
+    const passInput = document.createElement('input');
+    passInput.type = 'password';
+    passInput.className = 'boxes-taiga-input';
+    passInput.placeholder = t('ui.taiga.passLabel');
+    passInput.title = t('ui.taiga.passLabel');
+
+    rowCreds.appendChild(userInput);
+    rowCreds.appendChild(passInput);
+    form.appendChild(rowCreds);
+
+    const tokenInput = document.createElement('input');
+    tokenInput.type = 'text';
+    tokenInput.className = 'boxes-taiga-input boxes-taiga-token-input';
+    tokenInput.placeholder = t('ui.taiga.tokenPh');
+    tokenInput.title = t('ui.taiga.tokenLabel');
+    form.appendChild(tokenInput);
+
+    const actionRow = document.createElement('div');
+    actionRow.className = 'boxes-taiga-actions';
+
     const connectBtn = document.createElement('button');
     connectBtn.type = 'button';
-    connectBtn.className = 'boxes-taiga-btn';
-    connectBtn.textContent = t('ui.taiga.connect');
+    connectBtn.className = 'boxes-taiga-btn-primary';
+    connectBtn.textContent = t('ui.taiga.testAndAuth');
 
     const handleConnect = async () => {
-      const val = input.value.trim();
-      if (!val) return;
-      setTaigaToken(val);
-      const me = await fetchTaigaMe();
-      if (me) {
-        this.toast(`${t('ui.taiga.tokenSaved')} (${me.fullName})`);
-        void this.renderTaigaAuthBar(container, dl);
-        void this.fillProjectDatalist(dl);
-      } else {
+      const u = userInput.value.trim();
+      const p = passInput.value;
+      const tok = tokenInput.value.trim();
+
+      if (!u && !p && !tok) {
+        this.toast(t('ui.taiga.missingCredentials'));
+        return;
+      }
+
+      connectBtn.disabled = true;
+      connectBtn.textContent = '...';
+
+      try {
+        if (u && p) {
+          const newToken = await loginTaiga(u, p);
+          tokenInput.value = newToken;
+        } else if (tok) {
+          setTaigaToken(tok);
+        }
+
+        const me = await fetchTaigaMe();
+        if (me) {
+          this.toast(`${t('ui.taiga.authSuccess')} (${me.fullName})`);
+          void this.renderTaigaAuthBar(container, dl);
+          void this.fillProjectDatalist(dl);
+        } else {
+          setTaigaToken(null);
+          this.toast(t('ui.taiga.invalidCredentials'));
+        }
+      } catch (err: unknown) {
         setTaigaToken(null);
-        this.toast(t('ui.taiga.invalidToken'));
+        const msg = err instanceof TaigaError ? t(err.message) : t('ui.taiga.invalidCredentials');
+        this.toast(msg);
+      } finally {
+        connectBtn.disabled = false;
+        connectBtn.textContent = t('ui.taiga.testAndAuth');
       }
     };
 
     connectBtn.addEventListener('click', () => void handleConnect());
-    input.addEventListener('keydown', (e) => {
+    userInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') void handleConnect();
+    });
+    passInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') void handleConnect();
+    });
+    tokenInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') void handleConnect();
     });
 
-    form.appendChild(input);
-    form.appendChild(connectBtn);
+    actionRow.appendChild(connectBtn);
+    form.appendChild(actionRow);
     container.appendChild(form);
   }
 

@@ -29,6 +29,13 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
     },
+    proxy: {
+      '/api/taiga': {
+        target: 'https://taiga-api.fnde.gov.br/api/v1',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/taiga/, ''),
+      },
+    },
   },
   build: {
     target: 'es2022',
