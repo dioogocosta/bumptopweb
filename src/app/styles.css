@@ -154,8 +154,11 @@ body {
   top: max(12px, env(safe-area-inset-top));
   left: 12px;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   z-index: 40;
+  /* Limita a largura para que o wrap ocorra antes de sair da tela */
+  max-width: calc(100vw - 24px);
   /* PR15: o wrapper não captura ponteiro — só os botões. Assim arrastos
      na cena que passam pelos VAZIOS entre botões chegam ao canvas. */
   pointer-events: none;
@@ -213,6 +216,36 @@ body {
   text-align: right;
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
+}
+/* Mobile: slider compacto e botões menores para caber em 1-2 linhas */
+@media (max-width: 540px) {
+  .zoom-controls {
+    gap: 4px;
+  }
+  .zoom-controls button {
+    width: 28px;
+    height: 28px;
+  }
+  .zoom-controls button svg {
+    width: 15px;
+    height: 15px;
+  }
+  .zoom-slider-wrap {
+    height: 28px;
+    padding: 0 7px;
+    gap: 4px;
+  }
+  .zoom-slider {
+    width: 52px;
+  }
+  .zoom-slider-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+  .zoom-value {
+    font-size: 10px;
+    min-width: 16px;
+  }
 }
 /* PR15 — botão "Modo laço" / PR18 — busca / PR27 — conta / PR4a — engrenagem */
 .zoom-controls .lasso-btn.sel,

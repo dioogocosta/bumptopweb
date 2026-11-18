@@ -399,7 +399,7 @@ export class World {
       fromTarget: { ...s.target },
       toTarget: { x: box.pos.x, y: 0, z: box.pos.z },
       d0: s.distance,
-      d1: Math.max(70, Math.min(s.distance, 110)),
+      d1: 329,
       p: 0,
     };
     this.dirty = true;
@@ -2709,7 +2709,7 @@ export class World {
       fromTarget: { ...s.target },
       toTarget: { ...e.data.pose.position },
       d0: s.distance,
-      d1: Math.max(70, Math.min(s.distance, 110)),
+      d1: 329,
       p: 0,
     };
     this.dirty = true;
@@ -2722,12 +2722,17 @@ export class World {
     this.searchIndex = (this.searchIndex + dir + this.searchIds.length) % this.searchIds.length;
     const e = this.entries.get(this.searchIds[this.searchIndex]);
     if (e) {
+      // Troca para a caixa do item encontrado (lazy rendering: torna o item visível)
+      const targetBoxId = (e.data.meta?.boxId as string | undefined) ?? this.currentBoxId;
+      if (targetBoxId !== this.currentBoxId && this.boxes.has(targetBoxId)) {
+        this.setCurrentBox(targetBoxId);
+      }
       const s = this.camera.getState();
       this.searchAnim = {
         fromTarget: { ...s.target },
         toTarget: { ...e.data.pose.position },
         d0: s.distance,
-        d1: Math.max(70, Math.min(s.distance, 110)),
+        d1: 329,
         p: 0,
       };
     }
