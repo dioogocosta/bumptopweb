@@ -290,34 +290,92 @@ body {
 /* ------------------------------------------------------------------ */
 /* PR4.4 — Building View: botão 🏢 e botão "↩ Voltar ao Prédio"       */
 /* ------------------------------------------------------------------ */
-.zoom-controls .building-btn {
+.zoom-controls .building-btn,
+.zoom-controls .building-back-btn,
+.zoom-controls .reset-cam-btn,
+.zoom-controls .theme-btn {
   position: relative;
 }
-.zoom-controls .building-btn.active {
+.zoom-controls .building-btn.active,
+.zoom-controls .theme-btn.sel {
   background: rgba(99, 179, 237, 0.18);
   color: #63b3ed;
   border-color: rgba(99, 179, 237, 0.4);
 }
-.building-back-btn {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  pointer-events: auto;
-  background: rgba(13, 17, 23, 0.82);
-  border: 1px solid rgba(99, 179, 237, 0.35);
-  color: #63b3ed;
-  border-radius: 8px;
-  padding: 6px 16px;
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  transition: background 0.15s;
-  z-index: 15;
+.zoom-controls .building-back-btn {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(15, 23, 42, 0.85);
 }
-.building-back-btn:hover {
-  background: rgba(99, 179, 237, 0.15);
+.zoom-controls .building-back-btn:hover {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+/* Dropdown Menu de Temas */
+.theme-menu {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 40px);
+  left: 80px;
+  display: none;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 6px;
+  min-width: 190px;
+  z-index: 55;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}
+.theme-menu-head {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+}
+.theme-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+  width: 100%;
+}
+.theme-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+.theme-menu-item.active {
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+  font-weight: 500;
+}
+.theme-menu-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+.theme-menu-name {
+  flex: 1;
+}
+.theme-menu-check {
+  font-size: 12px;
+  font-weight: bold;
+  color: #38bdf8;
 }
 /* ------------------------------------------------------------------ */
 /* PR4a — Control Manager: painel de vidro com as caixas (mesmo vidro  */
