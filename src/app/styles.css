@@ -288,6 +288,38 @@ body {
   position: relative;
 }
 /* ------------------------------------------------------------------ */
+/* PR4.4 — Building View: botão 🏢 e botão "↩ Voltar ao Prédio"       */
+/* ------------------------------------------------------------------ */
+.zoom-controls .building-btn {
+  position: relative;
+}
+.zoom-controls .building-btn.active {
+  background: rgba(99, 179, 237, 0.18);
+  color: #63b3ed;
+  border-color: rgba(99, 179, 237, 0.4);
+}
+.building-back-btn {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: rgba(13, 17, 23, 0.82);
+  border: 1px solid rgba(99, 179, 237, 0.35);
+  color: #63b3ed;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: background 0.15s;
+  z-index: 15;
+}
+.building-back-btn:hover {
+  background: rgba(99, 179, 237, 0.15);
+}
+/* ------------------------------------------------------------------ */
 /* PR4a — Control Manager: painel de vidro com as caixas (mesmo vidro  */
 /* do modal de conta; listagem rola, itens estilo "andares da torre")  */
 /* ------------------------------------------------------------------ */

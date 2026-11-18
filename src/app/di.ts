@@ -24,6 +24,7 @@ import { FsAccessFileSystem } from '@fs/fsAccess';
 import { OpfsFileSystem } from '@fs/opfsFs';
 import { iconForExt } from '@fs/fileIcons';
 import { FileService } from './fileService';
+import { BuildingView } from '../building/BuildingView';
 
 export interface AppContext {
   world: World;
@@ -116,6 +117,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // Sem a API (D1 não configurado/offline), tudo degrada: o app segue 100%
   // funcional em modo local (OPFS), como sempre.
   const auth = new CloudflareAuth();
+
+  // PR4.4 — Building View: prédio 3D com andares = caixas
+  const buildingView = new BuildingView();
+  buildingView.mount(sceneRoot);
+  buildingView.setBoxes(world.listBoxes());
+  buildingView.onFloorClick((boxId) => {
+    // Fade-out prédio → entra na caixa
+    buildingView.hide(() => {
+      overlay.hideBuildingBack();
+      const box = world.getBox(boxId);
+      if (box) {
+        world.setCurrentBox(boxId);
+        overlay.toast(t('toast.buildingEntered', { name: box.name }));
+        overlay.showBuildingBack();
+      }
+    });
+  });
 
   // Input semântico: injeta o resolvedor de piso (sem three no adapter)
   const resolveFloor = makeFloorResolver(renderer);
@@ -921,6 +939,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     reopenBoxesPanel();
   });
 
+  // PR4.4 — Building View: toggle prédio e voltar ao prédio
+  overlayRoot.addEventListener('buildingtoggle', () => {
+    if (buildingView.isVisible()) {
+      buildingView.hide();
+    } else {
+      buildingView.setBoxes(world.listBoxes());
+      buildingView.show();
+    }
+  });
+  overlayRoot.addEventListener('buildingback', () => {
+    overlay.hideBuildingBack();
+    buildingView.setBoxes(world.listBoxes());
+    buildingView.show(() => {
+      overlay.toast(t('toast.buildingBack'));
+    });
+  });
+
   // =========================================================================
   // PR27 — Conta (login/cadastro com Cloudflare D1) + sync da cena na nuvem
   // =========================================================================
@@ -1453,6 +1488,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       renderer.dispose();
       physics.dispose();
       repo.close();
+      buildingView.dispose();
     },
   };
 }
