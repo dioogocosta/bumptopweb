@@ -6,7 +6,7 @@
 import { t } from '@core/i18n/i18n';
 import { THEMES } from '@core/theme/theme';
 import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
-import { fetchTaigaProjects } from '@taiga/taiga';
+import { fetchTaigaProjects, getTaigaToken, setTaigaToken, fetchTaigaMe } from '@taiga/taiga';
 import type {
   ContextMenuItem,
   DwellRingData,
@@ -488,8 +488,9 @@ export class DomOverlay implements IOverlay {
    */
   private async fillProjectDatalist(dl: HTMLDataListElement): Promise<void> {
     try {
+      dl.textContent = '';
       const projetos = await fetchTaigaProjects();
-      for (const p of projetos.slice(0, 50)) {
+      for (const p of projetos.slice(0, 100)) {
         const opt = document.createElement('option');
         opt.value = p.slug;
         opt.label = p.name;
@@ -498,6 +499,71 @@ export class DomOverlay implements IOverlay {
     } catch {
       /* offline/erro — o slug pode ser digitado à mão */
     }
+  }
+
+  /** PR4.7 — renderiza a barra de autenticação do Taiga com token JWT da sessão. */
+  private async renderTaigaAuthBar(container: HTMLElement, dl: HTMLDataListElement): Promise<void> {
+    container.textContent = '';
+    const token = getTaigaToken();
+    if (token) {
+      const me = await fetchTaigaMe();
+      if (me) {
+        const info = document.createElement('div');
+        info.className = 'boxes-taiga-info';
+        info.innerHTML = `<span>🔑</span> <span>${t('ui.taiga.connected')} <strong>${me.fullName}</strong></span>`;
+        const logoutBtn = document.createElement('button');
+        logoutBtn.type = 'button';
+        logoutBtn.className = 'boxes-taiga-btn boxes-taiga-btn-danger';
+        logoutBtn.textContent = t('ui.taiga.disconnect');
+        logoutBtn.addEventListener('click', () => {
+          setTaigaToken(null);
+          this.toast(t('ui.taiga.tokenRemoved'));
+          void this.renderTaigaAuthBar(container, dl);
+          void this.fillProjectDatalist(dl);
+        });
+        container.appendChild(info);
+        container.appendChild(logoutBtn);
+        return;
+      } else {
+        setTaigaToken(null);
+      }
+    }
+
+    const form = document.createElement('div');
+    form.className = 'boxes-taiga-form';
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.className = 'boxes-taiga-input';
+    input.placeholder = t('ui.taiga.tokenPh');
+    input.title = t('ui.taiga.tokenLabel');
+    const connectBtn = document.createElement('button');
+    connectBtn.type = 'button';
+    connectBtn.className = 'boxes-taiga-btn';
+    connectBtn.textContent = t('ui.taiga.connect');
+
+    const handleConnect = async () => {
+      const val = input.value.trim();
+      if (!val) return;
+      setTaigaToken(val);
+      const me = await fetchTaigaMe();
+      if (me) {
+        this.toast(`${t('ui.taiga.tokenSaved')} (${me.fullName})`);
+        void this.renderTaigaAuthBar(container, dl);
+        void this.fillProjectDatalist(dl);
+      } else {
+        setTaigaToken(null);
+        this.toast(t('ui.taiga.invalidToken'));
+      }
+    };
+
+    connectBtn.addEventListener('click', () => void handleConnect());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') void handleConnect();
+    });
+
+    form.appendChild(input);
+    form.appendChild(connectBtn);
+    container.appendChild(form);
   }
 
   /** PR4.2 — (re)desenha a lista com o filtro de pesquisa aplicado. */
@@ -861,6 +927,11 @@ export class DomOverlay implements IOverlay {
     this.boxesEmpty.style.display = 'none';
     card.appendChild(close);
     card.appendChild(head);
+    // PR4.7 — Barra de autenticação/sessão do Taiga
+    const taigaBar = document.createElement('div');
+    taigaBar.className = 'boxes-taiga-bar';
+    void this.renderTaigaAuthBar(taigaBar, dl);
+    card.appendChild(taigaBar);
     card.appendChild(hint);
     card.appendChild(this.boxesSearch);
     card.appendChild(this.boxesList);
