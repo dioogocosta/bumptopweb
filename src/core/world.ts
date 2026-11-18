@@ -397,6 +397,7 @@ export class World {
       const e = this.entries.get(id)!;
       e.data.meta.taigaStoryId = s.id;
       e.data.meta.taigaStatus = s.statusName;
+      e.data.meta.taigaProjectSlug = box.taigaProject;
     });
 
     // 3) contagens por status → dashboard da parede
@@ -430,9 +431,9 @@ export class World {
 
     // Lanes configuradas (ou padrão)
     const lanes: KanbanLane[] = box.kanbanLanes ?? [
-      { label: 'A Fazer',       color: '#1e3a5f', statusNames: ['new', 'ready', 'a fazer', 'backlog'] },
-      { label: 'Em andamento',  color: '#7c3100', statusNames: ['in progress', 'em andamento', 'doing'] },
-      { label: 'Concluído',     color: '#14532d', statusNames: ['done', 'closed', 'concluído', 'concluido'] },
+      { label: 'A Fazer',       color: '#1e3a5f', statusNames: ['new', 'ready', 'a fazer', 'backlog', 'aberto', 'pronto para desenvolvimento'] },
+      { label: 'Em andamento',  color: '#7c3100', statusNames: ['in progress', 'em andamento', 'doing', 'homologação', 'homologacao', 'test'] },
+      { label: 'Concluído',     color: '#14532d', statusNames: ['done', 'closed', 'concluído', 'concluido', 'cancelado', 'itens concluídos'] },
     ];
 
     // Remove itens antigos do Taiga nesta caixa
@@ -486,6 +487,7 @@ export class World {
         const e = this.entries.get(id)!;
         e.data.meta.taigaStoryId = s.id;
         e.data.meta.taigaStatus = s.statusName;
+        e.data.meta.taigaProjectSlug = box.taigaProject;
         e.data.meta.kanbanLane = li;
       });
       total += Math.min(ss.length, 60);

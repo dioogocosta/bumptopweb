@@ -242,7 +242,56 @@ export async function fetchTaigaSprints(projectId: number): Promise<TaigaSprint[
   }));
 }
 
-/** Stories de uma sprint específica (milestone). */
+/** Detalhes completos de uma user story para o modal de inspeção. */
+export interface TaigaStoryDetail {
+  id: number;
+  ref: number;
+  subject: string;
+  description?: string;
+  statusName: string;
+  statusColor: string;
+  isClosed: boolean;
+  assignedToName?: string;
+  assignedToPhoto?: string;
+  ownerName?: string;
+  milestoneName?: string;
+  totalPoints?: number;
+  projectSlug?: string;
+  projectName?: string;
+}
+
+/** Obtém os detalhes completos de uma user story pelo ID. */
+export async function fetchStoryDetail(storyId: number): Promise<TaigaStoryDetail> {
+  const s = await getJson<{
+    id: number;
+    ref: number;
+    subject: string;
+    description?: string;
+    total_points?: number;
+    milestone_name?: string;
+    status_extra_info?: { name?: string; color?: string; is_closed?: boolean };
+    assigned_to_extra_info?: { full_name_display?: string; photo?: string };
+    owner_extra_info?: { full_name_display?: string };
+    project_extra_info?: { name?: string; slug?: string };
+  }>(`/userstories/${storyId}`);
+
+  return {
+    id: s.id,
+    ref: s.ref ?? 0,
+    subject: s.subject || `#${s.ref}`,
+    description: s.description || '',
+    statusName: s.status_extra_info?.name || 'Backlog',
+    statusColor: s.status_extra_info?.color || '#8b5cf6',
+    isClosed: !!s.status_extra_info?.is_closed,
+    assignedToName: s.assigned_to_extra_info?.full_name_display,
+    assignedToPhoto: s.assigned_to_extra_info?.photo,
+    ownerName: s.owner_extra_info?.full_name_display,
+    milestoneName: s.milestone_name,
+    totalPoints: s.total_points,
+    projectSlug: s.project_extra_info?.slug,
+    projectName: s.project_extra_info?.name,
+  };
+}
 export async function fetchSprintStories(milestoneId: number): Promise<TaigaStory[]> {
   const us = await getJson<
     Array<{

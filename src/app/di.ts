@@ -15,7 +15,7 @@ import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { CloudflareAuth } from '@auth/cloudflareAuth';
-import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId, initTaigaTokenFromUrl } from '@taiga/taiga';
+import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId, initTaigaTokenFromUrl, fetchStoryDetail } from '@taiga/taiga';
 import { makeNoteTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
@@ -884,6 +884,20 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     // Pasta (com fsPath) → modal de vidro com o conteúdo (PR9); o menu
     // "Abrir" continua importando os itens para a cena
     const alvoObj = world.getObject(target);
+    if (alvoObj?.meta?.taigaStoryId !== undefined) {
+      void (async () => {
+        try {
+          const detail = await fetchStoryDetail(alvoObj.meta.taigaStoryId as number);
+          if (!detail.projectSlug && typeof alvoObj.meta.taigaProjectSlug === 'string') {
+            detail.projectSlug = alvoObj.meta.taigaProjectSlug as string;
+          }
+          overlay.showStoryModal(detail);
+        } catch {
+          overlay.toast(t('ui.taiga.httpError'));
+        }
+      })();
+      return;
+    }
     if (alvoObj?.meta.isDir === true && typeof alvoObj.meta.fsPath === 'string') {
       showFolderContents(alvoObj.meta.fsPath as string, alvoObj.label ?? 'Pasta');
       return;
@@ -1063,22 +1077,41 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     );
   };
   overlayRoot.addEventListener('boxcreate', (e) => {
-    // PR4.5 — detail virou objeto { type, project } (slug do Taiga p/ backlog);
-    // string simples continua aceita p/ compatibilidade.
-    const raw = (e as CustomEvent).detail as string | { type?: string; project?: string };
+    // PR4.5/4.9 — detail virou objeto { type, project, projectName, sprintId, sprintName }
+    const raw = (e as CustomEvent).detail as
+      | string
+      | { type?: string; project?: string; projectName?: string; sprintId?: number; sprintName?: string };
     const type = (typeof raw === 'string' ? raw : raw?.type) || 'comum';
     const project = typeof raw === 'string' ? '' : (raw?.project ?? '');
+    const projectName = typeof raw === 'string' ? '' : (raw?.projectName ?? '');
+    const sprintId = typeof raw === 'string' ? undefined : raw?.sprintId;
+    const sprintName = typeof raw === 'string' ? '' : (raw?.sprintName ?? '');
+
     const n = world.listBoxes().length;
+    let boxName = t('ui.boxNewName', { n });
+    const refTitle = projectName || project;
+    if (type === 'backlog' && refTitle) {
+      boxName = `Backlog ${refTitle}`;
+    } else if (type === 'sprint' && refTitle) {
+      boxName = sprintName ? `${sprintName} - ${refTitle}` : `Sprint ${refTitle}`;
+    }
+
     const box = world.addBoxEntity(
-      t('ui.boxNewName', { n }),
+      boxName,
       undefined,
       type as 'comum' | 'root' | 'kanban' | 'backlog' | 'sprint',
       project,
     );
+    if (sprintId !== undefined) {
+      box.taigaSprintId = sprintId;
+    }
+    if (sprintName) {
+      box.taigaSprintName = sprintName;
+    }
     overlay.toast(t('toast.boxCreated', { name: box.name }));
     reopenBoxesPanel();
     void syncBacklog(box.id); // PR4.5 — backlog: puxa as stories na criação
-    void syncSprint(box.id);  // PR4.6 — sprint: puxa stories da sprint ativa na criação
+    void syncSprint(box.id);  // PR4.6/4.9 — sprint: puxa stories da sprint selecionada/ativa na criação
   });
   overlayRoot.addEventListener('boxrename', (e) => {
     const { id, name } = (e as CustomEvent).detail as { id: string; name: string };

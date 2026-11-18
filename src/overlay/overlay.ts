@@ -6,7 +6,18 @@
 import { t } from '@core/i18n/i18n';
 import { THEMES } from '@core/theme/theme';
 import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
-import { fetchTaigaProjects, getTaigaToken, setTaigaToken, fetchTaigaMe, loginTaiga, TaigaError } from '@taiga/taiga';
+import {
+  fetchTaigaProjects,
+  getTaigaToken,
+  setTaigaToken,
+  fetchTaigaMe,
+  loginTaiga,
+  TaigaError,
+  fetchTaigaSprints,
+  resolveProjectId,
+  type TaigaStoryDetail,
+  type TaigaProject,
+} from '@taiga/taiga';
 import type {
   ContextMenuItem,
   DwellRingData,
@@ -181,6 +192,9 @@ export class DomOverlay implements IOverlay {
   private boxesType: HTMLSelectElement | null = null;
   /** PR4.5 — campo slug do projeto Taiga (aparece só quando o tipo = backlog). */
   private boxesProject: HTMLInputElement | null = null;
+  /** PR4.9 — seletor de sprint ao criar caixa tipo sprint. */
+  private boxesSprint: HTMLSelectElement | null = null;
+  private cachedProjects: TaigaProject[] = [];
 
   /** PR4.4 — Building View: botão 🏢 e botão "Voltar ao Prédio". */
   private buildingBtn: HTMLButtonElement | null = null;
@@ -490,6 +504,7 @@ export class DomOverlay implements IOverlay {
     try {
       dl.textContent = '';
       const projetos = await fetchTaigaProjects();
+      this.cachedProjects = projetos;
       for (const p of projetos.slice(0, 100)) {
         const opt = document.createElement('option');
         opt.value = p.slug;
@@ -943,13 +958,59 @@ export class DomOverlay implements IOverlay {
     dl.id = 'boxes-projects-dl';
     this.boxesProject.setAttribute('list', dl.id);
     this.boxesProject.style.display = 'none';
+
+    // PR4.9 — seletor de sprint ativa/específica ao criar caixa tipo sprint
+    this.boxesSprint = document.createElement('select');
+    this.boxesSprint.className = 'boxes-sprint-sel';
+    this.boxesSprint.style.display = 'none';
+    this.boxesSprint.innerHTML = '<option value="">Sprint ativa (automática)</option>';
+
+    const updateSprintsForProject = async () => {
+      if (this.boxesType?.value !== 'sprint' || !this.boxesSprint) return;
+      const slug = (this.boxesProject?.value ?? '').trim();
+      if (!slug) {
+        this.boxesSprint.innerHTML = '<option value="">Sprint ativa (automática)</option>';
+        return;
+      }
+      try {
+        const pId = await resolveProjectId(slug);
+        const sprints = await fetchTaigaSprints(pId);
+        this.boxesSprint.innerHTML = '';
+        const defOpt = document.createElement('option');
+        defOpt.value = '';
+        defOpt.textContent = 'Sprint ativa (automática)';
+        this.boxesSprint.appendChild(defOpt);
+        for (const s of sprints) {
+          const opt = document.createElement('option');
+          opt.value = String(s.id);
+          opt.setAttribute('data-name', s.name);
+          opt.textContent = `${s.name}${!s.closed ? ' (Ativa)' : ''}`;
+          if (!s.closed) opt.selected = true;
+          this.boxesSprint.appendChild(opt);
+        }
+      } catch {
+        /* se falhar ao resolver id, mantém automático */
+      }
+    };
+
     this.boxesType.addEventListener('change', () => {
-      const needsSlug = this.boxesType?.value === 'backlog' || this.boxesType?.value === 'sprint';
+      const type = this.boxesType?.value;
+      const needsSlug = type === 'backlog' || type === 'sprint';
       this.boxesProject!.style.display = needsSlug ? '' : 'none';
+      if (this.boxesSprint) this.boxesSprint.style.display = type === 'sprint' ? '' : 'none';
       if (needsSlug && !dl.childElementCount) void this.fillProjectDatalist(dl);
+      if (type === 'sprint') void updateSprintsForProject();
     });
+    this.boxesProject.addEventListener('change', () => void updateSprintsForProject());
+    this.boxesProject.addEventListener('input', () => {
+      const val = (this.boxesProject?.value ?? '').trim().toLowerCase();
+      const matched = this.cachedProjects.some((p) => p.slug.toLowerCase() === val || p.name.toLowerCase() === val);
+      if (matched) void updateSprintsForProject();
+    });
+
     head.appendChild(this.boxesProject);
     head.appendChild(dl);
+    head.appendChild(this.boxesSprint);
     // PR4.2 — botão "+ Nova caixa" (envia o tipo escolhido no evento boxcreate)
     const add = document.createElement('button');
     add.type = 'button';
@@ -959,14 +1020,30 @@ export class DomOverlay implements IOverlay {
     add.setAttribute('aria-label', t('ui.boxesAdd'));
     add.addEventListener('click', () => {
       const type = this.boxesType?.value || 'comum';
-      // PR4.5/4.6 — backlog/sprint carregam o slug junto (detail vira objeto)
       const needsSlug = type === 'backlog' || type === 'sprint';
       const project = needsSlug ? (this.boxesProject?.value ?? '').trim() : '';
-      this.root.dispatchEvent(new CustomEvent('boxcreate', { detail: { type, project }, bubbles: true }));
+      const matchedProj = this.cachedProjects.find(
+        (p) => p.slug.toLowerCase() === project.toLowerCase() || p.name.toLowerCase() === project.toLowerCase(),
+      );
+      const projectName = matchedProj ? matchedProj.name : project;
+      const sprintOpt = this.boxesSprint?.selectedOptions[0];
+      const sprintId = sprintOpt && sprintOpt.value ? Number(sprintOpt.value) : undefined;
+      const sprintName = sprintOpt?.getAttribute('data-name') || undefined;
+
+      this.root.dispatchEvent(
+        new CustomEvent('boxcreate', {
+          detail: { type, project, projectName, sprintId, sprintName },
+          bubbles: true,
+        }),
+      );
       this.boxesType!.value = 'comum'; // volta ao padrão
       if (this.boxesProject) {
         this.boxesProject.value = '';
         this.boxesProject.style.display = 'none';
+      }
+      if (this.boxesSprint) {
+        this.boxesSprint.innerHTML = '<option value="">Sprint ativa (automática)</option>';
+        this.boxesSprint.style.display = 'none';
       }
     });
     head.appendChild(add);
@@ -1677,6 +1754,157 @@ export class DomOverlay implements IOverlay {
       this.root.appendChild(wrap);
       ta.focus();
     });
+  }
+
+  /** PR4.9 — Modal de inspeção e detalhes completos de uma User Story do Taiga. */
+  showStoryModal(story: TaigaStoryDetail): void {
+    const existing = this.root.querySelector('.story-modal');
+    if (existing) existing.remove();
+
+    const m = document.createElement('div');
+    m.className = 'story-modal';
+    m.addEventListener('click', (e) => {
+      if (e.target === m) m.remove();
+    });
+
+    const card = document.createElement('div');
+    card.className = 'story-card';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'story-header';
+    const title = document.createElement('h3');
+    title.className = 'story-title';
+    title.textContent = `#${story.ref} ${story.subject}`;
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'boxes-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = t('ui.close');
+    closeBtn.addEventListener('click', () => m.remove());
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+
+    // Meta row (Badges)
+    const metaRow = document.createElement('div');
+    metaRow.className = 'story-meta-row';
+
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'story-badge';
+    statusBadge.style.backgroundColor = story.statusColor || '#8b5cf6';
+    statusBadge.style.color = '#fff';
+    statusBadge.textContent = story.statusName;
+    metaRow.appendChild(statusBadge);
+
+    if (story.milestoneName) {
+      const sprintBadge = document.createElement('span');
+      sprintBadge.className = 'story-badge';
+      sprintBadge.style.backgroundColor = 'rgba(14, 165, 233, 0.2)';
+      sprintBadge.style.color = '#38bdf8';
+      sprintBadge.textContent = `🏃 ${story.milestoneName}`;
+      metaRow.appendChild(sprintBadge);
+    }
+
+    if (story.totalPoints !== undefined && story.totalPoints !== null) {
+      const pointsBadge = document.createElement('span');
+      pointsBadge.className = 'story-badge';
+      pointsBadge.style.backgroundColor = 'rgba(234, 179, 8, 0.2)';
+      pointsBadge.style.color = '#facc15';
+      pointsBadge.textContent = `⭐ ${story.totalPoints} pts`;
+      metaRow.appendChild(pointsBadge);
+    }
+
+    if (story.projectName || story.projectSlug) {
+      const projBadge = document.createElement('span');
+      projBadge.className = 'story-badge';
+      projBadge.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+      projBadge.style.color = '#e2e8f0';
+      projBadge.textContent = `🏢 ${story.projectName || story.projectSlug}`;
+      metaRow.appendChild(projBadge);
+    }
+    card.appendChild(metaRow);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'story-body';
+
+    // Responsável
+    const assignedSec = document.createElement('div');
+    const assignedTitle = document.createElement('div');
+    assignedTitle.className = 'story-section-title';
+    assignedTitle.textContent = 'Atribuído a';
+    const assignedVal = document.createElement('div');
+    assignedVal.className = 'story-user-badge';
+    if (story.assignedToPhoto) {
+      const img = document.createElement('img');
+      img.className = 'story-user-avatar';
+      img.src = story.assignedToPhoto;
+      img.alt = story.assignedToName || '';
+      assignedVal.appendChild(img);
+    } else {
+      const icon = document.createElement('span');
+      icon.textContent = '👤';
+      assignedVal.appendChild(icon);
+    }
+    const nameSpan = document.createElement('strong');
+    nameSpan.textContent = story.assignedToName || 'Não atribuído';
+    assignedVal.appendChild(nameSpan);
+    assignedSec.appendChild(assignedTitle);
+    assignedSec.appendChild(assignedVal);
+    body.appendChild(assignedSec);
+
+    // Criador / Owner
+    if (story.ownerName) {
+      const ownerSec = document.createElement('div');
+      const ownerTitle = document.createElement('div');
+      ownerTitle.className = 'story-section-title';
+      ownerTitle.textContent = 'Criado por';
+      const ownerVal = document.createElement('div');
+      ownerVal.className = 'story-user-badge';
+      ownerVal.innerHTML = `<span>✍️</span> <span>${story.ownerName}</span>`;
+      ownerSec.appendChild(ownerTitle);
+      ownerSec.appendChild(ownerVal);
+      body.appendChild(ownerSec);
+    }
+
+    // Descrição / Escopo
+    const descSec = document.createElement('div');
+    const descTitle = document.createElement('div');
+    descTitle.className = 'story-section-title';
+    descTitle.textContent = 'Descrição / Escopo';
+    const descBox = document.createElement('div');
+    descBox.className = 'story-desc-box';
+    descBox.textContent = story.description || 'Nenhuma descrição detalhada informada.';
+    descSec.appendChild(descTitle);
+    descSec.appendChild(descBox);
+    body.appendChild(descSec);
+
+    card.appendChild(body);
+
+    // Footer
+    const footer = document.createElement('div');
+    footer.className = 'story-footer';
+    const closeBtn2 = document.createElement('button');
+    closeBtn2.type = 'button';
+    closeBtn2.className = 'boxes-taiga-btn';
+    closeBtn2.textContent = t('ui.close');
+    closeBtn2.addEventListener('click', () => m.remove());
+    footer.appendChild(closeBtn2);
+
+    if (story.projectSlug && story.ref) {
+      const link = document.createElement('a');
+      link.className = 'story-link-btn';
+      link.href = `https://taiga.fnde.gov.br/project/${story.projectSlug}/us/${story.ref}`;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Abrir no Taiga ↗';
+      footer.appendChild(link);
+    }
+    card.appendChild(footer);
+
+    m.appendChild(card);
+    this.root.appendChild(m);
   }
 
   /**

@@ -326,38 +326,60 @@ export class ThreeRenderer implements IRenderer {
         meshes.push(edges as unknown as THREE.Mesh);
       }
 
-      // Label da raia no topo da parede frontal (via canvas texture)
+      // Label da raia em alta resolução (canvas texture nítida)
       const labelCanvas = document.createElement('canvas');
-      labelCanvas.width = 256;
-      labelCanvas.height = 64;
+      labelCanvas.width = 512;
+      labelCanvas.height = 128;
       const ctx = labelCanvas.getContext('2d')!;
-      ctx.clearRect(0, 0, 256, 64);
-      // fundo semi-transparente arredondado
-      ctx.fillStyle = lane.color + 'cc';
+      ctx.clearRect(0, 0, 512, 128);
+      // fundo arredondado com borda neon
+      ctx.fillStyle = lane.color;
       ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(4, 4, 248, 56, 10);
-      else ctx.rect(4, 4, 248, 56);
+      if (ctx.roundRect) ctx.roundRect(8, 8, 496, 112, 20);
+      else ctx.rect(8, 8, 496, 112);
       ctx.fill();
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+
       // texto
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 22px sans-serif';
+      ctx.font = 'bold 46px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(lane.label, 128, 32);
+      ctx.fillText(lane.label.toUpperCase(), 256, 64);
 
       const labelTex = new THREE.CanvasTexture(labelCanvas);
-      const labelGeo = new THREE.PlaneGeometry(laneW * 0.9, 8);
-      const labelMat = new THREE.MeshLambertMaterial({ map: labelTex, transparent: true, opacity: 0.95, depthWrite: false });
-      const labelMesh = new THREE.Mesh(labelGeo, labelMat);
-      // Posiciona no topo da parede frontal (z negativo = frente)
-      labelMesh.position.set(
-        laneX + laneW / 2,
-        wallHeight * 0.88,
-        oz - halfSize + 1,
-      );
-      labelMesh.lookAt(laneX + laneW / 2, wallHeight * 0.88, oz - halfSize - 10);
-      group.add(labelMesh);
-      meshes.push(labelMesh);
+      labelTex.needsUpdate = true;
+
+      // 1) Placa de cabeçalho no CHÃO da raia (horizontal, visível olhando de cima)
+      const floorHeaderGeo = new THREE.PlaneGeometry(laneW * 0.85, 10);
+      const floorHeaderMat = new THREE.MeshBasicMaterial({
+        map: labelTex,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const floorHeaderMesh = new THREE.Mesh(floorHeaderGeo, floorHeaderMat);
+      floorHeaderMesh.rotation.x = -Math.PI / 2;
+      floorHeaderMesh.position.set(laneX + laneW / 2, 0.05, oz - halfSize + 7);
+      group.add(floorHeaderMesh);
+      meshes.push(floorHeaderMesh);
+
+      // 2) Placa na parede frontal da raia (vertical, voltada para dentro da sala)
+      const wallLabelGeo = new THREE.PlaneGeometry(laneW * 0.85, 8);
+      const wallLabelMat = new THREE.MeshBasicMaterial({
+        map: labelTex,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const wallLabelMesh = new THREE.Mesh(wallLabelGeo, wallLabelMat);
+      wallLabelMesh.position.set(laneX + laneW / 2, wallHeight * 0.5, oz - halfSize + 0.3);
+      group.add(wallLabelMesh);
+      meshes.push(wallLabelMesh);
     }
 
     this.roomKanbanLines.set(key, meshes);

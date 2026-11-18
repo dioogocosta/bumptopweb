@@ -557,6 +557,21 @@ body {
   border-color: rgba(139, 92, 246, 0.9);
   background: rgba(139, 92, 246, 0.28);
 }
+/* PR4.9 — seletor de sprint ao criar caixa sprint */
+.boxes-sprint-sel {
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.2);
+  color: #fff;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  outline: none;
+  max-width: 220px;
+}
+.boxes-sprint-sel option {
+  background: #16283a;
+  color: #fff;
+}
 /* PR4.7 — barra de autenticação/conexão com Taiga */
 .boxes-taiga-bar {
   display: flex;
@@ -2136,4 +2151,130 @@ body {
   overflow: auto;
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* PR4.9 — Modal de Detalhes da User Story (Taiga) */
+.story-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(5px);
+}
+.story-card {
+  position: relative;
+  width: 90%;
+  max-width: 680px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: #111827;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 20px rgba(139, 92, 246, 0.2);
+  color: #f8fafc;
+  overflow: hidden;
+}
+.story-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.story-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.35;
+}
+.story-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11.5px;
+}
+.story-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.story-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.story-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+.story-user-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+.story-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  object-fit: cover;
+}
+.story-desc-box {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.story-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.5);
+}
+.story-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #8b5cf6;
+  color: #fff;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+.story-link-btn:hover {
+  background: #7c3aed;
 }
