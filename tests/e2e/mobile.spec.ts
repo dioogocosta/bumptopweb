@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 test('mobile: app inicializa com canvas em viewport touch', async ({ page }) => {
-  const canvas = page.locator('#scene-root canvas');
+  const canvas = page.locator('#scene-root > canvas');
   await expect(canvas).toBeVisible();
 
   const size = await canvas.boundingBox();
@@ -31,14 +31,14 @@ test('mobile: app inicializa com canvas em viewport touch', async ({ page }) => 
 });
 
 test('mobile: long-press abre o menu de contexto', async ({ page }) => {
-  const canvas = page.locator('#scene-root canvas');
+  const canvas = page.locator('#scene-root > canvas');
   const box = (await canvas.boundingBox())!;
 
   // Toque longo no chão (longe do centro onde ficam os ícones demo)
   await page.touchscreen.tap(box.x + box.width * 0.25, box.y + box.height * 0.3);
   // O adapter usa pointer events; emulação de long-press via dispatch
   await page.evaluate(() => {
-    const canvas = document.querySelector('#scene-root canvas') as HTMLElement;
+    const canvas = document.querySelector('#scene-root > canvas') as HTMLElement;
     const r = canvas.getBoundingClientRect();
     const opts = { pointerId: 7, pointerType: 'touch', clientX: r.left + 60, clientY: r.top + 60, bubbles: true };
     canvas.dispatchEvent(new PointerEvent('pointerdown', opts));
@@ -49,7 +49,7 @@ test('mobile: long-press abre o menu de contexto', async ({ page }) => {
 
   // Limpa o pointer pendente
   await page.evaluate(() => {
-    const canvas = document.querySelector('#scene-root canvas') as HTMLElement;
+    const canvas = document.querySelector('#scene-root > canvas') as HTMLElement;
     canvas.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 7, pointerType: 'touch', bubbles: true }));
   });
 });
@@ -72,7 +72,7 @@ test('mobile: labels projetados aparecem sem transbordar a tela', async ({ page 
 // PointerEvent pointerType:'touch' via dispatchEvent, como no long-press.)
 // -------------------------------------------------------------------------
 test('PR15: modo laço no toque — botão liga, arrasto seleciona vários, toque parado desliga', async ({ page }) => {
-  const canvas = page.locator('#scene-root canvas');
+  const canvas = page.locator('#scene-root > canvas');
   const box = (await canvas.boundingBox())!;
 
   // Dois objetos perto do centro, afastados entre si, para o laço englobar
@@ -99,7 +99,7 @@ test('PR15: modo laço no toque — botão liga, arrasto seleciona vários, toqu
   // 2) Arrasto touch no chão vazio desenha o laço
   // isPrimary:true é essencial — sem ele o adapter trata como 2º dedo (pinch)
   await page.evaluate(({ p }) => {
-    const canvas = document.querySelector('#scene-root canvas') as HTMLElement;
+    const canvas = document.querySelector('#scene-root > canvas') as HTMLElement;
     const ev = (type: string, x: number, y: number) =>
       canvas.dispatchEvent(
         new PointerEvent(type, { pointerId: 31, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true }),
@@ -113,7 +113,7 @@ test('PR15: modo laço no toque — botão liga, arrasto seleciona vários, toqu
 
   // Continua o arrasto até englobar os dois e solta
   await page.evaluate(({ p }) => {
-    const canvas = document.querySelector('#scene-root canvas') as HTMLElement;
+    const canvas = document.querySelector('#scene-root > canvas') as HTMLElement;
     const ev = (type: string, x: number, y: number) =>
       canvas.dispatchEvent(
         new PointerEvent(type, { pointerId: 31, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true }),
@@ -137,7 +137,7 @@ test('PR15: modo laço no toque — botão liga, arrasto seleciona vários, toqu
 
   // 3) Toque PARADO no chão (sem desenhar) desliga o modo
   await page.evaluate(({ p }) => {
-    const canvas = document.querySelector('#scene-root canvas') as HTMLElement;
+    const canvas = document.querySelector('#scene-root > canvas') as HTMLElement;
     const ev = (type: string, x: number, y: number) =>
       canvas.dispatchEvent(
         new PointerEvent(type, { pointerId: 32, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y, bubbles: true }),
@@ -174,7 +174,7 @@ test('PR17: editor da nota em folha tela-cheia no mobile + meta resizes-content'
     const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
     return window.__bumptop!.renderer.projectToScreen(pos);
   }, notaId);
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   await page.mouse.click(box.x + tela.x, box.y + tela.y);
   const modal = page.locator('[data-testid="note-rich"]');
   await expect(modal).toBeVisible({ timeout: 4000 });

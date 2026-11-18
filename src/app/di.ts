@@ -15,6 +15,7 @@ import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { CloudflareAuth } from '@auth/cloudflareAuth';
+import { TaigaError, fetchTaigaStories } from '@taiga/taiga';
 import { makeNoteTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
@@ -120,6 +121,26 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // funcional em modo local (OPFS), como sempre.
   const auth = new CloudflareAuth();
 
+  // PR4.5 — Backlog (Taiga): sincroniza uma caixa backlog com as user
+  // stories PÚBLICAS do projeto configurado (só leitura; erro vira toast).
+  // Chamada ao entrar na caixa (prédio/painel) e ao criá-la.
+  async function syncBacklog(boxId: string): Promise<void> {
+    const box = world.getBox(boxId);
+    if (!box || box.type !== 'backlog') return;
+    if (!box.taigaProject) {
+      overlay.toast(t('toast.backlogNoSlug'));
+      return;
+    }
+    try {
+      const stories = await fetchTaigaStories(box.taigaProject);
+      const n = world.syncBoxStories(boxId, stories);
+      if (n === 0) overlay.toast(t('toast.backlogEmpty', { slug: box.taigaProject }));
+      else if (n > 0) overlay.toast(t('toast.backlogSynced', { name: box.name, n }));
+    } catch (err) {
+      overlay.toast(err instanceof TaigaError ? t(err.message) : t('ui.taiga.httpError'));
+    }
+  }
+
   // PR4.4 — Building View: prédio 3D com andares = caixas (primeira tela ao carregar)
   const buildingHost = document.body || sceneRoot;
   const buildingView = new BuildingView();
@@ -202,6 +223,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         world.flyToBox(boxId);
         overlay.toast(t('toast.buildingEntered', { name: box.name }));
         overlay.showBuildingBack();
+        void syncBacklog(boxId); // PR4.5 — backlog: puxa as stories do Taiga
         // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
         setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
       }
@@ -991,6 +1013,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     const id = (e as CustomEvent).detail as string;
     world.setCurrentBox(id);
     world.flyToBox(id);
+    void syncBacklog(id); // PR4.5 — backlog: atualiza as stories ao entrar
     // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
     setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
   });
@@ -1006,11 +1029,21 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     );
   };
   overlayRoot.addEventListener('boxcreate', (e) => {
-    const type = ((e as CustomEvent).detail as string) || 'comum';
+    // PR4.5 — detail virou objeto { type, project } (slug do Taiga p/ backlog);
+    // string simples continua aceita p/ compatibilidade.
+    const raw = (e as CustomEvent).detail as string | { type?: string; project?: string };
+    const type = (typeof raw === 'string' ? raw : raw?.type) || 'comum';
+    const project = typeof raw === 'string' ? '' : (raw?.project ?? '');
     const n = world.listBoxes().length;
-    const box = world.addBoxEntity(t('ui.boxNewName', { n }), undefined, type as 'comum' | 'root' | 'kanban');
+    const box = world.addBoxEntity(
+      t('ui.boxNewName', { n }),
+      undefined,
+      type as 'comum' | 'root' | 'kanban' | 'backlog',
+      project,
+    );
     overlay.toast(t('toast.boxCreated', { name: box.name }));
     reopenBoxesPanel();
+    void syncBacklog(box.id); // PR4.5 — backlog: puxa as stories na criação
   });
   overlayRoot.addEventListener('boxrename', (e) => {
     const { id, name } = (e as CustomEvent).detail as { id: string; name: string };

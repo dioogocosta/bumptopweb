@@ -43,7 +43,7 @@ test('app inicializa com canvas, SQLite e cena semeada', async ({ page }) => {
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Canvas WebGL montado
-  const canvas = page.locator('#scene-root canvas');
+  const canvas = page.locator('#scene-root > canvas');
   await expect(canvas).toHaveCount(1);
 
   // Cena de demonstração semeada
@@ -147,7 +147,7 @@ test('interação (arraste) não lança erro', async ({ page }) => {
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  const box = await page.locator('#scene-root canvas').boundingBox();
+  const box = await page.locator('#scene-root > canvas').boundingBox();
   if (!box) return;
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
@@ -167,7 +167,7 @@ test('interação (arraste) não lança erro', async ({ page }) => {
 test('menu de contexto: botão direito → criar nota → editar → excluir', async ({ page }) => {  await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   const startCount = await page.evaluate(() => window.__bumptop!.world.objectCount());
 
   // Piso vazio no quadrante inferior esquerdo (dentro da sala, longe dos ícones demo)
@@ -210,7 +210,7 @@ test('laço (Fase 7): mouse no chão vazio desenha o retângulo e seleciona', as
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   const start = { x: box.x + 60, y: box.y + 60 }; // canto = chão vazio (mesmo ponto do menu)
   const end = { x: box.x + box.width - 60, y: box.y + box.height - 60 };
 
@@ -238,7 +238,7 @@ test('laço: clicar no chão vazio sem arrastar NÃO deixa seleção', async ({ 
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   // Down + up no mesmo ponto: retângulo 0×0 não seleciona nada
   await page.mouse.click(box.x + 60, box.y + 60);
 
@@ -273,7 +273,7 @@ test('P0: todo item do menu de contexto tem tooltip (data-hint)', async ({ page 
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   await page.mouse.click(box.x + 60, box.y + 60, { button: 'right' });
 
   const menu = page.locator('.ctx-menu');
@@ -312,7 +312,7 @@ test('P1: Pile Widget Halo aparece ao pairar sobre uma pilha com botões e toolt
     return { ...s, pileId: a };
   });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   const targetX = box.x + screenPos.x;
   const targetY = box.y + screenPos.y;
 
@@ -372,7 +372,7 @@ test('P1: Dwell & Scrub exibe anel verde e faixa de miniaturas ao repousar sobre
     return { ...s, pileId: a, secondId: b };
   });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   const targetX = box.x + info.x;
   const targetY = box.y + info.y;
 
@@ -407,7 +407,7 @@ test('P1: Exploding Piles & Auto-Align toggles no menu de contexto e Sacudir pil
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   const floorPoint = { x: box.x + 60, y: box.y + 60 };
 
   // 1. Botão direito no chão vazio: exibe toggles de Auto-Align e Explodir Pilhas
@@ -483,7 +483,7 @@ test('P1: duplo-clique na parede foca a câmera na vista frontal (item 4)', asyn
   });
   expect(pt.visible).toBe(true);
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   await page.mouse.dblclick(box.x + pt.x, box.y + pt.y);
   await page.waitForTimeout(1500); // animação da câmera ~0.8 s
 
@@ -554,7 +554,7 @@ test('P1: Nova pasta no menu do chão cria pasta virtual na cena (item 6)', asyn
     return objs.length >= 3 && objs.slice(0, 3).every((o: any) => o.pose.position.y <= 2.0);
   }, { timeout: 15000 });
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   // Ponto do chão livre (canto inferior direito do canvas)
   const floorPoint = { x: box.x + 60, y: box.y + 60 };
   await page.mouse.click(floorPoint.x, floorPoint.y, { button: 'right' });
@@ -640,7 +640,7 @@ test('P1: soltar arquivo sobre a pasta no MEIO da sala move o arquivo (fix do dr
   expect(tela.pasta.visible).toBe(true);
   expect(tela.arq.visible).toBe(true);
 
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   // Drag REAL: down no arquivo → move até a pasta → espera a mola → up
   await page.mouse.move(box.x + tela.arq.x, box.y + tela.arq.y);
   await page.mouse.down();
@@ -709,7 +709,7 @@ test('P1: excluir pasta remove ícone + diretório OPFS e o watcher não recria'
     const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
     return window.__bumptop!.renderer.projectToScreen(pos);
   }, id);
-  const box = (await page.locator('#scene-root canvas').boundingBox())!;
+  const box = (await page.locator('#scene-root > canvas').boundingBox())!;
   await page.mouse.click(box.x + tela.x, box.y + tela.y, { button: 'right' });
   const menu = page.locator('.ctx-menu');
   await expect(menu).toBeVisible();
@@ -754,7 +754,7 @@ test.describe('PR8', () => {
       await navigator.storage
         .getDirectory()
         .then((r) => r.removeEntry('__drop_os__.txt', { recursive: true }).catch(() => {}));
-      const canvas = document.querySelector('#scene-root canvas')!;
+      const canvas = document.querySelector('#scene-root > canvas')!;
       const rect = canvas.getBoundingClientRect();
       const dt = new DataTransfer();
       dt.items.add(new File(['conteudo via arraste'], '__drop_os__.txt', { type: 'text/plain' }));
@@ -835,7 +835,7 @@ test.describe('PR8', () => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, id);
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
     await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
     const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 4000 });
@@ -893,7 +893,7 @@ test.describe('PR9', () => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, pastaId);
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
     await page.mouse.dblclick(box.x + telaBase.x, box.y + telaBase.y);
 
     await page.waitForFunction(
@@ -949,7 +949,7 @@ test.describe('PR9', () => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, pastaId);
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
     await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
 
     const modal = page.locator('[data-testid="folder-modal"]');
@@ -976,7 +976,7 @@ test.describe('PR10', () => {
       const w = window.__bumptop?.world;
       return !!w && w.listObjects().length >= 3;
     }, { timeout: 15000 });
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
 
     // Objeto de teste pregado na parede norte, baixado p/ dentro do viewport
     // (a câmera corta o topo da parede: y=22 sai da tela — placeAt é private
@@ -1046,7 +1046,7 @@ test.describe('PR10', () => {
       const w = window.__bumptop?.world;
       return !!w && w.listObjects().length >= 3;
     }, { timeout: 15000 });
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
 
     const fotoId = await page.evaluate(async () => {
       const w = window.__bumptop!.world;
@@ -1103,7 +1103,7 @@ test.describe('PR10', () => {
       const w = window.__bumptop?.world;
       return !!w && w.listObjects().length >= 3;
     }, { timeout: 15000 });
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
 
     const pastaId = await page.evaluate(async () => {
       const w = window.__bumptop!.world;
@@ -1184,7 +1184,7 @@ test.describe('PR13', () => {
       const w = window.__bumptop?.world;
       return !!w && w.listObjects().length >= 3;
     }, { timeout: 15000 });
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
 
     const notaId = await page.evaluate(() => {
       const w = window.__bumptop!.world;
@@ -1257,7 +1257,7 @@ test.describe('PR13', () => {
       const w = window.__bumptop?.world;
       return !!w && w.listObjects().length >= 3;
     }, { timeout: 15000 });
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
 
     const notaId = await page.evaluate(() => {
       const w = window.__bumptop!.world;
@@ -1335,7 +1335,7 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, notaId);
-    const box = (await page.locator('#scene-root canvas').boundingBox())!;
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
     await page.mouse.click(box.x + tela.x, box.y + tela.y);
     const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 4000 });
@@ -1385,7 +1385,7 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForTimeout(600);
     const svgs = await page.locator('.zoom-controls button svg').count();
-    expect(svgs).toBe(5); // zoom-in, zoom-out, busca 🔍 (PR18), engrenagem (PR4a) e conta (PR27)
+    expect(svgs).toBe(6); // zoom-in, zoom-out, busca 🔍 (PR18), engrenagem (PR4a), conta (PR27) e prédio (PR4.4)
     // O "+" do zoom-in e o traço do zoom-out desenhados no SVG
     const zin = await page.locator('.zoom-controls button').first().locator('svg line').count();
     expect(zin).toBe(3); // alça + traços do +

@@ -174,7 +174,7 @@ export const DEFAULT_ROOM: RoomConfig = {
   wallThickness: 10,
 };
 
-/** PR4a — tipos de caixa. 'root'/'kanban'/'backlog' entram no PR 4.3. */
+/** PR4a — tipos de caixa. 'root'/'kanban' no PR 4.3; 'backlog' no PR 4.5. */
 export type BoxType = 'comum' | 'root' | 'kanban' | 'backlog';
 
 /**
@@ -190,4 +190,18 @@ export interface BoxEntityData {
   halfSize: number;
   wallHeight: number;
   wallThickness: number;
+  /** PR4.5 — slug do projeto Taiga (só em caixas 'backlog'). */
+  taigaProject?: string;
+  /** PR4.5 — contagens por status do Taiga (preenchidas no sync, p/ o dashboard). */
+  taigaStats?: Array<{ name: string; color: string; count: number }>;
+}
+
+/** PR4.5 — user story do Taiga (só leitura; chega do adapter `src/taiga/`). */
+export interface TaigaStory {
+  id: number;
+  ref: number;
+  subject: string;
+  statusName: string;
+  statusColor: string;
+  isClosed: boolean;
 }
