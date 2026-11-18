@@ -13,6 +13,7 @@ import type {
   BoxType,
   BumpObjectData,
   CameraState,
+  KanbanLane,
   PhysicsConfig,
   Pose,
   RoomConfig,
@@ -259,6 +260,10 @@ export class World {
     this.deps.renderer.addRoom(this.roomOf(box));
     // PR4.3 — visual especial do tipo (raias Kanban / dashboard Root)
     this.deps.renderer.setRoomType(this.roomOf(box), box.type);
+    // PR4.6 — sprint/kanban com lanes customizadas restauradas do snapshot
+    if ((box.type === 'kanban' || box.type === 'sprint') && box.kanbanLanes?.length) {
+      this.deps.renderer.setRoomLanes(this.roomOf(box), box.kanbanLanes);
+    }
   }
 
   /** Pan da câmera limitado à caixa atual. */
@@ -318,6 +323,8 @@ export class World {
     };
     // PR4.5 — caixa backlog nasce apontando o projeto do Taiga (slug normalizado)
     if (type === 'backlog' && taigaProject) box.taigaProject = taigaProject.trim().toLowerCase();
+    // PR4.6 — sprint nasce com slug do projeto também
+    if (type === 'sprint' && taigaProject) box.taigaProject = taigaProject.trim().toLowerCase();
     this.boxes.set(id, box);
     this.ensureBoxRoom(box);
     this.setCurrentBox(id);
@@ -343,7 +350,7 @@ export class World {
   setBoxType(id: string, type: BoxType): boolean {
     const box = this.boxes.get(id);
     if (!box || id === 'box-default') return false;
-    if (type !== 'comum' && type !== 'root' && type !== 'kanban' && type !== 'backlog') return false;
+    if (type !== 'comum' && type !== 'root' && type !== 'kanban' && type !== 'backlog' && type !== 'sprint') return false;
     if (box.type === type) return true;
     box.type = type;
     this.deps.renderer.setRoomType(this.roomOf(box), type);
@@ -404,6 +411,110 @@ export class World {
     this.dashSig.delete(boxId); // reempurra o dashboard com os novos números
     this.dirty = true;
     return visiveis.length;
+  }
+
+  /**
+   * PR4.6 — sincroniza uma caixa SPRINT (kanban com Taiga) com as stories.
+   * Distribui cada story na raia correspondente ao status.
+   * Se as lanes ainda não estão configuradas, usa as padrões (3 colunas).
+   * Retorna qtd. de itens criados, ou -1 se a caixa não é sprint.
+   */
+  syncSprintStories(boxId: string, stories: TaigaStory[], sprintId?: number, sprintName?: string): number {
+    const box = this.boxes.get(boxId);
+    if (!box || (box.type !== 'sprint' && box.type !== 'kanban')) return -1;
+    if (this.currentBoxId !== boxId) this.setCurrentBox(boxId);
+
+    // Atualiza metadados da sprint
+    if (sprintId !== undefined) box.taigaSprintId = sprintId;
+    if (sprintName) box.taigaSprintName = sprintName;
+
+    // Lanes configuradas (ou padrão)
+    const lanes: KanbanLane[] = box.kanbanLanes ?? [
+      { label: 'A Fazer',       color: '#1e3a5f', statusNames: ['new', 'ready', 'a fazer', 'backlog'] },
+      { label: 'Em andamento',  color: '#7c3100', statusNames: ['in progress', 'em andamento', 'doing'] },
+      { label: 'Concluído',     color: '#14532d', statusNames: ['done', 'closed', 'concluído', 'concluido'] },
+    ];
+
+    // Remove itens antigos do Taiga nesta caixa
+    for (const [id, e] of [...this.entries]) {
+      if (e.data.meta?.boxId === boxId && e.data.meta?.taigaStoryId !== undefined) {
+        this.removeObject(id);
+      }
+    }
+
+    const n = lanes.length;
+    const laneW = (box.halfSize * 2) / n;
+    const GAP_X = 14;
+    const GAP_Z = 16;
+
+    // Agrupa stories por raia
+    const laneStories: TaigaStory[][] = lanes.map(() => []);
+    for (const s of stories) {
+      const statusLower = (s.statusName || '').toLowerCase();
+      let assigned = false;
+      for (let li = 0; li < lanes.length; li++) {
+        if (lanes[li]!.statusNames.some((sn) => statusLower.includes(sn) || sn.includes(statusLower))) {
+          laneStories[li]!.push(s);
+          assigned = true;
+          break;
+        }
+      }
+      // Status não mapeado → última raia (Concluído) se fechado, senão primeira
+      if (!assigned) {
+        if (s.isClosed) laneStories[n - 1]!.push(s);
+        else laneStories[0]!.push(s);
+      }
+    }
+
+    // Cria objetos por raia
+    let total = 0;
+    for (let li = 0; li < n; li++) {
+      const ss = laneStories[li]!;
+      const laneXCenter = box.pos.x - box.halfSize + li * laneW + laneW / 2;
+      const cols = Math.max(1, Math.floor(laneW / GAP_X));
+      ss.slice(0, 60).forEach((s, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const cx = laneXCenter + (col - (cols - 1) / 2) * GAP_X;
+        const cz = box.pos.z + (row - Math.floor(ss.length / cols) / 2) * GAP_Z;
+        const id = this.addBox(
+          { x: cx, y: 0.6, z: cz },
+          vec3(5, 1.1, 5),
+          s.statusColor || '#8b5cf6',
+          `#${s.ref} ${s.subject}`,
+        );
+        const e = this.entries.get(id)!;
+        e.data.meta.taigaStoryId = s.id;
+        e.data.meta.taigaStatus = s.statusName;
+        e.data.meta.kanbanLane = li;
+      });
+      total += Math.min(ss.length, 60);
+    }
+
+    // Contagens por status → taigaStats para o dashboard
+    const mapa = new Map<string, { name: string; color: string; count: number }>();
+    for (const s of stories) {
+      const k = s.statusName || 'Backlog';
+      const cur = mapa.get(k) ?? { name: k, color: s.statusColor || '#8b5cf6', count: 0 };
+      cur.count++;
+      mapa.set(k, cur);
+    }
+    box.taigaStats = [...mapa.values()].sort((a, b) => b.count - a.count);
+    this.dirty = true;
+    return total;
+  }
+
+  /**
+   * PR4.6 — configura as raias Kanban de uma caixa (kanban ou sprint).
+   * Persiste em `box.kanbanLanes` e notifica o renderer.
+   */
+  setKanbanLanes(boxId: string, lanes: KanbanLane[]): boolean {
+    const box = this.boxes.get(boxId);
+    if (!box || (box.type !== 'kanban' && box.type !== 'sprint')) return false;
+    box.kanbanLanes = lanes;
+    this.deps.renderer.setRoomLanes(this.roomOf(box), lanes);
+    this.dirty = true;
+    return true;
   }
 
   /**
@@ -2385,19 +2496,20 @@ export class World {
 
   /** Move um item para `pos` (pose + física + render), zerando a velocidade. */
   /**
-   * PR4.3 — raia Kanban (0..2) pela posição x dentro da caixa: 3 colunas
-   * esquerda→direita (A Fazer | Fazendo | Feito). Fora de uma caixa kanban,
-   * o item não tem raia (`meta.kanbanLane` removido).
+   * PR4.3/4.6 — raia Kanban (0..N-1) pela posição x dentro da caixa.
+   * Fora de uma caixa kanban ou sprint, o item não tem raia.
    */
   private syncKanbanLane(e: Entry): void {
     const box = this.boxOfEntry(e);
-    if (box.type !== 'kanban') {
+    if (box.type !== 'kanban' && box.type !== 'sprint') {
       delete e.data.meta.kanbanLane;
       return;
     }
+    const lanes = box.kanbanLanes;
+    const n = lanes?.length ?? 3;
     const left = box.pos.x - box.halfSize;
-    const w = (box.halfSize * 2) / 3;
-    const lane = Math.min(2, Math.max(0, Math.floor((e.data.pose.position.x - left) / w)));
+    const w = (box.halfSize * 2) / n;
+    const lane = Math.min(n - 1, Math.max(0, Math.floor((e.data.pose.position.x - left) / w)));
     e.data.meta.kanbanLane = lane;
   }
 
@@ -3304,6 +3416,10 @@ export class World {
         // PR4.5 — backlog: preserva o slug e as contagens por status
         if (typeof b.taigaProject === 'string' && b.taigaProject) nova.taigaProject = b.taigaProject;
         if (Array.isArray(b.taigaStats) && b.taigaStats.length) nova.taigaStats = b.taigaStats;
+        // PR4.6 — sprint: preserva sprint id/name e raias Kanban
+        if (typeof b.taigaSprintId === 'number') nova.taigaSprintId = b.taigaSprintId;
+        if (typeof b.taigaSprintName === 'string' && b.taigaSprintName) nova.taigaSprintName = b.taigaSprintName;
+        if (Array.isArray(b.kanbanLanes) && b.kanbanLanes.length) nova.kanbanLanes = b.kanbanLanes;
         this.boxes.set(b.id, nova);
       }
     }

@@ -10,6 +10,7 @@ import type {
   BoxType,
   CameraState,
   IRenderer,
+  KanbanLane,
   ObjectHandle,
   Pose,
   RoomConfig,
@@ -51,6 +52,10 @@ export class ThreeRenderer implements IRenderer {
   private activeTheme: Theme | null = null;
   /** PR4.3 — raias Kanban por sala (chave room:ox|oz). */
   private roomKanbanLines = new Map<string, THREE.Mesh[]>();
+  /** PR4.6 — labels HTML das raias Kanban (chave room:ox|oz). */
+  private roomKanbanLabels = new Map<string, HTMLElement[]>();
+  /** PR4.6 — config de raias ativas por caixa (para reaplicar via setRoomLanes). */
+  private roomKanbanConfig = new Map<string, KanbanLane[]>();
   /** PR4.3 — dashboards ROOT por sala (canvas pixel-voxel na parede). */
   private roomDashboards = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; texture: THREE.CanvasTexture; mesh: THREE.Mesh }>();
 
@@ -175,10 +180,10 @@ export class ThreeRenderer implements IRenderer {
     const key = `room:${ox}|${oz}`;
     const group = this.roomGroups.get(key);
     if (group) group.visible = visible;
-    const lines = this.roomKanbanLines.get(key);
-    if (lines) {
-      for (const l of lines) l.visible = visible;
-    }
+    // Raias Kanban ficam dentro do group, então group.visible já cobre.
+    // Mas labels HTML (caso existam fora do group) também:
+    const labels = this.roomKanbanLabels.get(key);
+    if (labels) for (const l of labels) l.style.display = visible ? '' : 'none';
     const dash = this.roomDashboards.get(key);
     if (dash) dash.mesh.visible = visible;
   }
@@ -214,16 +219,33 @@ export class ThreeRenderer implements IRenderer {
     const group = this.roomGroups.get(key);
     if (!group) return;
     this.clearRoomSpecials(key);
-    if (type === 'kanban') this.addKanbanLines(group, room);
-    else if (type === 'root' || type === 'backlog') this.addDashboard(group, room); // PR4.5: backlog também tem painel
+    if (type === 'kanban' || type === 'sprint') {
+      // Raias padrão (3 colunas) — serão sobrescritas por setRoomLanes se houver config
+      const defaultLanes: KanbanLane[] = [
+        { label: 'A Fazer',       color: '#1e3a5f', statusNames: ['new', 'ready', 'a fazer', 'backlog'] },
+        { label: 'Em andamento',  color: '#7c3100', statusNames: ['in progress', 'em andamento', 'doing'] },
+        { label: 'Concluído',     color: '#14532d', statusNames: ['done', 'closed', 'concluído', 'concluido'] },
+      ];
+      this.addKanbanLanes(group, room, defaultLanes);
+    } else if (type === 'root' || type === 'backlog') {
+      this.addDashboard(group, room); // PR4.5: backlog também tem painel
+    }
+  }
+
+  /** PR4.6 — reconfigura as raias Kanban com lanes customizadas. */
+  setRoomLanes(room: RoomConfig, lanes: KanbanLane[]): void {
+    const ox = room.origin?.x ?? 0;
+    const oz = room.origin?.z ?? 0;
+    const key = `room:${ox}|${oz}`;
+    const group = this.roomGroups.get(key);
+    if (!group) return;
+    // Limpa só raias (não o dashboard)
+    this.clearKanbanOnly(key);
+    this.addKanbanLanes(group, room, lanes);
   }
 
   private clearRoomSpecials(key: string): void {
-    const lines = this.roomKanbanLines.get(key);
-    if (lines) {
-      for (const m of lines) this.scene.remove(m);
-      this.roomKanbanLines.delete(key);
-    }
+    this.clearKanbanOnly(key);
     const dash = this.roomDashboards.get(key);
     if (dash) {
       this.scene.remove(dash.mesh);
@@ -233,24 +255,113 @@ export class ThreeRenderer implements IRenderer {
     }
   }
 
-  private addKanbanLines(group: THREE.Group, room: RoomConfig): void {
+  private clearKanbanOnly(key: string): void {
+    const lines = this.roomKanbanLines.get(key);
+    if (lines) {
+      for (const m of lines) this.scene.remove(m);
+      this.roomKanbanLines.delete(key);
+    }
+    const labels = this.roomKanbanLabels.get(key);
+    if (labels) {
+      for (const l of labels) l.remove();
+      this.roomKanbanLabels.delete(key);
+    }
+    this.roomKanbanConfig.delete(key);
+  }
+
+  /**
+   * PR4.6 — cria N raias Kanban no chão da caixa.
+   * Cada raia: divisória neon vertical + tarja colorida no chão + label HTML projetado.
+   */
+  private addKanbanLanes(group: THREE.Group, room: RoomConfig, lanes: KanbanLane[]): void {
     const { halfSize, wallHeight } = room;
     const ox = room.origin?.x ?? 0;
     const oz = room.origin?.z ?? 0;
     const key = `room:${ox}|${oz}`;
-    const w = (halfSize * 2) / 3;
-    const color = 0x2a4a6e;
-    const mat = new THREE.MeshLambertMaterial({ color });
-    const lines: THREE.Mesh[] = [];
-    for (let i = 1; i <= 2; i++) {
-      const x = ox - halfSize + i * w;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.12, wallHeight * 0.9, halfSize * 2), mat);
-      m.position.set(x, wallHeight * 0.45, oz);
-      m.receiveShadow = true;
-      group.add(m);
-      lines.push(m);
+    const n = lanes.length;
+    const laneW = (halfSize * 2) / n;
+    const meshes: THREE.Mesh[] = [];
+
+    for (let i = 0; i < n; i++) {
+      const lane = lanes[i]!;
+      const laneX = ox - halfSize + i * laneW;
+      const hexColor = parseInt(lane.color.replace('#', ''), 16);
+
+      // Piso colorido da raia (plano semi-transparente sobre o chão)
+      const floorGeo = new THREE.PlaneGeometry(laneW - 0.5, halfSize * 2 - 0.5);
+      const floorMat = new THREE.MeshLambertMaterial({
+        color: hexColor,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+      });
+      const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+      floorMesh.rotation.x = -Math.PI / 2;
+      floorMesh.position.set(laneX + laneW / 2, 0.02, oz);
+      group.add(floorMesh);
+      meshes.push(floorMesh);
+
+      // Divisória vertical (exceto a última raia)
+      if (i < n - 1) {
+        const divX = laneX + laneW;
+        const divGeo = new THREE.BoxGeometry(0.3, wallHeight * 0.85, halfSize * 2);
+        const divMat = new THREE.MeshLambertMaterial({
+          color: hexColor,
+          transparent: true,
+          opacity: 0.6,
+        });
+        const divMesh = new THREE.Mesh(divGeo, divMat);
+        divMesh.position.set(divX, wallHeight * 0.425, oz);
+        divMesh.receiveShadow = true;
+        group.add(divMesh);
+        meshes.push(divMesh);
+
+        // Aresta neon na divisória
+        const edgeGeo = new THREE.EdgesGeometry(divGeo);
+        const edgeMat = new THREE.LineBasicMaterial({ color: hexColor, transparent: true, opacity: 0.9 });
+        const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+        edges.position.copy(divMesh.position);
+        group.add(edges);
+        // Cast to Mesh for type compatibility (LineSegments → store as Mesh-like)
+        meshes.push(edges as unknown as THREE.Mesh);
+      }
+
+      // Label da raia no topo da parede frontal (via canvas texture)
+      const labelCanvas = document.createElement('canvas');
+      labelCanvas.width = 256;
+      labelCanvas.height = 64;
+      const ctx = labelCanvas.getContext('2d')!;
+      ctx.clearRect(0, 0, 256, 64);
+      // fundo semi-transparente arredondado
+      ctx.fillStyle = lane.color + 'cc';
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(4, 4, 248, 56, 10);
+      else ctx.rect(4, 4, 248, 56);
+      ctx.fill();
+      // texto
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(lane.label, 128, 32);
+
+      const labelTex = new THREE.CanvasTexture(labelCanvas);
+      const labelGeo = new THREE.PlaneGeometry(laneW * 0.9, 8);
+      const labelMat = new THREE.MeshLambertMaterial({ map: labelTex, transparent: true, opacity: 0.95, depthWrite: false });
+      const labelMesh = new THREE.Mesh(labelGeo, labelMat);
+      // Posiciona no topo da parede frontal (z negativo = frente)
+      labelMesh.position.set(
+        laneX + laneW / 2,
+        wallHeight * 0.88,
+        oz - halfSize + 1,
+      );
+      labelMesh.lookAt(laneX + laneW / 2, wallHeight * 0.88, oz - halfSize - 10);
+      group.add(labelMesh);
+      meshes.push(labelMesh);
     }
-    this.roomKanbanLines.set(key, lines);
+
+    this.roomKanbanLines.set(key, meshes);
+    this.roomKanbanConfig.set(key, lanes);
   }
 
   private addDashboard(group: THREE.Group, room: RoomConfig): void {

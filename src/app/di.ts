@@ -15,7 +15,7 @@ import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { CloudflareAuth } from '@auth/cloudflareAuth';
-import { TaigaError, fetchTaigaStories } from '@taiga/taiga';
+import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId } from '@taiga/taiga';
 import { makeNoteTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
@@ -141,6 +141,37 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     }
   }
 
+  // PR4.6 — Sprint (Taiga): sincroniza uma caixa sprint com a sprint ativa.
+  async function syncSprint(boxId: string): Promise<void> {
+    const box = world.getBox(boxId);
+    if (!box || (box.type !== 'sprint' && box.type !== 'kanban')) return;
+    if (!box.taigaProject) {
+      overlay.toast(t('toast.backlogNoSlug'));
+      return;
+    }
+    try {
+      let milestoneId = box.taigaSprintId;
+      let sprintName = box.taigaSprintName;
+      if (!milestoneId) {
+        const projectId = await resolveProjectId(box.taigaProject);
+        const sprints = await fetchTaigaSprints(projectId);
+        const active = sprints.find((s) => !s.closed) ?? sprints[0];
+        if (!active) {
+          overlay.toast(t('toast.backlogEmpty', { slug: box.taigaProject }));
+          return;
+        }
+        milestoneId = active.id;
+        sprintName = active.name;
+      }
+      const stories = await fetchSprintStories(milestoneId);
+      const n = world.syncSprintStories(boxId, stories, milestoneId, sprintName);
+      if (n === 0) overlay.toast(t('toast.backlogEmpty', { slug: box.taigaProject }));
+      else if (n > 0) overlay.toast(t('toast.backlogSynced', { name: box.name, n }));
+    } catch (err) {
+      overlay.toast(err instanceof TaigaError ? t(err.message) : t('ui.taiga.httpError'));
+    }
+  }
+
   // PR4.4 — Building View: prédio 3D com andares = caixas (primeira tela ao carregar)
   const buildingHost = document.body || sceneRoot;
   const buildingView = new BuildingView();
@@ -224,6 +255,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.toast(t('toast.buildingEntered', { name: box.name }));
         overlay.showBuildingBack();
         void syncBacklog(boxId); // PR4.5 — backlog: puxa as stories do Taiga
+        void syncSprint(boxId);  // PR4.6 — sprint: distribui stories nas raias
         // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
         setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
       }
@@ -1014,6 +1046,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     world.setCurrentBox(id);
     world.flyToBox(id);
     void syncBacklog(id); // PR4.5 — backlog: atualiza as stories ao entrar
+    void syncSprint(id);  // PR4.6 — sprint: atualiza raias ao entrar
     // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
     setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
   });
@@ -1038,12 +1071,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     const box = world.addBoxEntity(
       t('ui.boxNewName', { n }),
       undefined,
-      type as 'comum' | 'root' | 'kanban' | 'backlog',
+      type as 'comum' | 'root' | 'kanban' | 'backlog' | 'sprint',
       project,
     );
     overlay.toast(t('toast.boxCreated', { name: box.name }));
     reopenBoxesPanel();
     void syncBacklog(box.id); // PR4.5 — backlog: puxa as stories na criação
+    void syncSprint(box.id);  // PR4.6 — sprint: puxa stories da sprint ativa na criação
   });
   overlayRoot.addEventListener('boxrename', (e) => {
     const { id, name } = (e as CustomEvent).detail as { id: string; name: string };
