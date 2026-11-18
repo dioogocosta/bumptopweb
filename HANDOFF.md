@@ -60,6 +60,17 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 | PR #2 | **Halo da pilha clicável:** a âncora agora fica no centro da pilha. Antes, os botões ficavam a ~70 px e sumiam no caminho até eles. |
 | PR #2 | **Prender na parede é opcional e vem desligado** (`autoWallPin`, toggle "Prender ao jogar na parede" no menu do chão). Itens presos são escolhidos pela posição na tela (`pickPinnedOnScreen`), então dá para puxá-los de volta. |
 | `124b6a8` | **Itens finos como folhas:** `asSheet()` deixa a meia-espessura em 5% da largura (0,35 num item de 14; antes era 1,6). Vale para itens novos e para cenas carregadas. **Verificado no navegador em 10/11/2026** (ver §5.1). |
+| PR18 | **Busca nas notas:** botão 🔍 na barra de controles, realce com anéis amarelos pulsantes nos matches, navegação em voo de câmera (‹ n/m ›) e atalho Enter. |
+| PR19 | **Autenticação e Nuvem com Cloudflare D1:** backend serverless em `functions/` (Cloudflare Pages Functions same-origin `/api/...`), hash de senha PBKDF2 (SHA-256, 100k iterações), sessão via cookie HttpOnly + Secure + SameSite=Strict com SHA-256 do token no banco, isolamento estrito de dados por `user_id` em `scenes(user_id, payload, updated_at)`, sincronização automática (debounced 3s), UI no overlay (botão Entrar, modal de autenticação, chip do usuário com Sair), degradação graciosa para modo local OPFS/SQLite quando offline ou sem D1. Sonda `scripts/validate-pr19.mjs` (6/6). |
+
+### 4.1 Configuração do Cloudflare D1 (Ação necessária do Dono)
+1. No dashboard da Cloudflare: **Workers & Pages** → **D1** → **Create database** com o nome `bumptop-d1`.
+2. Em **Pages** (`bumptopweb.pages.dev`): **Settings** → **Functions** → **D1 database bindings**:
+   - Variable name: `DB`
+   - Database: selecione `bumptop-d1`
+3. Executar o schema do banco:
+   - Via Wrangler: `wrangler d1 execute bumptop-d1 --file=docs/d1-setup.sql`
+   - Ou colar e executar o conteúdo de `docs/d1-setup.sql` no console SQL do Cloudflare Dashboard.
 
 ## 5. Pendências conhecidas (por prioridade)
 

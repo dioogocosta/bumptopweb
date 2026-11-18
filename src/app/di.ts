@@ -22,10 +22,12 @@ import { FsAccessFileSystem } from '@fs/fsAccess';
 import { OpfsFileSystem } from '@fs/opfsFs';
 import { iconForExt } from '@fs/fileIcons';
 import { FileService } from './fileService';
+import { CloudflareAuth } from '../auth/cloudflareAuth';
 
 export interface AppContext {
   world: World;
   repo: IRepo;
+  auth: CloudflareAuth;
   loop: MainLoop;
   files: FileService;
   renderer: ThreeRenderer;
@@ -56,6 +58,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   const physics = new RapierPhysics();
   const repo = new SqliteRepo();
   await repo.init();
+  const auth = new CloudflareAuth();
 
   // Idioma (i18n): setting persistido → detecção do navegador → pt-BR
   const storedLang = await repo.getSetting<string>('lang', '');
@@ -851,6 +854,74 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (st) overlay.setSearchCount(st.index + 1, st.ids.length);
   });
 
+  // PR19 — autenticação e sincronização na nuvem (Cloudflare D1)
+  overlayRoot.addEventListener('authsubmit', (e) => {
+    const detail = (e as CustomEvent).detail as { mode: 'signin' | 'signup'; email: string; password: string };
+    overlay.setAuthModalLoading(true);
+    const authPromise = detail.mode === 'signup'
+      ? auth.signUp(detail.email, detail.password)
+      : auth.signIn(detail.email, detail.password);
+
+    authPromise
+      .then(async (res) => {
+        overlay.setAuthModalLoading(false);
+        if (!res.ok) {
+          overlay.setAuthModalError(res.error || t('toast.authInvalidCreds'));
+          return;
+        }
+        overlay.hideAuthModal();
+        overlay.setAuthUser(res.user ?? { email: detail.email });
+        overlay.toast(
+          detail.mode === 'signup'
+            ? t('toast.authSignUpSuccess')
+            : t('toast.authSignInSuccess', { email: detail.email })
+        );
+
+        // Sincronização pós-login:
+        const remote = await auth.loadRemoteScene();
+        if (remote && remote.objects && remote.objects.length > 0) {
+          world.loadSnapshot(remote);
+          await repo.saveScene(remote).catch(() => {});
+          overlay.toast(t('toast.sceneRestored', { n: remote.objects.length, backend: 'Cloudflare D1' }));
+        } else {
+          // Se o usuário não tem cena remota, sobe a cena atual
+          const localSnap = world.toSnapshot();
+          if (localSnap.objects && localSnap.objects.length > 0) {
+            const ok = await auth.saveRemoteScene(localSnap);
+            if (ok) overlay.toast(t('toast.authUploadSuccess'));
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('Erro ao processar auth:', err);
+        overlay.setAuthModalLoading(false);
+        overlay.setAuthModalError(t('toast.authErrorGeneric'));
+      });
+  });
+
+  overlayRoot.addEventListener('authsignout', () => {
+    void auth.signOut().then(() => {
+      overlay.setAuthUser(null);
+      overlay.toast(t('toast.authSignOutSuccess'));
+    });
+  });
+
+  // Checagem assíncrona de sessão existente no carregamento
+  auth
+    .getSession()
+    .then(async (session) => {
+      overlay.setAuthUser(session?.user ?? null);
+      if (session?.user) {
+        const remote = await auth.loadRemoteScene();
+        if (remote && remote.objects && remote.objects.length > 0) {
+          world.loadSnapshot(remote);
+          await repo.saveScene(remote).catch(() => {});
+          overlay.toast(t('toast.sceneRestored', { n: remote.objects.length, backend: 'Cloudflare D1' }));
+        }
+      }
+    })
+    .catch(() => {});
+
   // Persistência: carrega cena salva ou cria cenário de demonstração
   const saved = await repo.loadScene();
   if (saved && saved.objects.length > 0) {
@@ -997,14 +1068,26 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // A PRIMEIRA falha de save vira toast: antes era só console.warn e o usuário
   // só descobria a perda quando o F5 zerava a cena (bug do fallback idb-sqlite).
   let saveFailToastShown = false;
+  let cloudSyncTimer: number | null = null;
+  const syncCloudDebounced = () => {
+    if (!auth.getUser()) return;
+    if (cloudSyncTimer) window.clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = window.setTimeout(() => {
+      cloudSyncTimer = null;
+      auth.saveRemoteScene(world.toSnapshot()).catch(() => {});
+    }, 3000);
+  };
+
   const flushNow = () => {
-    repo.saveScene(world.toSnapshot()).catch((e) => {
+    const snap = world.toSnapshot();
+    repo.saveScene(snap).catch((e) => {
       console.warn('save falhou', e);
       if (!saveFailToastShown) {
         saveFailToastShown = true;
         overlay.toast(t('toast.saveFailed'));
       }
     });
+    syncCloudDebounced();
   };
   const onVisibilityFlush = () => {
     if (document.visibilityState === 'hidden') flushNow();
@@ -1231,6 +1314,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   return {
     world,
     repo,
+    auth,
     loop,
     files,
     renderer,

@@ -329,6 +329,15 @@ export interface IOverlay {
     onExtract?: (path: string) => void;
   }): void;
   hideFolderModal(): void;
+  /** PR19 — atualiza estado de autenticação no overlay (email do usuário ou null) */
+  setAuthUser?(user: { email: string } | null): void;
+  /** PR19 — abre o modal de autenticação (signin ou signup) */
+  showAuthModal?(mode?: 'signin' | 'signup'): void;
+  /** PR19 — fecha o modal de autenticação */
+  hideAuthModal?(): void;
+  isAuthModalVisible?(): boolean;
+  setAuthModalError?(error: string | null): void;
+  setAuthModalLoading?(loading: boolean): void;
 }
 
 export interface DwellRingData {
@@ -386,4 +395,26 @@ export interface ContextMenuItem {
   danger?: boolean;
   /** Dica curta exibida como tooltip preto ao passar o mouse (P0). */
   hint?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Autenticação e sincronização na nuvem (PR19 — Cloudflare D1)
+// ---------------------------------------------------------------------------
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+export interface AuthSession {
+  user: AuthUser;
+}
+
+export interface IAuthPort {
+  getSession(): Promise<AuthSession | null>;
+  signIn(email: string, password: string): Promise<{ ok: boolean; error?: string; user?: AuthUser }>;
+  signUp(email: string, password: string): Promise<{ ok: boolean; error?: string; user?: AuthUser }>;
+  signOut(): Promise<void>;
+  loadRemoteScene(): Promise<SceneSnapshot | null>;
+  saveRemoteScene(snapshot: SceneSnapshot): Promise<boolean>;
 }

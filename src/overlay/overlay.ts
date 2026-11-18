@@ -124,6 +124,14 @@ export class DomOverlay implements IOverlay {
   private searchInput: HTMLInputElement | null = null;
   private searchCount: HTMLSpanElement | null = null;
   private searchMarks = new Map<string, HTMLElement>();
+  /** PR19 — autenticação e nuvem (Cloudflare D1). */
+  private authWrap: HTMLDivElement | null = null;
+  private authBtn: HTMLButtonElement | null = null;
+  private authModalEl: HTMLDivElement | null = null;
+  private authModalCleanup: (() => void) | null = null;
+  private authErrorEl: HTMLDivElement | null = null;
+  private authSubmitEl: HTMLButtonElement | null = null;
+  private currentUser: { email: string } | null = null;
   private haloHovered = false;
   private haloActionCb: ((pileId: string, action: string) => void) | null = null;
   private haloCurrentPileId: string | null = null;
@@ -226,6 +234,27 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('searchtoggle', { bubbles: true }));
     });
     zoomWrap.appendChild(this.searchBtn);
+
+    // PR19 — container e botão de autenticação
+    this.authWrap = document.createElement('div');
+    this.authWrap.className = 'auth-wrap';
+    this.authBtn = document.createElement('button');
+    this.authBtn.type = 'button';
+    this.authBtn.className = 'auth-btn';
+    this.authBtn.title = t('ui.authSignIn');
+    this.authBtn.setAttribute('aria-label', t('ui.authSignIn'));
+    this.authBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">` +
+      `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>` +
+      `<circle cx="12" cy="7" r="4"/>` +
+      `</svg>` +
+      `<span class="auth-btn-label">${t('ui.authSignIn')}</span>`;
+    this.authBtn.addEventListener('click', () => {
+      this.showAuthModal('signin');
+    });
+    this.authWrap.appendChild(this.authBtn);
+    zoomWrap.appendChild(this.authWrap);
+
     this.root.appendChild(zoomWrap);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
@@ -351,6 +380,230 @@ export class DomOverlay implements IOverlay {
         el.remove();
         this.searchMarks.delete(id);
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // PR19 — autenticação e nuvem (Cloudflare D1)
+  // -------------------------------------------------------------------------
+
+  /** Atualiza o estado visual do usuário (email logado ou botão Entrar) */
+  setAuthUser(user: { email: string } | null): void {
+    this.currentUser = user;
+    if (!this.authWrap) return;
+    this.authWrap.innerHTML = '';
+    if (user) {
+      const chip = document.createElement('div');
+      chip.className = 'auth-user-chip';
+      chip.title = user.email;
+      chip.innerHTML =
+        `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">` +
+        `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>` +
+        `<circle cx="12" cy="7" r="4"/>` +
+        `</svg>` +
+        `<span class="auth-user-email">${user.email}</span>`;
+
+      const signOutBtn = document.createElement('button');
+      signOutBtn.type = 'button';
+      signOutBtn.className = 'auth-signout-btn';
+      signOutBtn.title = t('ui.authSignOut');
+      signOutBtn.setAttribute('aria-label', t('ui.authSignOut'));
+      signOutBtn.textContent = t('ui.authSignOut');
+      signOutBtn.addEventListener('click', () => {
+        this.root.dispatchEvent(new CustomEvent('authsignout', { bubbles: true }));
+      });
+
+      this.authWrap.appendChild(chip);
+      this.authWrap.appendChild(signOutBtn);
+    } else {
+      if (this.authBtn) {
+        this.authWrap.appendChild(this.authBtn);
+      }
+    }
+  }
+
+  getAuthUser(): { email: string } | null {
+    return this.currentUser;
+  }
+
+  showAuthModal(initialMode: 'signin' | 'signup' = 'signin'): void {
+    this.hideAuthModal();
+
+    let mode = initialMode;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'auth-backdrop';
+
+    const modal = document.createElement('div');
+    modal.className = 'auth-modal';
+
+    const head = document.createElement('div');
+    head.className = 'auth-head';
+
+    const title = document.createElement('h2');
+    title.className = 'auth-title';
+    title.textContent = mode === 'signup' ? t('ui.authModalTitleSignUp') : t('ui.authModalTitleSignIn');
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'auth-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = t('ui.close');
+    closeBtn.setAttribute('aria-label', t('ui.close'));
+
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'auth-error';
+    errorDiv.style.display = 'none';
+
+    const form = document.createElement('form');
+    form.className = 'auth-form';
+
+    const emailGroup = document.createElement('div');
+    emailGroup.className = 'auth-group';
+    const emailLabel = document.createElement('label');
+    emailLabel.className = 'auth-label';
+    emailLabel.textContent = t('ui.authEmail');
+    const emailInput = document.createElement('input');
+    emailInput.type = 'email';
+    emailInput.className = 'auth-input auth-email';
+    emailInput.placeholder = t('ui.authEmailPlaceholder');
+    emailInput.required = true;
+    emailInput.autocomplete = 'username';
+    emailGroup.appendChild(emailLabel);
+    emailGroup.appendChild(emailInput);
+
+    const passGroup = document.createElement('div');
+    passGroup.className = 'auth-group';
+    const passLabel = document.createElement('label');
+    passLabel.className = 'auth-label';
+    passLabel.textContent = t('ui.authPassword');
+    const passInput = document.createElement('input');
+    passInput.type = 'password';
+    passInput.className = 'auth-input auth-password';
+    passInput.placeholder = t('ui.authPasswordPlaceholder');
+    passInput.required = true;
+    passInput.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+    passGroup.appendChild(passLabel);
+    passGroup.appendChild(passInput);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'submit';
+    submitBtn.className = 'auth-submit';
+    submitBtn.textContent = mode === 'signup' ? t('ui.authSubmitSignUp') : t('ui.authSubmitSignIn');
+
+    const switchLink = document.createElement('button');
+    switchLink.type = 'button';
+    switchLink.className = 'auth-switch';
+    switchLink.textContent = mode === 'signup' ? t('ui.authSwitchToSignIn') : t('ui.authSwitchToSignUp');
+
+    const updateMode = (newMode: 'signin' | 'signup') => {
+      mode = newMode;
+      title.textContent = mode === 'signup' ? t('ui.authModalTitleSignUp') : t('ui.authModalTitleSignIn');
+      submitBtn.textContent = mode === 'signup' ? t('ui.authSubmitSignUp') : t('ui.authSubmitSignIn');
+      switchLink.textContent = mode === 'signup' ? t('ui.authSwitchToSignIn') : t('ui.authSwitchToSignUp');
+      passInput.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+      errorDiv.style.display = 'none';
+      errorDiv.textContent = '';
+    };
+
+    switchLink.addEventListener('click', () => {
+      updateMode(mode === 'signup' ? 'signin' : 'signup');
+    });
+
+    form.appendChild(emailGroup);
+    form.appendChild(passGroup);
+    form.appendChild(submitBtn);
+
+    modal.appendChild(head);
+    modal.appendChild(errorDiv);
+    modal.appendChild(form);
+    modal.appendChild(switchLink);
+    backdrop.appendChild(modal);
+
+    const finish = () => {
+      this.hideAuthModal();
+    };
+
+    closeBtn.addEventListener('click', finish);
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) finish();
+    });
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') finish();
+    };
+    document.addEventListener('keydown', onKey);
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = emailInput.value.trim();
+      const password = passInput.value;
+
+      if (!email || !password) return;
+      if (password.length < 8) {
+        errorDiv.textContent = t('ui.authPasswordMin');
+        errorDiv.style.display = 'block';
+        return;
+      }
+
+      this.root.dispatchEvent(
+        new CustomEvent('authsubmit', {
+          bubbles: true,
+          detail: { mode, email, password },
+        })
+      );
+    });
+
+    this.root.appendChild(backdrop);
+    this.authModalEl = backdrop;
+    this.authErrorEl = errorDiv;
+    this.authSubmitEl = submitBtn;
+
+    this.authModalCleanup = () => {
+      document.removeEventListener('keydown', onKey);
+      backdrop.remove();
+      this.authModalEl = null;
+      this.authErrorEl = null;
+      this.authSubmitEl = null;
+    };
+
+    setTimeout(() => emailInput.focus(), 50);
+  }
+
+  hideAuthModal(): void {
+    this.authModalCleanup?.();
+    this.authModalCleanup = null;
+    this.authModalEl?.remove();
+    this.authModalEl = null;
+    this.authErrorEl = null;
+    this.authSubmitEl = null;
+  }
+
+  isAuthModalVisible(): boolean {
+    return !!this.authModalEl;
+  }
+
+  setAuthModalError(msg: string | null): void {
+    if (!this.authErrorEl) return;
+    if (msg) {
+      this.authErrorEl.textContent = msg;
+      this.authErrorEl.style.display = 'block';
+    } else {
+      this.authErrorEl.textContent = '';
+      this.authErrorEl.style.display = 'none';
+    }
+  }
+
+  setAuthModalLoading(loading: boolean): void {
+    if (!this.authSubmitEl) return;
+    this.authSubmitEl.disabled = loading;
+    if (loading) {
+      this.authSubmitEl.dataset.origText = this.authSubmitEl.textContent || '';
+      this.authSubmitEl.textContent = t('ui.authLoading');
+    } else if (this.authSubmitEl.dataset.origText) {
+      this.authSubmitEl.textContent = this.authSubmitEl.dataset.origText;
     }
   }
 
