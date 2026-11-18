@@ -23,6 +23,14 @@ export const THEMES: Theme[] = [
     iconPalette: ['#4f9cff', '#ff6b6b', '#51cf66', '#ffd43b', '#cc5de8', '#ff922b'],
   },
   {
+    // Tema Floor — Design System idêntico ao prédio 3D (chão quadriculado escuro, linhas translúcidas neon)
+    name: 'Floor',
+    background: 0x0a0f16,
+    floor: 0x0f172a,
+    wall: 0x162334,
+    iconPalette: ['#38bdf8', '#818cf8', '#34d399', '#fbbf24', '#f472b6', '#fb923c'],
+  },
+  {
     name: 'Night',
     background: 0x1a1a20,
     floor: 0x2a2a33,

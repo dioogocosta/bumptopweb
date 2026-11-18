@@ -36,6 +36,8 @@ export class ThreeRenderer implements IRenderer {
   private pilePanel: THREE.Mesh | null = null;
   private roomGroups = new Map<string, THREE.Group>();
   private roomMats = new Map<string, { floor: THREE.MeshLambertMaterial; wall: THREE.MeshLambertMaterial }>();
+  private bumpTopTexture: THREE.CanvasTexture | null = null;
+  private floorBuildingTexture: THREE.CanvasTexture | null = null;
   /** PR4.3 — raias Kanban por sala (chave room:ox|oz). */
   private roomKanbanLines = new Map<string, THREE.Mesh[]>();
   /** PR4.3 — dashboards ROOT por sala (canvas pixel-voxel na parede). */
@@ -287,6 +289,96 @@ export class ThreeRenderer implements IRenderer {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
+  }
+
+  private createFloorBuildingTexture(): THREE.CanvasTexture {
+    const size = 1024;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // 1. Fundo escuro azul-noite profundo tecnológico (mesmo design do prédio 3D)
+    const grad = ctx.createRadialGradient(size / 2, size / 2, size * 0.1, size / 2, size / 2, size * 0.75);
+    grad.addColorStop(0, '#0f172a');
+    grad.addColorStop(1, '#070b12');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    // 2. Grade quadriculada com linhas transparentes (design system Floor)
+    const step = 64;
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.20)';
+
+    for (let x = 0; x <= size; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= size; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+
+    // 3. Subdivisões mais finas
+    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.08)';
+    for (let x = 0; x <= size; x += 16) {
+      if (x % step === 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= size; y += 16) {
+      if (y % step === 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+
+    // 4. Marcadores cibernéticos (+) nos nós da grade
+    ctx.fillStyle = 'rgba(99, 179, 237, 0.5)';
+    for (let x = step * 2; x < size; x += step * 2) {
+      for (let y = step * 2; y < size; y += step * 2) {
+        ctx.fillRect(x - 3, y - 0.5, 7, 1);
+        ctx.fillRect(x - 0.5, y - 3, 1, 7);
+      }
+    }
+
+    // 5. Círculos concêntricos sutis de radar no centro
+    const cx = size / 2;
+    const cy = size / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.38, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.18, 0, Math.PI * 2);
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = 'rgba(99, 179, 237, 0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  private getFloorTextureForTheme(themeName: string): THREE.CanvasTexture {
+    if (themeName === 'Floor') {
+      if (!this.floorBuildingTexture) this.floorBuildingTexture = this.createFloorBuildingTexture();
+      return this.floorBuildingTexture;
+    }
+    if (!this.bumpTopTexture) this.bumpTopTexture = this.createBumpTopFloorTexture();
+    return this.bumpTopTexture;
   }
 
   addBox(id: string, halfExtents: Vec3, color: string): ObjectHandle {
@@ -548,10 +640,21 @@ export class ThreeRenderer implements IRenderer {
 
   setTheme(theme: Theme): void {
     this.scene.background = new THREE.Color(theme.background);
-    const floorColor = theme.name === 'BumpTop' ? 0xffffff : theme.floor;
-    // PR4.2 — pinta o chão/paredes de TODAS as caixas
+    const isFloor = theme.name === 'Floor';
+    const isBumpTop = theme.name === 'BumpTop';
+
     for (const { floor, wall } of this.roomMats.values()) {
-      floor.color.setHex(floorColor);
+      if (isFloor) {
+        floor.map = this.getFloorTextureForTheme('Floor');
+        floor.color.setHex(0xffffff);
+      } else if (isBumpTop) {
+        floor.map = this.getFloorTextureForTheme('BumpTop');
+        floor.color.setHex(0xffffff);
+      } else {
+        floor.map = null;
+        floor.color.setHex(theme.floor);
+      }
+      floor.needsUpdate = true;
       wall.color.setHex(theme.wall);
     }
   }

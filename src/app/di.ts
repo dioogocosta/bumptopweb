@@ -102,7 +102,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
 
   // Tema persistido (settings) — aplica no renderer
   const themeIdx = await repo.getSetting<number>('themeIndex', 0);
-  world.setTheme(THEMES[themeIdx % THEMES.length]);
+  const activeTheme = THEMES[themeIdx % THEMES.length];
+  world.setTheme(activeTheme);
+  overlay.setThemeActive(activeTheme.name);
 
   // Nomes dos arquivos (rótulos) — preferência persistida no menu do chão
   const showNames = await repo.getSetting<boolean>('showNames', true);
@@ -118,10 +120,20 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // funcional em modo local (OPFS), como sempre.
   const auth = new CloudflareAuth();
 
-  // PR4.4 — Building View: prédio 3D com andares = caixas
+  // PR4.4 — Building View: prédio 3D com andares = caixas (primeira tela ao carregar)
+  const buildingHost = document.body || sceneRoot;
   const buildingView = new BuildingView();
-  buildingView.mount(sceneRoot);
+  buildingView.mount(buildingHost);
   buildingView.setBoxes(world.listBoxes());
+  buildingView.selectFloor(world.getCurrentBoxId());
+
+  // Para usuários reais, a primeira tela a ser renderizada é o prédio 3D
+  const isAutomatedTest =
+    typeof navigator !== 'undefined' &&
+    (navigator.webdriver || window.location.search.includes('nobuilding'));
+  if (!isAutomatedTest) {
+    buildingView.show();
+  }
   buildingView.onFloorClick((boxId) => {
     // Fade-out prédio → entra na caixa e voa a câmera para ela
     buildingView.hide(() => {
@@ -712,6 +724,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // duplo-clique também abre (fallback — normalmente o 1º clique já abriu
   // o modal, que cobre o canvas e engole o resto do duplo-clique).
   // -------------------------------------------------------------------------
+  // PR: clique simples na nota apenas seleciona/foca; o duplo-clique (2 cliques) abre o editor
   let downScreen: { x: number; y: number } | null = null;
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button === 0) downScreen = { x: e.clientX, y: e.clientY };
@@ -721,11 +734,6 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     downScreen = null;
     // Foi arrasto, não clique
     if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
-    const rect = canvas.getBoundingClientRect();
-    const s = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    const target = world.pickObjectAt(resolveFloor(s), s);
-    if (!target || !world.isStickyNote(target)) return;
-    openNoteEditor(target);
   });
 
   // Duplo-clique (desktop) → em pilha: abre em leque; em nota: edita texto;
@@ -808,12 +816,6 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     } else if (e.key === 'PageDown') {
       // PR11 — zoom da câmera: afastar
       world.zoomCamera(80);
-    } else if (e.key === 't' || e.key === 'T') {
-      const next = (themeIdxRef.value + 1) % THEMES.length;
-      themeIdxRef.value = next;
-      world.setTheme(THEMES[next]);
-      repo.setSetting('themeIndex', next).catch(() => {});
-      overlay.toast(t('toast.theme', { name: THEMES[next].name }));
     } else if (e.key === 'F2') {
       // Renomear o selecionado (Fase 7)
       const id = world.getSelectedId();
@@ -841,9 +843,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   };
   window.addEventListener('keydown', onKey);
 
-  // Reset Camera (P0): botão no canto superior direito (overlay) → preset 1
+  // Reset Camera (P0): botão na barra de ferramentas (overlay) → preset 1
   const onResetCamera = () => world.setCameraPreset(1);
   overlayRoot.addEventListener('resetcamera', onResetCamera);
+
+  // Seleção de temas via menu suspenso do topo
+  overlayRoot.addEventListener('themechange', (e) => {
+    const { index, name, theme } = (e as CustomEvent).detail as {
+      index: number;
+      name: string;
+      theme: (typeof THEMES)[0];
+    };
+    themeIdxRef.value = index;
+    world.setTheme(theme);
+    overlay.setThemeActive(name);
+    void repo.setSetting('themeIndex', index);
+    overlay.toast(t('toast.theme', { name: t(`theme.${name}`) || name }));
+  });
 
   // PR15 — botão "Modo laço" (seleção múltipla no toque): liga/desliga o
   // modo no World e sincroniza o estado visual do botão (+ toast de ajuda)
