@@ -172,8 +172,10 @@ export class DomOverlay implements IOverlay {
   private boxesEmpty: HTMLElement | null = null;
   private boxesCleanup: (() => void) | null = null;
   /** PR4.2 — CRUD: dados do painel (p/ refiltrar/re-render) + campo busca. */
-  private boxesData: Array<{ id: string; label: string; current?: boolean }> = [];
+  private boxesData: Array<{ id: string; label: string; current?: boolean; type?: string }> = [];
   private boxesSearch: HTMLInputElement | null = null;
+  /** PR4.3 — seletor de tipo da nova caixa (no cabeçalho). */
+  private boxesType: HTMLSelectElement | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -363,7 +365,7 @@ export class DomOverlay implements IOverlay {
    * root: `boxgoto` {id}, `boxcreate`, `boxrename` {id, name},
    * `boxdelete` {id}, `boxesclose`.
    */
-  showBoxesPanel(boxes: Array<{ id: string; label: string; current?: boolean }>): void {
+  showBoxesPanel(boxes: Array<{ id: string; label: string; current?: boolean; type?: string }>): void {
     if (!this.boxesModal) this.buildBoxesModal();
     this.boxesData = boxes;
     const m = this.boxesModal!;
@@ -401,6 +403,13 @@ export class DomOverlay implements IOverlay {
         this.root.dispatchEvent(new CustomEvent('boxgoto', { detail: b.id, bubbles: true }));
       });
       item.appendChild(nome);
+      // PR4.3 — badge de tipo (Raiz/Kanban) — só para caixas não-comum
+      if (b.type && b.type !== 'comum') {
+        const badge = document.createElement('span');
+        badge.className = 'boxes-type-badge boxes-type-badge-' + b.type;
+        badge.textContent = t('ui.boxType.' + b.type);
+        item.appendChild(badge);
+      }
       // Ações (PR4.2): renomear ✏️ + excluir 🗑 (a caixa padrão não exclui)
       const actions = document.createElement('span');
       actions.className = 'boxes-item-actions';
@@ -533,7 +542,29 @@ export class DomOverlay implements IOverlay {
     title.className = 'boxes-title';
     title.textContent = t('ui.boxesTitle');
     head.appendChild(title);
-    // PR4.2 — botão "+ Nova caixa"
+    // PR4.3 — seletor de tipo da nova caixa (backlog desabilitado: Taiga é PR próprio)
+    this.boxesType = document.createElement('select');
+    this.boxesType.className = 'boxes-type-sel';
+    this.boxesType.setAttribute('aria-label', t('ui.boxesType'));
+    const optComum = document.createElement('option');
+    optComum.value = 'comum';
+    optComum.textContent = t('ui.boxType.comum');
+    const optRoot = document.createElement('option');
+    optRoot.value = 'root';
+    optRoot.textContent = t('ui.boxType.root');
+    const optKanban = document.createElement('option');
+    optKanban.value = 'kanban';
+    optKanban.textContent = t('ui.boxType.kanban');
+    const optBacklog = document.createElement('option');
+    optBacklog.value = 'backlog';
+    optBacklog.textContent = t('ui.boxType.backlog');
+    optBacklog.disabled = true;
+    this.boxesType.appendChild(optComum);
+    this.boxesType.appendChild(optRoot);
+    this.boxesType.appendChild(optKanban);
+    this.boxesType.appendChild(optBacklog);
+    head.appendChild(this.boxesType);
+    // PR4.2 — botão "+ Nova caixa" (envia o tipo escolhido no evento boxcreate)
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'boxes-add';
@@ -541,7 +572,9 @@ export class DomOverlay implements IOverlay {
     add.title = t('ui.boxesAdd');
     add.setAttribute('aria-label', t('ui.boxesAdd'));
     add.addEventListener('click', () => {
-      this.root.dispatchEvent(new CustomEvent('boxcreate', { bubbles: true }));
+      const type = this.boxesType?.value || 'comum';
+      this.root.dispatchEvent(new CustomEvent('boxcreate', { detail: type, bubbles: true }));
+      this.boxesType!.value = 'comum'; // volta ao padrão
     });
     head.appendChild(add);
     const hint = document.createElement('div');

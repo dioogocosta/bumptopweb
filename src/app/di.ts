@@ -899,12 +899,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (!overlay.isBoxesPanelVisible()) return;
     const cur = world.getCurrentBoxId();
     overlay.showBoxesPanel(
-      world.listBoxes().map((b) => ({ id: b.id, label: b.name, current: b.id === cur })),
+      world.listBoxes().map((b) => ({ id: b.id, label: b.name, current: b.id === cur, type: b.type })),
     );
   };
-  overlayRoot.addEventListener('boxcreate', () => {
+  overlayRoot.addEventListener('boxcreate', (e) => {
+    const type = ((e as CustomEvent).detail as string) || 'comum';
     const n = world.listBoxes().length;
-    const box = world.addBoxEntity(t('ui.boxNewName', { n }));
+    const box = world.addBoxEntity(t('ui.boxNewName', { n }), undefined, type as 'comum' | 'root' | 'kanban');
     overlay.toast(t('toast.boxCreated', { name: box.name }));
     reopenBoxesPanel();
   });

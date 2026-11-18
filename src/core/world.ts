@@ -10,6 +10,7 @@
  */
 import type {
   BoxEntityData,
+  BoxType,
   BumpObjectData,
   CameraState,
   PhysicsConfig,
@@ -105,6 +106,8 @@ export class World {
   private boxes = new Map<string, BoxEntityData>();
   private currentBoxId = 'box-default';
   private roomsCreated = new Set<string>();
+  /** PR4.3 — dirty flag do dashboard ROOT: assinatura dos stats por caixa. */
+  private dashSig = new Map<string, string>();
 
   private pickedId: string | null = null;
   private dragHeight = 0;
@@ -233,6 +236,8 @@ export class World {
     this.roomsCreated.add(box.id);
     this.deps.physics.createRoom(this.roomOf(box));
     this.deps.renderer.addRoom(this.roomOf(box));
+    // PR4.3 — visual especial do tipo (raias Kanban / dashboard Root)
+    this.deps.renderer.setRoomType(this.roomOf(box), box.type);
   }
 
   /** Pan da câmera limitado à caixa atual. */
@@ -302,6 +307,23 @@ export class World {
     const next = name.trim().slice(0, 60);
     if (!box || !next) return false;
     box.name = next;
+    this.dirty = true;
+    return true;
+  }
+
+  /**
+   * PR4.3 — muda o TIPO da caixa (painel: Comum/Root/Kanban). A caixa padrão
+   * fica sempre 'comum'. false se o id não existe, é o padrão ou o tipo é
+   * inválido. O render ajusta raias/dashboard pela porta `setRoomType`.
+   */
+  setBoxType(id: string, type: BoxType): boolean {
+    const box = this.boxes.get(id);
+    if (!box || id === 'box-default') return false;
+    if (type !== 'comum' && type !== 'root' && type !== 'kanban' && type !== 'backlog') return false;
+    if (box.type === type) return true;
+    box.type = type;
+    this.deps.renderer.setRoomType(this.roomOf(box), type);
+    this.dashSig.delete(id); // ROOT de novo → reempurra os stats
     this.dirty = true;
     return true;
   }
@@ -414,6 +436,7 @@ export class World {
       },
     };
     this.entries.set(id, { data, body, render });
+    this.syncKanbanLane(this.entries.get(id)!); // PR4.3 — raia Kanban
     this.dirty = true;
     return id;
   }
@@ -2283,11 +2306,29 @@ export class World {
   }
 
   /** Move um item para `pos` (pose + física + render), zerando a velocidade. */
+  /**
+   * PR4.3 — raia Kanban (0..2) pela posição x dentro da caixa: 3 colunas
+   * esquerda→direita (A Fazer | Fazendo | Feito). Fora de uma caixa kanban,
+   * o item não tem raia (`meta.kanbanLane` removido).
+   */
+  private syncKanbanLane(e: Entry): void {
+    const box = this.boxOfEntry(e);
+    if (box.type !== 'kanban') {
+      delete e.data.meta.kanbanLane;
+      return;
+    }
+    const left = box.pos.x - box.halfSize;
+    const w = (box.halfSize * 2) / 3;
+    const lane = Math.min(2, Math.max(0, Math.floor((e.data.pose.position.x - left) / w)));
+    e.data.meta.kanbanLane = lane;
+  }
+
   private placeAt(e: Entry, pos: Vec3): void {
     e.data.pose = { position: pos, rotation: e.data.pose.rotation };
     this.deps.physics.setPosition(e.body, pos);
     this.deps.physics.setVelocity(e.body, vec3());
     this.deps.renderer.setPose(e.render, e.data.pose);
+    this.syncKanbanLane(e); // PR4.3 — raia acompanha a posição na caixa kanban
   }
 
   /** Gira os itens soltos da seleção em torno do eixo vertical. */
@@ -2941,6 +2982,32 @@ export class World {
 
     // Labels de arquivo projetados (M1) — só quando a cena está suja
     if (this.dirty) this.syncLabels();
+    // PR4.3 — dashboard ROOT: empurra stats para o renderer só quando mudam (dirty flag)
+    this.syncDashboard();
+  }
+
+  /** PR4.3 — sincroniza o dashboard pixel-voxel das caixas ROOT com dirty flag. */
+  private syncDashboard(): void {
+    for (const box of this.boxes.values()) {
+      if (box.type !== 'root') continue;
+      let itens = 0, pastas = 0, notas = 0, pilhas = 0;
+      for (const e of this.entries.values()) {
+        if ((e.data.meta?.boxId ?? this.currentBoxId) !== box.id) continue;
+        itens++;
+        if (e.data.kind === ObjectKind.Pile) { pilhas++; continue; }
+        const f = e.data.typeFlags;
+        if ((f & TypeFlags.Folder) !== 0) pastas++;
+        if ((f & TypeFlags.StickyNote) !== 0) notas++;
+      }
+      const sig = `${box.id}|${itens}|${pastas}|${notas}|${pilhas}`;
+      if (this.dashSig.get(box.id) === sig) continue;
+      this.dashSig.set(box.id, sig);
+      this.deps.renderer.setRoomDashboard(this.roomOf(box), {
+        name: box.name,
+        itens, pastas, notas,
+        pilhas: pilhas,
+      });
+    }
   }
 
   /**
