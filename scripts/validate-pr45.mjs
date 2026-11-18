@@ -36,7 +36,9 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') erros.push(m.text()); });
   page.on('pageerror', (e) => erros.push(String(e)));
 
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  // PR44 tornou o prédio a primeira tela — `?nobuilding=1` abre direto na
+  // caixa (o próprio PR44 usa esse param) p/ testar o fluxo do backlog.
+  await page.goto(`${BASE}/?nobuilding=1`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__bumptop?.world?.listBoxes, null, { timeout: 30000 });
   await page.waitForFunction(() => {
     const w = window.__bumptop?.world;
