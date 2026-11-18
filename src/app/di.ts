@@ -123,12 +123,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   buildingView.mount(sceneRoot);
   buildingView.setBoxes(world.listBoxes());
   buildingView.onFloorClick((boxId) => {
-    // Fade-out prédio → entra na caixa
+    // Fade-out prédio → entra na caixa e voa a câmera para ela
     buildingView.hide(() => {
       overlay.hideBuildingBack();
       const box = world.getBox(boxId);
       if (box) {
         world.setCurrentBox(boxId);
+        world.flyToBox(boxId);
         overlay.toast(t('toast.buildingEntered', { name: box.name }));
         overlay.showBuildingBack();
       }
@@ -914,6 +915,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // PR4.2 — CRUD de caixas: criar (nome automático "Caixa n"), renomear,
   // excluir (itens voltam p/ a Caixa Comum) — o painel re-renderiza em cima
   const reopenBoxesPanel = () => {
+    buildingView.setBoxes(world.listBoxes());
     if (!overlay.isBoxesPanelVisible()) return;
     const cur = world.getCurrentBoxId();
     overlay.showBoxesPanel(
@@ -945,12 +947,14 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       buildingView.hide();
     } else {
       buildingView.setBoxes(world.listBoxes());
+      buildingView.selectFloor(world.getCurrentBoxId());
       buildingView.show();
     }
   });
   overlayRoot.addEventListener('buildingback', () => {
     overlay.hideBuildingBack();
     buildingView.setBoxes(world.listBoxes());
+    buildingView.selectFloor(world.getCurrentBoxId());
     buildingView.show(() => {
       overlay.toast(t('toast.buildingBack'));
     });
