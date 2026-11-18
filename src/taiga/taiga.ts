@@ -1,24 +1,66 @@
 // ---------------------------------------------------------------------------
-// PR4.5 — Backlog (Taiga): leitura PÚBLICA da API do Taiga da FNDE.
+// PR4.5 — Backlog (Taiga): leitura da API do Taiga da FNDE.
 // A API real fica em `taiga-api.fnde.gov.br` (o `taiga.fnde.gov.br` serve
-// só o SPA) e responde com `Access-Control-Allow-Origin: *` — dá para
-// chamar direto do browser, sem Pages Functions proxy.
-// Escopo v1: só leitura de projetos/user stories públicos (sem login).
+// só o SPA) e responde com `Access-Control-Allow-Origin: *`.
 // PR4.6 — adiciona fetch de sprints (milestones) e stories por sprint.
+// PR4.7 — suporte a autenticação por Bearer token (JWT) para acessar
+// projetos privados, user stories e sprints da sessão logada.
 // ---------------------------------------------------------------------------
 
 import type { TaigaStory } from '../core/model/types';
 
 const API = 'https://taiga-api.fnde.gov.br/api/v1';
+const TOKEN_KEY = 'bumptop_taiga_token';
 
-/** Um projeto público do Taiga (só o necessário p/ o seletor). */
+/** Obtém o token de autenticação salvo no navegador. */
+export function getTaigaToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Salva ou remove o token de autenticação no navegador. */
+export function setTaigaToken(token: string | null): void {
+  try {
+    if (token && token.trim()) {
+      localStorage.setItem(TOKEN_KEY, token.trim());
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  } catch {}
+}
+
+/** Inicializa o token a partir do parâmetro ?taiga_token= na URL se presente. */
+export function initTaigaTokenFromUrl(): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get('taiga_token');
+    if (token) {
+      setTaigaToken(token);
+      url.searchParams.delete('taiga_token');
+      window.history.replaceState({}, document.title, url.toString());
+    }
+  } catch {}
+}
+
+/** Um usuário do Taiga autenticado. */
+export interface TaigaUser {
+  id: number;
+  username: string;
+  fullName: string;
+}
+
+/** Um projeto do Taiga (público ou privado). */
 export interface TaigaProject {
   id: number;
   slug: string;
   name: string;
 }
 
-/** PR4.6 — uma sprint (milestone) do Taiga. */
+/** Uma sprint (milestone) do Taiga. */
 export interface TaigaSprint {
   id: number;
   name: string;
@@ -28,17 +70,28 @@ export interface TaigaSprint {
   estimated_finish: string | null;
 }
 
-/** Erro amigável p/ a UI (mensagem já em PT). */
+/** Erro amigável p/ a UI (mensagem já em chave i18n). */
 export class TaigaError extends Error {}
 
 async function getJson<T>(path: string): Promise<T> {
   let r: Response;
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const token = getTaigaToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   try {
-    r = await fetch(`${API}${path}`, { headers: { Accept: 'application/json' } });
+    r = await fetch(`${API}${path}`, { headers });
   } catch {
     throw new TaigaError('ui.taiga.netError');
   }
+
+  if (r.status === 401 || r.status === 403) {
+    throw new TaigaError('ui.taiga.invalidToken');
+  }
   if (!r.ok) throw new TaigaError('ui.taiga.httpError');
+
   try {
     return (await r.json()) as T;
   } catch {
@@ -46,10 +99,27 @@ async function getJson<T>(path: string): Promise<T> {
   }
 }
 
-/** Lista os projetos públicos (máx. 50) — p/ o seletor quando não há slug. */
+/** Obtém os dados do usuário autenticado no Taiga. Retorna null se não logado/inválido. */
+export async function fetchTaigaMe(): Promise<TaigaUser | null> {
+  const token = getTaigaToken();
+  if (!token) return null;
+  try {
+    const raw = await getJson<{ id: number; username: string; full_name?: string }>('/users/me');
+    if (!raw || typeof raw.id !== 'number') return null;
+    return {
+      id: raw.id,
+      username: raw.username,
+      fullName: raw.full_name || raw.username,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Lista os projetos disponíveis (públicos e privados da conta logada). */
 export async function fetchTaigaProjects(): Promise<TaigaProject[]> {
   const raw = await getJson<Array<{ id: number; slug: string; name: string }>>(
-    '/projects?limit=50',
+    '/projects?limit=100',
   );
   if (!Array.isArray(raw)) return [];
   return raw
@@ -58,13 +128,21 @@ export async function fetchTaigaProjects(): Promise<TaigaProject[]> {
 }
 
 /**
- * PR4.6 — resolve o ID de um projeto pelo slug.
- * (O filtro ?slug= desta instância é ignorado — lista tudo e casa local.)
+ * Resolve o ID de um projeto pelo slug.
+ * Tenta primeiro busca direta por slug (suporta projetos privados), depois fallback de lista.
  */
 export async function resolveProjectId(slug: string): Promise<number> {
   const limpo = slug.trim().toLowerCase();
   if (!limpo) throw new TaigaError('ui.taiga.noSlug');
-  const projetos = await getJson<Array<{ id: number; slug: string }>>('/projects?limit=50');
+
+  try {
+    const p = await getJson<{ id: number; slug: string }>(`/projects/by_slug?slug=${encodeURIComponent(limpo)}`);
+    if (p && typeof p.id === 'number') return p.id;
+  } catch {
+    /* fallback para listar projetos */
+  }
+
+  const projetos = await getJson<Array<{ id: number; slug: string }>>('/projects?limit=100');
   const proj = Array.isArray(projetos) ? projetos.find((p) => p && p.slug === limpo) : null;
   if (!proj) throw new TaigaError('ui.taiga.notFound');
   return proj.id;
@@ -93,7 +171,7 @@ export async function fetchTaigaSprints(projectId: number): Promise<TaigaSprint[
   }));
 }
 
-/** PR4.6 — stories de uma sprint específica (milestone). */
+/** Stories de uma sprint específica (milestone). */
 export async function fetchSprintStories(milestoneId: number): Promise<TaigaStory[]> {
   const us = await getJson<
     Array<{

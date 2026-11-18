@@ -15,7 +15,7 @@ import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { CloudflareAuth } from '@auth/cloudflareAuth';
-import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId } from '@taiga/taiga';
+import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId, initTaigaTokenFromUrl } from '@taiga/taiga';
 import { makeNoteTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
@@ -56,6 +56,7 @@ function makeFloorResolver(renderer: ThreeRenderer): (s: { x: number; y: number 
 }
 
 export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement): Promise<AppContext> {
+  initTaigaTokenFromUrl();
   const renderer = new ThreeRenderer();
   await renderer.init(sceneRoot, DEFAULT_ROOM);
 
