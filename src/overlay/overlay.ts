@@ -1763,12 +1763,32 @@ export class DomOverlay implements IOverlay {
 
     const m = document.createElement('div');
     m.className = 'story-modal';
-    m.addEventListener('click', (e) => {
-      if (e.target === m) m.remove();
-    });
+    m.style.pointerEvents = 'auto';
 
     const card = document.createElement('div');
     card.className = 'story-card';
+    card.style.pointerEvents = 'auto';
+
+    // Evita propagação de cliques/drag para a cena 3D abaixo
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    card.addEventListener('click', (e) => e.stopPropagation());
+    m.addEventListener('pointerdown', (e) => {
+      if (e.target === m) e.stopPropagation();
+    });
+
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey);
+      m.remove();
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cleanup();
+    };
+    window.addEventListener('keydown', onKey);
+
+    m.addEventListener('click', (e) => {
+      if (e.target === m) cleanup();
+    });
 
     // Header
     const header = document.createElement('div');
@@ -1781,7 +1801,10 @@ export class DomOverlay implements IOverlay {
     closeBtn.className = 'boxes-close';
     closeBtn.textContent = '✕';
     closeBtn.title = t('ui.close');
-    closeBtn.addEventListener('click', () => m.remove());
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cleanup();
+    });
     header.appendChild(title);
     header.appendChild(closeBtn);
     card.appendChild(header);
@@ -1889,7 +1912,10 @@ export class DomOverlay implements IOverlay {
     closeBtn2.type = 'button';
     closeBtn2.className = 'boxes-taiga-btn';
     closeBtn2.textContent = t('ui.close');
-    closeBtn2.addEventListener('click', () => m.remove());
+    closeBtn2.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cleanup();
+    });
     footer.appendChild(closeBtn2);
 
     if (story.projectSlug && story.ref) {
