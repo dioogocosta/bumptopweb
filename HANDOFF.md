@@ -6,7 +6,7 @@ Documento de continuidade para a próxima IA ou desenvolvedor. Leia inteiro ante
 
 - **O que é:** uma versão web do BumpTop, o desktop 3D com física (Google, 2012, Apache 2.0). Os arquivos viram objetos numa sala 3D e podem ser arrastados, arremessados, empilhados, pregados nas paredes e selecionados com laço.
 - **Repositório:** https://github.com/dioogocosta/bumptopweb (branch `main`)
-- **Site publicado:** https://bumptopweb.vercel.app/. A Vercel publica a `main` automaticamente a cada push.
+- **Site publicado:** https://bumptopweb.pages.dev/ — **Cloudflare Pages** publica a `main` automaticamente a cada push. (Vercel: conta bloqueada; Netlify de produção pausado — ver §8.)
 - **Fonte do original, para consulta:** https://github.com/bumptop/BumpTop, principalmente `trunk/win/Source` (`BT_Util.cpp`, `BT_Pile.cpp`, `BumpTop.cpp`).
 - **Vídeo de referência usado pelo dono:** "Keepin' It Real: Pushing the Desktop Metaphor with Physics, Piles and the Pen" (DGP Toronto). Ele mostra: Lasso'n'Cross, LassoMenu, Pile Widgets (Fisheye, Leafer, Compression Browse, Fan-Out, Grid, Messy/Tidy), Pressure Lock, Drag'n'Cross, Dwell and Scrub, Hierarchical Piles, Exploding Piles, Enforcing Axis-Alignment e papéis "crumple/crease".
 - **Idioma:** o dono fala português do Brasil. A interface é pt-BR por padrão, com en completo.
@@ -19,8 +19,8 @@ TypeScript, Vite 8, three.js (render), Rapier 3D WASM (física), SQLite WASM em 
 npm install
 npm run dev          # http://localhost:5173
 npm run typecheck
-npm test             # unit (Vitest)  — 114 testes
-npm run test:e2e     # E2E (Playwright) — 29 passam, 3 são pulados de propósito
+npm test             # unit (Vitest)  — 219 testes
+npm run test:e2e     # E2E (Playwright) — 63 passam; 6 pulados; 1 falha pré-existente (PR10, ver §5.5)
 npm run lint:arch    # garante que src/core/** continua puro
 npm run build
 node scripts/validate-sheets.mjs   # validação das folhas finas (BASE_URL=http://localhost:5174 se a porta padrão estiver ocupada)
@@ -48,6 +48,8 @@ app/di.ts        composição: menus de contexto, LassoMenu, atalhos, halo, loop
 Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O input chega como ações semânticas (`pointerDown`, `pointerMove`, `context`...). Os mocks das portas ficam em `tests/core/world.test.ts` e `tests/core/selection.test.ts`. Ao adicionar um método numa porta, atualize **os dois** mocks.
 
 ## 4. Estado atual: o que foi feito nesta sessão (todo já na `main`)
+
+> **Nota (18/11/2026):** esta tabela é o histórico da primeira sessão (PR1/PR2). O estado **recente** do projeto — Control Manager (fases 4a, 4.2, 4.3 e 4.4), login/D1 (PR27) e as pendências abertas — está em **§8**. Contadores atualizados em §2 (219 unit / 63 E2E passando).
 
 | Commit / PR | O que mudou |
 |---|---|
@@ -88,12 +90,12 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 
 ## 7. Fluxo de trabalho combinado com o dono
 
-- Os ajustes vão em branch e PR. O dono pediu explicitamente para publicar na `main` quando estiver pronto, e a Vercel publica sozinha.
+- Os ajustes vão em branch e PR. O dono pediu explicitamente para publicar na `main` quando estiver pronto, e o **Cloudflare Pages** publica sozinha (ver §8).
 - Commits em Conventional Commits, em português.
 - Antes de publicar: `npm run typecheck && npm test && npm run lint:arch && npm run build`, mais o E2E quando mexer em UI.
 - O dono tem créditos limitados: priorize mudanças pequenas, verificadas e publicadas.
 
-## 8. PR27 — Login/conta com Cloudflare D1 + cena na nuvem (nov 2026)
+## 8. PR27 — Login/conta com Cloudflare D1 + cena na nuvem · estado do Control Manager (nov 2026)
 
 **Deploy principal: Cloudflare Pages (`bumptopweb.pages.dev`) — Netlify de produção pausado (sem créditos).**
 
@@ -119,11 +121,12 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 - Unitários do adapter: `tests/auth/cloudflareAuth.test.ts` (7 testes).
 
 ### Pendências abertas (pós-PR27)
-1. **Control Manager (item 4 do dono) — EM ANDAMENTO por fases**: ref. horizonx.so (Energy Command Dashboard: torre diagonal de blocos selecionáveis + dashboard lateral de vidro). **CONCEITO (do dono): CAIXA = o espaço (chão + 4 paredes) onde TUDO acontece — pastas/arquivos/notas ficam DENTRO dela; caixa ≠ pasta.** Modelo escolhido: caixas LADO A LADO no mesmo mundo 3D (cada uma com chão+paredes próprios); a sala original migrou para ser a 1ª caixa ("Caixa Comum", `box-default`).
+1. **Control Manager (item 4 do dono) — EM ANDAMENTO por fases** (✅ publicadas: **4a · 4.2 · 4.3 · 4.4**; ⏳ pendente: Backlog/Taiga): ref. horizonx.so (Energy Command Dashboard: torre diagonal de blocos selecionáveis + dashboard lateral de vidro). **CONCEITO (do dono): CAIXA = o espaço (chão + 4 paredes) onde TUDO acontece — pastas/arquivos/notas ficam DENTRO dela; caixa ≠ pasta.** Modelo escolhido: caixas LADO A LADO no mesmo mundo 3D (cada uma com chão+paredes próprios); a sala original migrou para ser a 1ª caixa ("Caixa Comum", `box-default`).
    - **PR4a ✅ refeito**: `BoxEntityData` no core (`id/name/type/pos/halfSize`), física+render com `origin` por caixa, clamp/parede/wall-pin/wall-toss/auto-align box-aware (`meta.boxId` por item), snapshot com `boxes`+`currentBoxId` (migração automática de mundos antigos sem `boxes`), `World.addBoxEntity/flyToBox/setCurrentBox`, pan da câmera limitado à caixa ativa, painel `.boxes-*` lista caixas (ativa marcada com ● verde). Sonda: `scripts/validate-pr4a.mjs` (6/6).
-   - **PR4.2 — CRUD de caixas**: criar (`+ Nova caixa`, nome automático "Caixa n", nasce na diagonal da torre `{x:340k, z:-340k}` e vira a ativa)/renomear inline (Enter/blur commita, Esc restaura, trim+60 chars)/pesquisar por nome (filtro local)/excluir com confirmação dentro do item (itens voltam à Caixa Comum clampados, pregados despregam de pé; `box-default` é intocável; a ativa PODE ser excluída — a Comum assume). Porta nova `removeRoom(room)` em IPhysics+IRenderer (rapier: `roomBodies` por `${ox}|${oz}`; three: `roomGroups`/`roomMats`, setTheme pinta todas). Bug real achado pela sonda: o worker SQLite descartava `boxes`/`currentBoxId` no `saveScene` (caixas sumiam no F5) — migração v2 (`scene.boxes_json`+`scene.current_box_id`) + leitura no `loadScene` (a nuvem já gravava o snapshot inteiro). Sonda: `scripts/validate-pr4b.mjs` (8/8 no wrangler e em produção). Regressões produção: PR4a 6/6 · PR27 13/13 · PR18 6/6 · PR17 4/4. Playwright 63/64 (falha pré-existente PR10).
+   - **PR4.2 ✅ — CRUD de caixas**: criar (`+ Nova caixa`, nome automático "Caixa n", nasce na diagonal da torre `{x:340k, z:-340k}` e vira a ativa)/renomear inline (Enter/blur commita, Esc restaura, trim+60 chars)/pesquisar por nome (filtro local)/excluir com confirmação dentro do item (itens voltam à Caixa Comum clampados, pregados despregam de pé; `box-default` é intocável; a ativa PODE ser excluída — a Comum assume). Porta nova `removeRoom(room)` em IPhysics+IRenderer (rapier: `roomBodies` por `${ox}|${oz}`; three: `roomGroups`/`roomMats`, setTheme pinta todas). Bug real achado pela sonda: o worker SQLite descartava `boxes`/`currentBoxId` no `saveScene` (caixas sumiam no F5) — migração v2 (`scene.boxes_json`+`scene.current_box_id`) + leitura no `loadScene` (a nuvem já gravava o snapshot inteiro). Sonda: `scripts/validate-pr4b.mjs` (8/8 no wrangler e em produção). Regressões produção: PR4a 6/6 · PR27 13/13 · PR18 6/6 · PR17 4/4. Playwright 63/64 (falha pré-existente PR10).
    - **PR4.3 ✅ — Tipos de caixa**: `BoxType` funcional (`'comum'|'root'|'kanban'|'backlog'`). `World.setBoxType` (recusa `box-default`) + porta `setRoomType`/`setRoomDashboard` em IRenderer. **ROOT** = dashboard pixel-voxel na parede norte (canvas 512×256, NearestFilter; `syncDashboard()` no `update()` só empurra stats quando a assinatura muda — dirty flag). **Kanban** = 3 raias verticais no chão (A Fazer/Fazendo/Feito) + `meta.kanbanLane` 0..2 pela posição x, atualizado em `addBox`/`placeAt`. Painel: select `.boxes-type-sel` (Backlog desabilitado), badge `.boxes-type-badge` no item, `boxcreate` com `detail` do tipo. Sonda: `scripts/validate-pr4c.mjs` (8/8 no wrangler e em produção — ATENÇÃO: fecha o modal e espera 10 s antes do reload; recarregar com save em andamento abre o OPFS em conflito e o snapshot não carrega). Regressões produção: PR4b 8/8 · PR4a 6/6 · PR27 13/13 · PR18 6/6 · PR17 4/4. Playwright 63/64 (falha pré-existente PR10).
-   - **PR4.4 (PRÓXIMO, pedido do dono) — Tela de entrada = PRÉDIO com andares**: referência `C:\Projetos\BumpTop3D\arc0050-1.0.1\arc0050` (https://arc0050.openship.mdxpreview.xyz/, imagem `image-1.png`): prédio onde **cada andar = uma caixa existente**; tela inicial mostra o prédio com as caixas empilhadas; acessar um andar com **efeito de transição** → ver os arquivos; ao voltar, ver o prédio; **cada andar só existe se uma caixa for criada** (começa com 1 e vai criando mais).
+   - **PR4.4 ✅ — Tela de entrada = PRÉDIO com andares** (PR #39, +431 linhas, `src/building/BuildingView.ts` com 306): prédio 3D onde **cada andar = uma caixa existente** (rótulo `F{n}` em sprite, cor por `BoxType`, `cam.ty` recentrado no meio do prédio; sem caixas → "chão" placeholder `__empty__`). Render em canvas próprio (scene/camera/WebGLRenderer próprios, container `z-index: 50`) com fade in/out (~370 ms), órbita por arrastar/zoom e raycast no clique do andar. Fluxo: **clique no andar** → fade-out → `setCurrentBox` + toast "Entrando na caixa" → mostra **"↩ Voltar ao Prédio"** (`.building-back-btn`); **botão 🏢** (`.building-btn`, barra de zoom) alterna prédio/caixa a qualquer momento. Referência do dono: arc0050 (`C:\Projetos\BumpTop3D\arc0050-1.0.1\arc0050`, imagem `image-1.png`). **Validado em produção (18/11/2026)**: bundle `index-*.js` contém as strings do PR + sonda funcional **6/6** (botão presente, prédio visível, entra no andar com fade+toast, volta ao prédio, 0 erros de console).
+   - **Pendente do item 4 — Backlog (Taiga)**: select de tipo já oferece "Backlog (em breve)" desabilitado; a implementação (mapear caixas/issues do **Taiga** `taiga.fnde.gov.br` — API `/api/v1` via Pages Functions por CORS) é **PR próprio** — é o "item 6" da lista do dono (planejar antes de codar).
 2. Reset/backup por usuário: a cena vai em UMA linha por usuário (sem histórico de versões) — merge de mudanças offline não existe (nuvem manda).
 3. Rate limit global (KV/DO) e verificação de e-mail: não implementados (v1).
 4. PWA: cache do SW pode servir bundle velho — Ctrl+F5; após bind do D1, o re-deploy é o que ativa o binding das Functions.
