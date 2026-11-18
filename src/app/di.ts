@@ -131,6 +131,64 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   const skipBuilding =
     typeof window !== 'undefined' &&
     window.location.search.includes('nobuilding=1');
+
+  // ── Dashboard: stats, busca global e dots de match ───────────────────────
+  const updateBuildingStats = () => {
+    const rawStats = world.getBoxStats();
+    const boxes = world.listBoxes().map((box) => {
+      const s = rawStats.find((r) => r.boxId === box.id);
+      return {
+        boxId:     box.id,
+        notes:     s?.notes     ?? 0,
+        photos:    s?.photos    ?? 0,
+        documents: s?.documents ?? 0,
+        others:    s?.others    ?? 0,
+        noteItems: s?.noteItems ?? [],
+      };
+    });
+    buildingView.setStats({ boxes });
+  };
+  updateBuildingStats();
+
+  // Busca global no dashboard do prédio
+  buildingView.onSearch((query) => {
+    if (!query.trim()) {
+      buildingView.setSearchMatches([], '');
+      return;
+    }
+    const rawStats = world.getBoxStats();
+    const boxes = world.listBoxes();
+    const matches: import('../building/BuildingView').SearchMatch[] = [];
+    for (let i = 0; i < boxes.length; i++) {
+      const box = boxes[i]!;
+      const s = rawStats.find((r) => r.boxId === box.id);
+      if (!s) continue;
+      const q = query.toLowerCase();
+      for (const note of s.noteItems) {
+        const hay = `${note.label}\n${note.text}`.toLowerCase();
+        if (hay.includes(q)) {
+          matches.push({ itemId: note.id, boxId: box.id, label: note.label, floorNum: i + 1 });
+        }
+      }
+    }
+    buildingView.setSearchMatches(matches, query);
+  });
+
+  // Clique em dot → navega até a nota específica
+  buildingView.onItemDotClick((itemId, boxId) => {
+    buildingView.hide(() => {
+      overlay.hideBuildingBack();
+      const box = world.getBox(boxId);
+      if (box) {
+        world.setCurrentBox(boxId);
+        world.flyToBox(boxId);
+        world.flyToObject(itemId);
+        overlay.showBuildingBack();
+        setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
+      }
+    });
+  });
+
   if (!skipBuilding) {
     buildingView.show();
   }
@@ -940,6 +998,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // excluir (itens voltam p/ a Caixa Comum) — o painel re-renderiza em cima
   const reopenBoxesPanel = () => {
     buildingView.setBoxes(world.listBoxes());
+    updateBuildingStats();
     if (!overlay.isBoxesPanelVisible()) return;
     const cur = world.getCurrentBoxId();
     overlay.showBoxesPanel(
@@ -971,6 +1030,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       buildingView.hide();
     } else {
       buildingView.setBoxes(world.listBoxes());
+      updateBuildingStats();
       buildingView.selectFloor(world.getCurrentBoxId());
       buildingView.show();
     }
@@ -978,6 +1038,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   overlayRoot.addEventListener('buildingback', () => {
     overlay.hideBuildingBack();
     buildingView.setBoxes(world.listBoxes());
+    updateBuildingStats();
     buildingView.selectFloor(world.getCurrentBoxId());
     buildingView.show(() => {
       overlay.toast(t('toast.buildingBack'));
