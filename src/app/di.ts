@@ -144,6 +144,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         world.flyToBox(boxId);
         overlay.toast(t('toast.buildingEntered', { name: box.name }));
         overlay.showBuildingBack();
+        // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
+        setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
       }
     });
   });
@@ -844,7 +846,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   window.addEventListener('keydown', onKey);
 
   // Reset Camera (P0): botão na barra de ferramentas (overlay) → preset 1
-  const onResetCamera = () => world.setCameraPreset(1);
+  const onResetCamera = () => {
+    world.setCameraPreset(1);
+    // Sincroniza a barra de zoom com a nova distância
+    overlay.setZoomSliderValue(world.getCamera().distance);
+  };
   overlayRoot.addEventListener('resetcamera', onResetCamera);
 
   // Seleção de temas via menu suspenso do topo
@@ -927,6 +933,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     const id = (e as CustomEvent).detail as string;
     world.setCurrentBox(id);
     world.flyToBox(id);
+    // Sincroniza barra de zoom com a distância destino do flyToBox (~90)
+    setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
   });
   // PR4.2 — CRUD de caixas: criar (nome automático "Caixa n"), renomear,
   // excluir (itens voltam p/ a Caixa Comum) — o painel re-renderiza em cima
@@ -1174,11 +1182,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     e.stopPropagation();
   });
 
-  // PR11 — botões de zoom na tela (delta na escala do wheel)
-  overlay.onZoom(
-    () => { world.zoomCamera(-60); overlay.toast(t('toast.zoomIn')); },
-    () => { world.zoomCamera(60); overlay.toast(t('toast.zoomOut')); },
-  );
+  // PR11 — barra deslizável de zoom: converte distância ↔ slider
+  overlay.onZoomSlider((distance: number) => {
+    world.setCamera({ ...world.getCamera(), distance });
+  });
+  // Inicializa o slider com a distância padrão do preset 1 (distance: 210)
+  overlay.setZoomSliderValue(210);
   overlay.onPileCloseClick(() => {
     if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));
   });

@@ -230,6 +230,26 @@ export class World {
     };
   }
 
+  /**
+   * Oculta todas as salas/itens exceto a caixa ativa.
+   * Chamado ao mudar de caixa (lazy rendering).
+   */
+  private showOnlyCurrentBox(): void {
+    for (const [id, box] of this.boxes) {
+      const visible = id === this.currentBoxId;
+      // Só alterna salas que já foram criadas
+      if (this.roomsCreated.has(id)) {
+        this.deps.renderer.setRoomVisible(this.roomOf(box), visible);
+      }
+      // Itens pertencentes a cada caixa
+      for (const e of this.entries.values()) {
+        if ((e.data.meta?.boxId ?? 'box-default') === id) {
+          this.deps.renderer.setVisible(e.render, visible);
+        }
+      }
+    }
+  }
+
   /** Cria chão+4 paredes (física + render) de uma caixa, uma única vez. */
   private ensureBoxRoom(box: BoxEntityData): void {
     if (this.roomsCreated.has(box.id)) return;
@@ -268,6 +288,7 @@ export class World {
     if (!box) return false;
     this.currentBoxId = id;
     this.applyPanBounds();
+    this.showOnlyCurrentBox();
     this.dirty = true;
     return true;
   }
@@ -3247,6 +3268,8 @@ export class World {
       }
     }
     this.applyPileLayout();
+    // Lazy rendering: oculta todas as caixas/itens exceto a caixa ativa
+    this.showOnlyCurrentBox();
     this.dirty = true;
   }
 }
