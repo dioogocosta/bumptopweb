@@ -5,6 +5,7 @@
  */
 import { t } from '@core/i18n/i18n';
 import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
+import { fetchTaigaProjects } from '@taiga/taiga';
 import type {
   ContextMenuItem,
   DwellRingData,
@@ -176,6 +177,8 @@ export class DomOverlay implements IOverlay {
   private boxesSearch: HTMLInputElement | null = null;
   /** PR4.3 — seletor de tipo da nova caixa (no cabeçalho). */
   private boxesType: HTMLSelectElement | null = null;
+  /** PR4.5 — campo slug do projeto Taiga (aparece só quando o tipo = backlog). */
+  private boxesProject: HTMLInputElement | null = null;
 
   /** PR4.4 — Building View: botão 🏢 e botão "Voltar ao Prédio". */
   private buildingBtn: HTMLButtonElement | null = null;
@@ -394,7 +397,7 @@ export class DomOverlay implements IOverlay {
    * Painel de vidro listando as CAIXAS (espaços chão+4 paredes onde as
    * pastas/arquivos/notas acontecem). `boxes` = {id, label, current} —
    * o chamador lê do world (o overlay NÃO conhece o core). Eventos no
-   * root: `boxgoto` {id}, `boxcreate`, `boxrename` {id, name},
+   * root: `boxgoto` {id}, `boxcreate` {type, project}, `boxrename` {id, name},
    * `boxdelete` {id}, `boxesclose`.
    */
   showBoxesPanel(boxes: Array<{ id: string; label: string; current?: boolean; type?: string }>): void {
@@ -411,6 +414,24 @@ export class DomOverlay implements IOverlay {
       };
       document.addEventListener('keydown', onKey);
       this.boxesCleanup = () => document.removeEventListener('keydown', onKey);
+    }
+  }
+
+  /**
+   * PR4.5 — preenche o datalist com os projetos PÚBLICOS do Taiga (auxílio
+   * p/ digitar o slug). Falha silenciosa: o campo aceita slug digitado.
+   */
+  private async fillProjectDatalist(dl: HTMLDataListElement): Promise<void> {
+    try {
+      const projetos = await fetchTaigaProjects();
+      for (const p of projetos.slice(0, 50)) {
+        const opt = document.createElement('option');
+        opt.value = p.slug;
+        opt.label = p.name;
+        dl.appendChild(opt);
+      }
+    } catch {
+      /* offline/erro — o slug pode ser digitado à mão */
     }
   }
 
@@ -583,7 +604,7 @@ export class DomOverlay implements IOverlay {
     title.className = 'boxes-title';
     title.textContent = t('ui.boxesTitle');
     head.appendChild(title);
-    // PR4.3 — seletor de tipo da nova caixa (backlog desabilitado: Taiga é PR próprio)
+    // PR4.3/4.5 — seletor de tipo da nova caixa (backlog ligado no PR 4.5)
     this.boxesType = document.createElement('select');
     this.boxesType.className = 'boxes-type-sel';
     this.boxesType.setAttribute('aria-label', t('ui.boxesType'));
@@ -599,12 +620,29 @@ export class DomOverlay implements IOverlay {
     const optBacklog = document.createElement('option');
     optBacklog.value = 'backlog';
     optBacklog.textContent = t('ui.boxType.backlog');
-    optBacklog.disabled = true;
     this.boxesType.appendChild(optComum);
     this.boxesType.appendChild(optRoot);
     this.boxesType.appendChild(optKanban);
     this.boxesType.appendChild(optBacklog);
     head.appendChild(this.boxesType);
+    // PR4.5 — slug do projeto Taiga (só aparece quando o tipo = backlog)
+    this.boxesProject = document.createElement('input');
+    this.boxesProject.type = 'text';
+    this.boxesProject.className = 'boxes-project';
+    this.boxesProject.placeholder = t('ui.boxesProjectPh');
+    this.boxesProject.setAttribute('aria-label', t('ui.boxesProject'));
+    this.boxesProject.title = t('ui.boxesProject');
+    const dl = document.createElement('datalist');
+    dl.id = 'boxes-projects-dl';
+    this.boxesProject.setAttribute('list', dl.id);
+    this.boxesProject.style.display = 'none';
+    this.boxesType.addEventListener('change', () => {
+      const ehBacklog = this.boxesType?.value === 'backlog';
+      this.boxesProject!.style.display = ehBacklog ? '' : 'none';
+      if (ehBacklog && !dl.childElementCount) void this.fillProjectDatalist(dl);
+    });
+    head.appendChild(this.boxesProject);
+    head.appendChild(dl);
     // PR4.2 — botão "+ Nova caixa" (envia o tipo escolhido no evento boxcreate)
     const add = document.createElement('button');
     add.type = 'button';
@@ -614,8 +652,14 @@ export class DomOverlay implements IOverlay {
     add.setAttribute('aria-label', t('ui.boxesAdd'));
     add.addEventListener('click', () => {
       const type = this.boxesType?.value || 'comum';
-      this.root.dispatchEvent(new CustomEvent('boxcreate', { detail: type, bubbles: true }));
+      // PR4.5 — backlog carrega o slug junto (detail vira objeto)
+      const project = type === 'backlog' ? (this.boxesProject?.value ?? '').trim() : '';
+      this.root.dispatchEvent(new CustomEvent('boxcreate', { detail: { type, project }, bubbles: true }));
       this.boxesType!.value = 'comum'; // volta ao padrão
+      if (this.boxesProject) {
+        this.boxesProject.value = '';
+        this.boxesProject.style.display = 'none';
+      }
     });
     head.appendChild(add);
     const hint = document.createElement('div');

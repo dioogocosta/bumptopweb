@@ -28,6 +28,7 @@ export type {
   Pose,
   RoomConfig,
   SceneSnapshot,
+  TaigaStory,
   Vec3,
   Quat,
 } from '../model/types';
@@ -146,6 +147,10 @@ export interface RoomDashboardData {
   pastas: number;
   notas: number;
   pilhas: number;
+  /** PR4.5 — caixa BACKLOG: contagens por status (cor vem do Taiga). */
+  statuses?: Array<{ name: string; color: string; count: number }>;
+  /** PR4.5 — texto extra do dashboard (slug do projeto Taiga). */
+  extra?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import type {
   Pose,
   RoomConfig,
   SceneSnapshot,
+  TaigaStory,
   Vec3,
 } from './model/types';
 import { DEFAULT_PHYSICS, DEFAULT_ROOM, ObjectKind, PileLayout, TypeFlags } from './model/types';
@@ -277,7 +278,7 @@ export class World {
    * Sem `pos`, escolhe o próximo slot na DIAGONAL da torre (ref. HorizonX).
    * Vira a caixa ativa. Nome único garantido pelo chamador.
    */
-  addBoxEntity(name: string, pos?: { x: number; z: number }, type: BoxEntityData['type'] = 'comum'): BoxEntityData {
+  addBoxEntity(name: string, pos?: { x: number; z: number }, type: BoxEntityData['type'] = 'comum', taigaProject?: string): BoxEntityData {
     let n = 1;
     let id = `box_${Date.now().toString(36)}_${n}`;
     while (this.boxes.has(id)) id = `box_${Date.now().toString(36)}_${++n}`;
@@ -294,6 +295,8 @@ export class World {
       wallHeight: room.wallHeight,
       wallThickness: room.wallThickness,
     };
+    // PR4.5 — caixa backlog nasce apontando o projeto do Taiga (slug normalizado)
+    if (type === 'backlog' && taigaProject) box.taigaProject = taigaProject.trim().toLowerCase();
     this.boxes.set(id, box);
     this.ensureBoxRoom(box);
     this.setCurrentBox(id);
@@ -326,6 +329,60 @@ export class World {
     this.dashSig.delete(id); // ROOT de novo → reempurra os stats
     this.dirty = true;
     return true;
+  }
+
+  /**
+   * PR4.5 — sincroniza uma caixa BACKLOG com as user stories do Taiga:
+   * remove os itens antigos vindos do Taiga (refetch não duplica) e cria
+   * um objeto por story (cor do status, rótulo "#ref assunto"), em grade
+   * no chão da caixa. Atualiza `box.taigaStats` p/ o dashboard (dirty flag).
+   * Retorna quantos itens foram criados, ou -1 se a caixa não é backlog.
+   */
+  syncBoxStories(boxId: string, stories: TaigaStory[]): number {
+    const box = this.boxes.get(boxId);
+    if (!box || box.type !== 'backlog') return -1;
+    // Itens nascem clampados na caixa ATIVA — garante que é a alvo
+    if (this.currentBoxId !== boxId) this.setCurrentBox(boxId);
+
+    // 1) limpa os antigos (marcados com meta.taigaStoryId)
+    for (const [id, e] of [...this.entries]) {
+      if (e.data.meta?.boxId === boxId && e.data.meta?.taigaStoryId !== undefined) {
+        this.removeObject(id);
+      }
+    }
+
+    // 2) um objeto por story (grade centrada na caixa; teto p/ não pesar)
+    const MAX = 80;
+    const COLS = 8;
+    const GAP = 16;
+    const visiveis = stories.slice(0, MAX);
+    const linhas = Math.max(1, Math.ceil(visiveis.length / COLS));
+    visiveis.forEach((s, i) => {
+      const cx = box.pos.x + ((i % COLS) - (COLS - 1) / 2) * GAP;
+      const cz = box.pos.z + (Math.floor(i / COLS) - (linhas - 1) / 2) * GAP;
+      const id = this.addBox(
+        { x: cx, y: 0.6, z: cz },
+        vec3(6, 1.2, 6),
+        s.statusColor || '#8b5cf6',
+        `#${s.ref} ${s.subject}`,
+      );
+      const e = this.entries.get(id)!;
+      e.data.meta.taigaStoryId = s.id;
+      e.data.meta.taigaStatus = s.statusName;
+    });
+
+    // 3) contagens por status → dashboard da parede
+    const mapa = new Map<string, { name: string; color: string; count: number }>();
+    for (const s of stories) {
+      const k = s.statusName || 'Backlog';
+      const cur = mapa.get(k) ?? { name: k, color: s.statusColor || '#8b5cf6', count: 0 };
+      cur.count++;
+      mapa.set(k, cur);
+    }
+    box.taigaStats = [...mapa.values()].sort((a, b) => b.count - a.count);
+    this.dashSig.delete(boxId); // reempurra o dashboard com os novos números
+    this.dirty = true;
+    return visiveis.length;
   }
 
   /**
@@ -2986,10 +3043,10 @@ export class World {
     this.syncDashboard();
   }
 
-  /** PR4.3 — sincroniza o dashboard pixel-voxel das caixas ROOT com dirty flag. */
+  /** PR4.3/4.5 — sincroniza o dashboard pixel-voxel das caixas ROOT/BACKLOG (dirty flag). */
   private syncDashboard(): void {
     for (const box of this.boxes.values()) {
-      if (box.type !== 'root') continue;
+      if (box.type !== 'root' && box.type !== 'backlog') continue;
       let itens = 0, pastas = 0, notas = 0, pilhas = 0;
       for (const e of this.entries.values()) {
         if ((e.data.meta?.boxId ?? this.currentBoxId) !== box.id) continue;
@@ -2999,13 +3056,18 @@ export class World {
         if ((f & TypeFlags.Folder) !== 0) pastas++;
         if ((f & TypeFlags.StickyNote) !== 0) notas++;
       }
-      const sig = `${box.id}|${itens}|${pastas}|${notas}|${pilhas}`;
+      const statsSig = box.taigaStats ? JSON.stringify(box.taigaStats) : '';
+      const sig = `${box.id}|${box.type}|${itens}|${pastas}|${notas}|${pilhas}|${statsSig}`;
       if (this.dashSig.get(box.id) === sig) continue;
       this.dashSig.set(box.id, sig);
       this.deps.renderer.setRoomDashboard(this.roomOf(box), {
         name: box.name,
         itens, pastas, notas,
         pilhas: pilhas,
+        // PR4.5 — backlog: contagens por status do Taiga + slug
+        ...(box.type === 'backlog'
+          ? { statuses: box.taigaStats ?? [], extra: box.taigaProject ?? '' }
+          : {}),
       });
     }
   }
@@ -3159,7 +3221,7 @@ export class World {
     if (boxes) {
       for (const b of boxes) {
         if (!b || typeof b.id !== 'string') continue;
-        this.boxes.set(b.id, {
+        const nova: BoxEntityData = {
           id: b.id,
           name: typeof b.name === 'string' && b.name ? b.name : t('box.default'),
           type: b.type ?? 'comum',
@@ -3167,7 +3229,11 @@ export class World {
           halfSize: Number(b.halfSize) || DEFAULT_ROOM.halfSize,
           wallHeight: Number(b.wallHeight) || DEFAULT_ROOM.wallHeight,
           wallThickness: Number(b.wallThickness) || DEFAULT_ROOM.wallThickness,
-        });
+        };
+        // PR4.5 — backlog: preserva o slug e as contagens por status
+        if (typeof b.taigaProject === 'string' && b.taigaProject) nova.taigaProject = b.taigaProject;
+        if (Array.isArray(b.taigaStats) && b.taigaStats.length) nova.taigaStats = b.taigaStats;
+        this.boxes.set(b.id, nova);
       }
     }
     if (this.boxes.size === 0) {

@@ -373,6 +373,10 @@ body {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* PR4.2 — cabeçalho com o botão "+ Nova caixa" */
 .boxes-head {
@@ -409,6 +413,26 @@ body {
 .boxes-type-sel option {
   background: #16283a;
   color: #fff;
+}
+/* PR4.5 — campo slug do projeto Taiga (só visível com tipo = backlog) */
+.boxes-project {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 260px;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  border-radius: 10px;
+  background: rgba(139, 92, 246, 0.18);
+  color: #fff;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  outline: none;
+}
+.boxes-project::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.boxes-project:focus {
+  border-color: rgba(139, 92, 246, 0.9);
+  background: rgba(139, 92, 246, 0.28);
 }
 /* PR4.3 — badge de tipo no item da lista */
 .boxes-type-badge {

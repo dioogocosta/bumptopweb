@@ -26,7 +26,8 @@
       "@fs/*": ["./src/fs/*"],
       "@input/*": ["./src/input/*"],
       "@overlay/*": ["./src/overlay/*"],
-      "@auth/*": ["./src/auth/*"]
+      "@auth/*": ["./src/auth/*"],
+      "@taiga/*": ["./src/taiga/*"]
     }
   },
   "include": ["src", "tests", "src/**/*.ts", "src/**/*.tsx"],

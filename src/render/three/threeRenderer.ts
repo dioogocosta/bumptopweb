@@ -137,7 +137,7 @@ export class ThreeRenderer implements IRenderer {
     if (!group) return;
     this.clearRoomSpecials(key);
     if (type === 'kanban') this.addKanbanLines(group, room);
-    else if (type === 'root') this.addDashboard(group, room);
+    else if (type === 'root' || type === 'backlog') this.addDashboard(group, room); // PR4.5: backlog também tem painel
   }
 
   private clearRoomSpecials(key: string): void {
@@ -195,7 +195,7 @@ export class ThreeRenderer implements IRenderer {
     this.roomDashboards.set(key, { canvas, ctx, texture, mesh });
   }
 
-  /** PR4.3 — atualiza o texto do dashboard ROOT de uma sala. */
+  /** PR4.3/4.5 — atualiza o texto do dashboard ROOT/BACKLOG de uma sala. */
   setRoomDashboard(room: RoomConfig, data: RoomDashboardData): void {
     const ox = room.origin?.x ?? 0;
     const oz = room.origin?.z ?? 0;
@@ -213,6 +213,41 @@ export class ThreeRenderer implements IRenderer {
     ctx.font = 'bold 20px monospace';
     ctx.textAlign = 'center';
     ctx.fillText(data.name, canvas.width / 2, 40);
+
+    // PR4.5 — caixa BACKLOG: contagens por status do Taiga (quadradinho
+    // colorido + nome + nº) em vez das linhas de itens/pastas/notas.
+    if (data.statuses && data.statuses.length) {
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'left';
+      let y = 78;
+      const larguraMax = canvas.width - 90;
+      for (const st of data.statuses.slice(0, 8)) {
+        ctx.fillStyle = st.color || '#8b5cf6';
+        ctx.fillRect(46, y - 13, 16, 16);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(46, y - 13, 16, 16);
+        ctx.fillStyle = '#e0e0e0';
+        const nome = st.name.length > 24 ? `${st.name.slice(0, 23)}…` : st.name;
+        ctx.fillText(`${nome}`, 72, y);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#9fd0ff';
+        ctx.fillText(String(st.count), larguraMax + 46, y);
+        ctx.textAlign = 'left';
+        y += 30;
+      }
+      // rodapé: slug do projeto Taiga
+      if (data.extra) {
+        ctx.fillStyle = '#6a7f92';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        const slug = data.extra.length > 34 ? `${data.extra.slice(0, 33)}…` : data.extra;
+        ctx.fillText(`Taiga: ${slug}`, canvas.width / 2, canvas.height - 18);
+      }
+      dash.texture.needsUpdate = true;
+      return;
+    }
+
     ctx.font = '16px monospace';
     const linhas = [
       `Itens: ${data.itens}`,
