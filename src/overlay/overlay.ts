@@ -780,7 +780,7 @@ export class DomOverlay implements IOverlay {
     title.className = 'boxes-title';
     title.textContent = t('ui.boxesTitle');
     head.appendChild(title);
-    // PR4.3/4.5 — seletor de tipo da nova caixa (backlog ligado no PR 4.5)
+    // PR4.3/4.5/4.6 — seletor de tipo da nova caixa
     this.boxesType = document.createElement('select');
     this.boxesType.className = 'boxes-type-sel';
     this.boxesType.setAttribute('aria-label', t('ui.boxesType'));
@@ -796,12 +796,16 @@ export class DomOverlay implements IOverlay {
     const optBacklog = document.createElement('option');
     optBacklog.value = 'backlog';
     optBacklog.textContent = t('ui.boxType.backlog');
+    const optSprint = document.createElement('option');
+    optSprint.value = 'sprint';
+    optSprint.textContent = t('ui.boxType.sprint');
     this.boxesType.appendChild(optComum);
     this.boxesType.appendChild(optRoot);
     this.boxesType.appendChild(optKanban);
     this.boxesType.appendChild(optBacklog);
+    this.boxesType.appendChild(optSprint);
     head.appendChild(this.boxesType);
-    // PR4.5 — slug do projeto Taiga (só aparece quando o tipo = backlog)
+    // PR4.5/4.6 — slug do projeto Taiga (aparece quando tipo = backlog ou sprint)
     this.boxesProject = document.createElement('input');
     this.boxesProject.type = 'text';
     this.boxesProject.className = 'boxes-project';
@@ -813,9 +817,9 @@ export class DomOverlay implements IOverlay {
     this.boxesProject.setAttribute('list', dl.id);
     this.boxesProject.style.display = 'none';
     this.boxesType.addEventListener('change', () => {
-      const ehBacklog = this.boxesType?.value === 'backlog';
-      this.boxesProject!.style.display = ehBacklog ? '' : 'none';
-      if (ehBacklog && !dl.childElementCount) void this.fillProjectDatalist(dl);
+      const needsSlug = this.boxesType?.value === 'backlog' || this.boxesType?.value === 'sprint';
+      this.boxesProject!.style.display = needsSlug ? '' : 'none';
+      if (needsSlug && !dl.childElementCount) void this.fillProjectDatalist(dl);
     });
     head.appendChild(this.boxesProject);
     head.appendChild(dl);
@@ -828,8 +832,9 @@ export class DomOverlay implements IOverlay {
     add.setAttribute('aria-label', t('ui.boxesAdd'));
     add.addEventListener('click', () => {
       const type = this.boxesType?.value || 'comum';
-      // PR4.5 — backlog carrega o slug junto (detail vira objeto)
-      const project = type === 'backlog' ? (this.boxesProject?.value ?? '').trim() : '';
+      // PR4.5/4.6 — backlog/sprint carregam o slug junto (detail vira objeto)
+      const needsSlug = type === 'backlog' || type === 'sprint';
+      const project = needsSlug ? (this.boxesProject?.value ?? '').trim() : '';
       this.root.dispatchEvent(new CustomEvent('boxcreate', { detail: { type, project }, bubbles: true }));
       this.boxesType!.value = 'comum'; // volta ao padrão
       if (this.boxesProject) {

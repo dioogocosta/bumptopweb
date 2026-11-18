@@ -224,6 +224,7 @@ const ptBR: Dict = {
   'ui.boxType.root': 'Raiz (dashboard)',
   'ui.boxType.kanban': 'Kanban',
   'ui.boxType.backlog': 'Backlog (Taiga)',
+  'ui.boxType.sprint': 'Sprint (Taiga)',
   'ui.boxesType': 'Tipo da nova caixa',
   // PR4.5 — Backlog (Taiga)
   'ui.boxesProject': 'Projeto Taiga (slug)',
@@ -512,6 +513,7 @@ const en: Dict = {
   'ui.boxType.root': 'Root (dashboard)',
   'ui.boxType.kanban': 'Kanban',
   'ui.boxType.backlog': 'Backlog (Taiga)',
+  'ui.boxType.sprint': 'Sprint (Taiga)',
   'ui.boxesType': 'New box type',
   // PR4.5 — Backlog (Taiga)
   'ui.boxesProject': 'Taiga project (slug)',

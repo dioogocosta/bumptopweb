@@ -9,6 +9,7 @@ import type {
   BoxType,
   BumpObjectData,
   CameraState,
+  KanbanLane,
   PhysicsConfig,
   PileLayout,
   Pose,
@@ -23,6 +24,7 @@ export type {
   BoxType,
   BumpObjectData,
   CameraState,
+  KanbanLane,
   PhysicsConfig,
   PileLayout,
   Pose,
@@ -135,6 +137,11 @@ export interface IRenderer {
    * Root cria o painel do dashboard na parede; 'comum' volta ao visual padrão.
    */
   setRoomType(room: RoomConfig, type: BoxType): void;
+  /**
+   * PR4.6 — configura as raias Kanban de uma caixa (kanban ou sprint).
+   * Deve ser chamado DEPOIS de setRoomType com 'kanban' ou 'sprint'.
+   */
+  setRoomLanes(room: RoomConfig, lanes: KanbanLane[]): void;
   /**
    * PR4.3 — dados do dashboard pixel-voxel de uma caixa ROOT (dirty flag do
    * lado do core: só chega aqui quando os números mudam).

@@ -174,8 +174,20 @@ export const DEFAULT_ROOM: RoomConfig = {
   wallThickness: 10,
 };
 
-/** PR4a — tipos de caixa. 'root'/'kanban' no PR 4.3; 'backlog' no PR 4.5. */
-export type BoxType = 'comum' | 'root' | 'kanban' | 'backlog';
+/** PR4a — tipos de caixa. 'root'/'kanban' no PR 4.3; 'backlog' no PR 4.5; 'sprint' no PR 4.6. */
+export type BoxType = 'comum' | 'root' | 'kanban' | 'backlog' | 'sprint';
+
+/**
+ * PR4.6 — configuração de uma raia Kanban (nome, cor, mapeamento de status do Taiga).
+ */
+export interface KanbanLane {
+  /** Label exibido no topo da raia. */
+  label: string;
+  /** Cor hex da raia (bordas + header). */
+  color: string;
+  /** Status do Taiga que são mapeados para esta raia (nomes normalizados em lowercase). */
+  statusNames: string[];
+}
 
 /**
  * PR4a — uma CAIXA do Control Manager: o espaço (chão + 4 paredes) onde
@@ -194,6 +206,12 @@ export interface BoxEntityData {
   taigaProject?: string;
   /** PR4.5 — contagens por status do Taiga (preenchidas no sync, p/ o dashboard). */
   taigaStats?: Array<{ name: string; color: string; count: number }>;
+  /** PR4.6 — id da sprint do Taiga (só em caixas 'sprint'). */
+  taigaSprintId?: number;
+  /** PR4.6 — nome da sprint (preenchido no sync). */
+  taigaSprintName?: string;
+  /** PR4.6 — raias Kanban configuradas para esta caixa (sprint ou kanban). */
+  kanbanLanes?: KanbanLane[];
 }
 
 /** PR4.5 — user story do Taiga (só leitura; chega do adapter `src/taiga/`). */

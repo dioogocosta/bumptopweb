@@ -41,6 +41,7 @@ const FLOOR_COLOR: Record<BoxType, number> = {
   root:    0x22c55e,
   kanban:  0xf97316,
   backlog: 0x8b5cf6,
+  sprint:  0x0ea5e9,
 };
 
 const FLOOR_HEIGHT     = 4.2;
