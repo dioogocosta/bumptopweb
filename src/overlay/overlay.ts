@@ -4,6 +4,7 @@
  * Usa DOM direto p/ M0; pode migrar p/ Preact quando a UI crescer.
  */
 import { t } from '@core/i18n/i18n';
+import { THEMES } from '@core/theme/theme';
 import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
 import { fetchTaigaProjects } from '@taiga/taiga';
 import type {
@@ -184,24 +185,18 @@ export class DomOverlay implements IOverlay {
   private buildingBtn: HTMLButtonElement | null = null;
   private buildingBackBtn: HTMLButtonElement | null = null;
 
+  /** Menu de seleção de temas. */
+  private themeBtn: HTMLButtonElement | null = null;
+  private themeMenu: HTMLElement | null = null;
+  private themeCleanup: (() => void) | null = null;
+  private currentThemeName = 'BumpTop';
+
   constructor(root: HTMLElement) {
     this.root = root;
     root.style.position = 'fixed';
     root.style.inset = '0';
     root.style.pointerEvents = 'none';
     root.style.zIndex = '10';
-
-    // Botão "Reset Camera" (P0) — canto superior direito; dispara `resetcamera`
-    // (mesmo padrão de evento do `ctxaction`; o composition root escuta).
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-cam';
-    reset.textContent = t('ui.resetCamera');
-    reset.setAttribute('aria-label', t('ui.resetCamera'));
-    reset.addEventListener('click', () => {
-      this.root.dispatchEvent(new CustomEvent('resetcamera', { bubbles: true }));
-    });
-    this.root.appendChild(reset);
 
     // PR11 — controles de zoom na tela (topo central)
     // PR16 — ícones em SVG (o emoji 🔍+ renderizava mal nos dispositivos)
@@ -216,20 +211,59 @@ export class DomOverlay implements IOverlay {
       `</svg>`;
     const zoomWrap = document.createElement('div');
     zoomWrap.className = 'zoom-controls';
+
     const btnIn = document.createElement('button');
     btnIn.type = 'button';
     btnIn.title = t('ui.zoomIn');
     btnIn.setAttribute('aria-label', t('ui.zoomIn'));
     btnIn.innerHTML = zoomSvg(true);
     btnIn.addEventListener('click', () => this.zoomCbIn?.());
+    zoomWrap.appendChild(btnIn);
+
     const btnOut = document.createElement('button');
     btnOut.type = 'button';
     btnOut.title = t('ui.zoomOut');
     btnOut.setAttribute('aria-label', t('ui.zoomOut'));
     btnOut.innerHTML = zoomSvg(false);
     btnOut.addEventListener('click', () => this.zoomCbOut?.());
-    zoomWrap.appendChild(btnIn);
     zoomWrap.appendChild(btnOut);
+
+    // Botão "Redefinir Câmera" como ícone
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'reset-cam-btn';
+    resetBtn.title = t('ui.resetCamera');
+    resetBtn.setAttribute('aria-label', t('ui.resetCamera'));
+    resetBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<path d="M3.5 12a8.5 8.5 0 1 0 8.5-8.5c-3.1 0-5.8 1.6-7.3 4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>` +
+      `<path d="M3.5 3.5v4.5h4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `</svg>`;
+    resetBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('resetcamera', { bubbles: true }));
+    });
+    zoomWrap.appendChild(resetBtn);
+
+    // Botão "Escolher Tema" como ícone
+    this.themeBtn = document.createElement('button');
+    this.themeBtn.type = 'button';
+    this.themeBtn.className = 'theme-btn';
+    this.themeBtn.title = t('ui.theme');
+    this.themeBtn.setAttribute('aria-label', t('ui.theme'));
+    this.themeBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<path d="M12 2.5C6.75 2.5 2.5 6.75 2.5 12s4.25 9.5 9.5 9.5c.8 0 1.45-.65 1.45-1.45 0-.37-.14-.7-.37-.96-.23-.25-.37-.58-.37-.94 0-.8.65-1.45 1.45-1.45H16c3.15 0 5.7-2.55 5.7-5.7 0-4.73-4.27-8.45-9.7-8.45z" stroke="currentColor" stroke-width="2"/>` +
+      `<circle cx="7.5" cy="11.5" r="1.3" fill="currentColor"/>` +
+      `<circle cx="10.5" cy="7.5" r="1.3" fill="currentColor"/>` +
+      `<circle cx="14.5" cy="7.5" r="1.3" fill="currentColor"/>` +
+      `<circle cx="17.5" cy="11.5" r="1.3" fill="currentColor"/>` +
+      `</svg>`;
+    this.themeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleThemeMenu();
+    });
+    zoomWrap.appendChild(this.themeBtn);
+
     // PR15 — botão "Modo laço": no TOQUE, arrastar o dedo no chão vazio
     // desenha o laço (seleção múltipla). Liga/desliga por aqui ou com um
     // toque parado no chão (o World avisa via onLassoModeChanged).
@@ -243,6 +277,7 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('lassomode', { bubbles: true }));
     });
     zoomWrap.appendChild(this.lassoBtn);
+
     // PR18 — botão de BUSCA nas notas: abre o campo de busca; os matches
     // ganham destaque na cena e a câmera "voa" de uma nota para a outra.
     this.searchBtn = document.createElement('button');
@@ -259,6 +294,7 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('searchtoggle', { bubbles: true }));
     });
     zoomWrap.appendChild(this.searchBtn);
+
     // PR4a (Control Manager) — ENGRENAGEM: abre o painel de vidro com a
     // lista de CAIXAS (pastas) da mesa; clicar numa caixa voa até ela.
     // (o CRUD completo entra no PR 4.2 — este PR é a porta de entrada)
@@ -276,6 +312,7 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('settingstoggle', { bubbles: true }));
     });
     zoomWrap.appendChild(this.settingsBtn);
+
     // PR27 — botão de CONTA (login com Cloudflare D1): abre o modal de
     // entrar/criar conta; logado, mostra o e-mail + "Sair".
     this.authBtn = document.createElement('button');
@@ -309,18 +346,24 @@ export class DomOverlay implements IOverlay {
     });
     zoomWrap.appendChild(this.buildingBtn);
 
-    this.root.appendChild(zoomWrap);
-
-    // PR4.4 — botão "↩ Voltar ao Prédio" (visível só dentro de uma caixa, quando o prédio existiu)
+    // PR4.4 — botão "Voltar ao Prédio" como ícone
     this.buildingBackBtn = document.createElement('button');
     this.buildingBackBtn.type = 'button';
     this.buildingBackBtn.className = 'building-back-btn';
-    this.buildingBackBtn.textContent = t('ui.buildingBack');
+    this.buildingBackBtn.title = t('ui.buildingBack');
+    this.buildingBackBtn.setAttribute('aria-label', t('ui.buildingBack'));
     this.buildingBackBtn.style.display = 'none';
+    this.buildingBackBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<path d="M9 14l-4-4 4-4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<path d="M5 10h10a4 4 0 0 1 4 4v3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>` +
+      `</svg>`;
     this.buildingBackBtn.addEventListener('click', () => {
       this.root.dispatchEvent(new CustomEvent('buildingback', { bubbles: true }));
     });
-    this.root.appendChild(this.buildingBackBtn);
+    zoomWrap.appendChild(this.buildingBackBtn);
+
+    this.root.appendChild(zoomWrap);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
     this.searchBar = document.createElement('div');
@@ -576,6 +619,117 @@ export class DomOverlay implements IOverlay {
 
   hideBuildingBack(): void {
     if (this.buildingBackBtn) this.buildingBackBtn.style.display = 'none';
+  }
+
+  /** Define qual tema está visualmente marcado como ativo no menu. */
+  setThemeActive(name: string): void {
+    this.currentThemeName = name;
+    if (this.themeMenu && this.themeMenu.style.display !== 'none') {
+      this.renderThemeMenu();
+    }
+  }
+
+  toggleThemeMenu(): void {
+    if (this.themeMenu && this.themeMenu.style.display !== 'none') {
+      this.hideThemeMenu();
+    } else {
+      this.showThemeMenu();
+    }
+  }
+
+  showThemeMenu(): void {
+    if (!this.themeMenu) this.buildThemeMenu();
+    this.renderThemeMenu();
+    this.themeMenu!.style.display = 'flex';
+    this.themeBtn?.classList.add('sel');
+
+    if (!this.themeCleanup) {
+      const onDocClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (
+          this.themeMenu &&
+          target &&
+          !this.themeMenu.contains(target) &&
+          target !== this.themeBtn &&
+          !this.themeBtn?.contains(target)
+        ) {
+          this.hideThemeMenu();
+        }
+      };
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') this.hideThemeMenu();
+      };
+      setTimeout(() => {
+        document.addEventListener('click', onDocClick);
+        document.addEventListener('keydown', onKey);
+      }, 0);
+      this.themeCleanup = () => {
+        document.removeEventListener('click', onDocClick);
+        document.removeEventListener('keydown', onKey);
+      };
+    }
+  }
+
+  hideThemeMenu(): void {
+    if (this.themeMenu) this.themeMenu.style.display = 'none';
+    this.themeBtn?.classList.remove('sel');
+    this.themeCleanup?.();
+    this.themeCleanup = null;
+  }
+
+  private buildThemeMenu(): void {
+    const menu = document.createElement('div');
+    menu.className = 'theme-menu';
+    this.themeMenu = menu;
+    this.root.appendChild(menu);
+  }
+
+  private renderThemeMenu(): void {
+    if (!this.themeMenu) return;
+    this.themeMenu.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'theme-menu-head';
+    head.textContent = t('ui.themeTitle');
+    this.themeMenu.appendChild(head);
+
+    THEMES.forEach((th, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = th.name === this.currentThemeName ? 'theme-menu-item active' : 'theme-menu-item';
+
+      const dot = document.createElement('span');
+      dot.className = 'theme-menu-dot';
+      const c = '#' + th.floor.toString(16).padStart(6, '0');
+      dot.style.background = c;
+
+      const label = document.createElement('span');
+      label.className = 'theme-menu-name';
+      label.textContent = t(`theme.${th.name}`) || th.name;
+
+      btn.appendChild(dot);
+      btn.appendChild(label);
+
+      if (th.name === this.currentThemeName) {
+        const check = document.createElement('span');
+        check.className = 'theme-menu-check';
+        check.textContent = '✓';
+        btn.appendChild(check);
+      }
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.currentThemeName = th.name;
+        this.hideThemeMenu();
+        this.root.dispatchEvent(
+          new CustomEvent('themechange', {
+            detail: { index: idx, name: th.name, theme: th },
+            bubbles: true,
+          }),
+        );
+      });
+
+      this.themeMenu!.appendChild(btn);
+    });
   }
 
   private buildBoxesModal(): void {

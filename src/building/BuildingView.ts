@@ -35,8 +35,8 @@ export class BuildingView {
   private group =     new THREE.Group();
   private raf = 0;
 
-  // Câmera órbita
-  private cam = { theta: 0.65, phi: 1.15, dist: 90, ty: 15 };
+  // Câmera órbita — theta ~ 2.35 rad (135°) posiciona a câmera à frente dos textos de cada andar
+  private cam = { theta: 2.35, phi: 1.15, dist: 90, ty: 15 };
   private drag = { down: false, lx: 0, ly: 0 };
 
   private rawBoxes: BoxEntityData[] = [];
@@ -368,7 +368,7 @@ export class BuildingView {
     const totalH = Math.max(1, items.length) * FLOOR_HEIGHT;
     this.cam.ty = totalH / 2;
     this.cam.dist = Math.max(48, Math.min(160, totalH * 2.6 + 36));
-    this.cam.theta = 0.65;
+    this.cam.theta = 2.35;
     this.cam.phi = 1.15;
   }
 
@@ -399,8 +399,10 @@ export class BuildingView {
     ctx.fillText(`F${floor} · ${cleanName}`, 14, 24);
 
     const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    // depthTest: false e renderOrder elevado garantem que os textos fiquem sempre legíveis na frente
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(mat);
+    sprite.renderOrder = 999;
     sprite.scale.set(16, 3, 1);
     return sprite;
   }

@@ -83,8 +83,13 @@ test('M1: labels de arquivo, presets de câmera e tema funcionam', async ({ page
   const after = await page.evaluate(() => JSON.stringify(window.__bumptop!.world.getCamera()));
   expect(after).not.toBe(before);
 
-  // Cycling de tema (T) persiste no repo
-  await page.keyboard.press('t');
+  // Seleção de tema pelo menu (.theme-btn) persiste no repo
+  const themeBtn = page.locator('.theme-btn');
+  await expect(themeBtn).toBeVisible();
+  await themeBtn.click();
+  await page.waitForTimeout(200);
+  const themeItem = page.locator('.theme-menu-item').nth(1);
+  await themeItem.click();
   await page.waitForTimeout(400);
   const themeIdx = await page.evaluate(() => window.__bumptop!.repo.getSetting('themeIndex', 0));
   expect(themeIdx).toBe(1);
@@ -824,14 +829,14 @@ test.describe('PR8', () => {
     await page.waitForTimeout(500);
 
     // PR9/PR14: nota NÃO tem mais label DOM (o texto vive na textura da face).
-    // O CLIQUE abre o EDITOR RICO (sem o card escuro de leitura) — conteúdo
-    // completo visível nele.
+    // O DUPLO CLIQUE abre o EDITOR RICO (sem o card escuro de leitura) — conteúdo
+    // completo visível nele (1 clique apenas seleciona/arrasta).
     const tela = await page.evaluate((oid) => {
       const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, id);
     const box = (await page.locator('#scene-root > canvas').boundingBox())!;
-    await page.mouse.click(box.x + tela.x, box.y + tela.y);
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
     const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 4000 });
     // Card escuro de leitura (PR8) NÃO deve aparecer

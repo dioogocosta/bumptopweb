@@ -35,7 +35,18 @@ export class ThreeRenderer implements IRenderer {
   /** Painel de vidro da pilha aberta em grade (PR9). */
   private pilePanel: THREE.Mesh | null = null;
   private roomGroups = new Map<string, THREE.Group>();
-  private roomMats = new Map<string, { floor: THREE.MeshLambertMaterial; wall: THREE.MeshLambertMaterial }>();
+  private roomMats = new Map<
+    string,
+    {
+      floor: THREE.MeshLambertMaterial;
+      wall: THREE.MeshLambertMaterial;
+      edges?: THREE.LineSegments[];
+    }
+  >();
+  private bumpTopTexture: THREE.CanvasTexture | null = null;
+  private floorBuildingTexture: THREE.CanvasTexture | null = null;
+  private infiniteFloorMesh: THREE.Mesh | null = null;
+  private infiniteGridTexture: THREE.CanvasTexture | null = null;
   /** PR4.3 — raias Kanban por sala (chave room:ox|oz). */
   private roomKanbanLines = new Map<string, THREE.Mesh[]>();
   /** PR4.3 — dashboards ROOT por sala (canvas pixel-voxel na parede). */
@@ -72,6 +83,24 @@ export class ThreeRenderer implements IRenderer {
     this.scene.add(dir);
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.40));
 
+    // Piso infinito / grade ampla cibernética (visível no tema Floor)
+    const infGeo = new THREE.PlaneGeometry(5000, 5000);
+    if (!this.infiniteGridTexture) {
+      this.infiniteGridTexture = this.createInfiniteGridTexture();
+    }
+    const infMat = new THREE.MeshLambertMaterial({
+      map: this.infiniteGridTexture,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: true,
+    });
+    this.infiniteFloorMesh = new THREE.Mesh(infGeo, infMat);
+    this.infiniteFloorMesh.rotation.x = -Math.PI / 2;
+    this.infiniteFloorMesh.position.set(0, -0.06, 0);
+    this.infiniteFloorMesh.receiveShadow = true;
+    this.infiniteFloorMesh.visible = false;
+    this.scene.add(this.infiniteFloorMesh);
+
     this.applyCamera();
   }
 
@@ -96,20 +125,43 @@ export class ThreeRenderer implements IRenderer {
     group.add(floor);
 
     // 4 paredes — tom azul ardósia clássico BumpTop
+    // As paredes Norte e Sul cobrem a extensão externa total (halfSize * 2 + wallThickness * 2),
+    // abraçando as paredes Oeste e Leste sem degraus nem quinas salientes.
     const wallMat = new THREE.MeshLambertMaterial({ color: 0x3d648f });
+    const wallEdgesList: THREE.LineSegments[] = [];
+
     const mkWall = (w: number, h: number, d: number, x: number, z: number) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      const geo = new THREE.BoxGeometry(w, h, d);
+      const m = new THREE.Mesh(geo, wallMat);
       m.position.set(ox + x, h / 2, oz + z);
       m.receiveShadow = true;
       group.add(m);
+
+      // Arestas de neon cibernético para o tema Floor (invisíveis por padrão nos demais temas)
+      const edgeGeo = new THREE.EdgesGeometry(geo);
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.85,
+      });
+      const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+      edges.position.copy(m.position);
+      edges.visible = false;
+      group.add(edges);
+      wallEdgesList.push(edges);
     };
-    mkWall(halfSize * 2, wallHeight, wallThickness, 0, -halfSize);
-    mkWall(halfSize * 2, wallHeight, wallThickness, 0, halfSize);
-    mkWall(wallThickness, wallHeight, halfSize * 2, -halfSize, 0);
-    mkWall(wallThickness, wallHeight, halfSize * 2, halfSize, 0);
+
+    const spanX = (halfSize + wallThickness) * 2;
+    const spanZ = halfSize * 2;
+    const centerOffset = halfSize + wallThickness / 2;
+
+    mkWall(spanX, wallHeight, wallThickness, 0, -centerOffset);
+    mkWall(spanX, wallHeight, wallThickness, 0, +centerOffset);
+    mkWall(wallThickness, wallHeight, spanZ, -centerOffset, 0);
+    mkWall(wallThickness, wallHeight, spanZ, +centerOffset, 0);
     this.scene.add(group);
     // PR4.2 — materiais por caixa (o setTheme pinta TODAS as caixas)
-    this.roomMats.set(group.name, { floor: floorMat, wall: wallMat });
+    this.roomMats.set(group.name, { floor: floorMat, wall: wallMat, edges: wallEdgesList });
   }
 
   /** PR4.2 — remove o chão + 4 paredes da caixa (meshes + materiais). */
@@ -123,6 +175,13 @@ export class ThreeRenderer implements IRenderer {
     for (const child of group.children) {
       const mesh = child as THREE.Mesh;
       mesh.geometry?.dispose?.();
+    }
+    const matEntry = this.roomMats.get(key);
+    if (matEntry?.edges) {
+      for (const e of matEntry.edges) {
+        e.geometry?.dispose?.();
+        (e.material as THREE.Material)?.dispose?.();
+      }
     }
     this.roomGroups.delete(key);
     this.roomMats.delete(key);
@@ -322,6 +381,144 @@ export class ThreeRenderer implements IRenderer {
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
+  }
+
+  private createFloorBuildingTexture(): THREE.CanvasTexture {
+    const size = 1024;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // 1. Fundo escuro azul-noite profundo tecnológico (mesmo design do prédio 3D)
+    const grad = ctx.createRadialGradient(size / 2, size / 2, size * 0.1, size / 2, size / 2, size * 0.75);
+    grad.addColorStop(0, '#0f172a');
+    grad.addColorStop(1, '#070b12');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+
+    // 2. Grade quadriculada com linhas transparentes (design system Floor)
+    const step = 64;
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.20)';
+
+    for (let x = 0; x <= size; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= size; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+
+    // 3. Subdivisões mais finas
+    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.08)';
+    for (let x = 0; x <= size; x += 16) {
+      if (x % step === 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= size; y += 16) {
+      if (y % step === 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+
+    // 4. Marcadores cibernéticos (+) nos nós da grade
+    ctx.fillStyle = 'rgba(99, 179, 237, 0.5)';
+    for (let x = step * 2; x < size; x += step * 2) {
+      for (let y = step * 2; y < size; y += step * 2) {
+        ctx.fillRect(x - 3, y - 0.5, 7, 1);
+        ctx.fillRect(x - 0.5, y - 3, 1, 7);
+      }
+    }
+
+    // 5. Círculos concêntricos sutis de radar no centro
+    const cx = size / 2;
+    const cy = size / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.38, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.14)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.18, 0, Math.PI * 2);
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = 'rgba(99, 179, 237, 0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** Textura procedural repetível para o chão infinito quadriculado (tema Floor). */
+  private createInfiniteGridTexture(): THREE.CanvasTexture {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Fundo azul petróleo escuro cibernético
+    ctx.fillStyle = '#0a0f16';
+    ctx.fillRect(0, 0, size, size);
+
+    // Subdivisões mais finas
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
+    const sub = size / 4;
+    for (let p = sub; p < size; p += sub) {
+      ctx.beginPath();
+      ctx.moveTo(p, 0); ctx.lineTo(p, size);
+      ctx.moveTo(0, p); ctx.lineTo(size, p);
+      ctx.stroke();
+    }
+
+    // Linhas mestras quadriculadas transparentes
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.24)';
+    ctx.strokeRect(0, 0, size, size);
+
+    // Cruzes cibernéticas (+) nas interseções dos cantos e centro
+    ctx.fillStyle = 'rgba(99, 179, 237, 0.55)';
+    const drawCross = (x: number, y: number) => {
+      ctx.fillRect(x - 4, y - 0.75, 8, 1.5);
+      ctx.fillRect(x - 0.75, y - 4, 1.5, 8);
+    };
+    drawCross(0, 0);
+    drawCross(size, 0);
+    drawCross(0, size);
+    drawCross(size, size);
+    drawCross(size / 2, size / 2);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(160, 160);
+    return tex;
+  }
+
+  private getFloorTextureForTheme(themeName: string): THREE.CanvasTexture {
+    if (themeName === 'Floor') {
+      if (!this.floorBuildingTexture) this.floorBuildingTexture = this.createFloorBuildingTexture();
+      return this.floorBuildingTexture;
+    }
+    if (!this.bumpTopTexture) this.bumpTopTexture = this.createBumpTopFloorTexture();
+    return this.bumpTopTexture;
   }
 
   addBox(id: string, halfExtents: Vec3, color: string): ObjectHandle {
@@ -583,11 +780,54 @@ export class ThreeRenderer implements IRenderer {
 
   setTheme(theme: Theme): void {
     this.scene.background = new THREE.Color(theme.background);
-    const floorColor = theme.name === 'BumpTop' ? 0xffffff : theme.floor;
-    // PR4.2 — pinta o chão/paredes de TODAS as caixas
-    for (const { floor, wall } of this.roomMats.values()) {
-      floor.color.setHex(floorColor);
-      wall.color.setHex(theme.wall);
+    const isFloor = theme.name === 'Floor';
+    const isBumpTop = theme.name === 'BumpTop';
+
+    // Piso infinito quadriculado em todo o mundo 3D visível no tema Floor
+    if (this.infiniteFloorMesh) {
+      this.infiniteFloorMesh.visible = isFloor;
+    }
+
+    for (const { floor, wall, edges } of this.roomMats.values()) {
+      if (isFloor) {
+        floor.map = this.getFloorTextureForTheme('Floor');
+        floor.color.setHex(0xffffff);
+
+        // Parede translúcida vítrea + arestas de neon (idêntico à pilha do prédio 3D)
+        wall.color.setHex(0x162334);
+        wall.transparent = true;
+        wall.opacity = 0.28;
+        wall.depthWrite = false;
+        wall.needsUpdate = true;
+        if (edges) {
+          for (const edge of edges) edge.visible = true;
+        }
+      } else if (isBumpTop) {
+        floor.map = this.getFloorTextureForTheme('BumpTop');
+        floor.color.setHex(0xffffff);
+
+        wall.color.setHex(theme.wall);
+        wall.transparent = false;
+        wall.opacity = 1.0;
+        wall.depthWrite = true;
+        wall.needsUpdate = true;
+        if (edges) {
+          for (const edge of edges) edge.visible = false;
+        }
+      } else {
+        floor.map = null;
+        floor.color.setHex(theme.floor);
+
+        wall.color.setHex(theme.wall);
+        wall.transparent = false;
+        wall.opacity = 1.0;
+        wall.depthWrite = true;
+        wall.needsUpdate = true;
+        if (edges) {
+          for (const edge of edges) edge.visible = false;
+        }
+      }
+      floor.needsUpdate = true;
     }
   }
 
