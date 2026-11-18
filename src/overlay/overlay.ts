@@ -177,6 +177,10 @@ export class DomOverlay implements IOverlay {
   /** PR4.3 — seletor de tipo da nova caixa (no cabeçalho). */
   private boxesType: HTMLSelectElement | null = null;
 
+  /** PR4.4 — Building View: botão 🏢 e botão "Voltar ao Prédio". */
+  private buildingBtn: HTMLButtonElement | null = null;
+  private buildingBackBtn: HTMLButtonElement | null = null;
+
   constructor(root: HTMLElement) {
     this.root = root;
     root.style.position = 'fixed';
@@ -285,7 +289,35 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('authtoggle', { bubbles: true }));
     });
     zoomWrap.appendChild(this.authBtn);
+
+    // PR4.4 — botão 🏢 "Vista do Prédio"
+    this.buildingBtn = document.createElement('button');
+    this.buildingBtn.type = 'button';
+    this.buildingBtn.className = 'building-btn';
+    this.buildingBtn.title = t('ui.buildingView');
+    this.buildingBtn.setAttribute('aria-label', t('ui.buildingView'));
+    this.buildingBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<rect x="4" y="2" width="16" height="20" rx="1.5" stroke="currentColor" stroke-width="2"/>` +
+      `<path d="M4 8h16M4 14h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>` +
+      `</svg>`;
+    this.buildingBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('buildingtoggle', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.buildingBtn);
+
     this.root.appendChild(zoomWrap);
+
+    // PR4.4 — botão "↩ Voltar ao Prédio" (visível só dentro de uma caixa, quando o prédio existiu)
+    this.buildingBackBtn = document.createElement('button');
+    this.buildingBackBtn.type = 'button';
+    this.buildingBackBtn.className = 'building-back-btn';
+    this.buildingBackBtn.textContent = t('ui.buildingBack');
+    this.buildingBackBtn.style.display = 'none';
+    this.buildingBackBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('buildingback', { bubbles: true }));
+    });
+    this.root.appendChild(this.buildingBackBtn);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
     this.searchBar = document.createElement('div');
@@ -514,6 +546,15 @@ export class DomOverlay implements IOverlay {
 
   isBoxesPanelVisible(): boolean {
     return !!this.boxesModal && this.boxesModal.style.display !== 'none';
+  }
+
+  /** PR4.4 — mostra/oculta botão "↩ Voltar ao Prédio" no HUD. */
+  showBuildingBack(): void {
+    if (this.buildingBackBtn) this.buildingBackBtn.style.display = '';
+  }
+
+  hideBuildingBack(): void {
+    if (this.buildingBackBtn) this.buildingBackBtn.style.display = 'none';
   }
 
   private buildBoxesModal(): void {
