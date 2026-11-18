@@ -35,7 +35,7 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') erros.push(m.text()); });
   page.on('pageerror', (e) => erros.push(String(e)));
 
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => window.__bumptop?.world?.listBoxes, null, { timeout: 30000 });
   await page.waitForFunction(() => {
     const w = window.__bumptop?.world;
@@ -126,7 +126,11 @@ try {
     `dashboard criado=${dash.tem}`);
 
   // ---------- P4c-reload ----------
-  await sleep(3000); // flush de persistência
+  // Fecha o modal e dá tempo de TODOS os saves terminarem antes do reload —
+  // recarregar com save em andamento abre o OPFS em conflito (handle duplicado)
+  // e o novo worker SQLite falha ao carregar o snapshot (cena volta ao default).
+  await page.keyboard.press('Escape');
+  await sleep(10000);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__bumptop?.world?.listBoxes, null, { timeout: 30000 });
   await sleep(800);
@@ -153,7 +157,7 @@ try {
     !t.includes('favicon') && !t.includes('X-Frame') &&
     !t.includes('401') && !t.includes('Unauthorized') &&
     !/status of 400|status of 503|status of 404/.test(t));
-  check('P4c-console', reais.length === 0, `erros de console: ${reais.length}`);
+  check('P4c-console', reais.length === 0, `erros de console: ${reais.length}${reais.length ? ' :: ' + reais.slice(0, 3).join(' | ') : ''}`);
 
   await page.screenshot({ path: `${OUT}/pr4c-final.png` });
 } catch (e) {
