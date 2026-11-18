@@ -40,7 +40,7 @@ try {
   await sleep(400);
 
   // ---------- P19a: botão Entrar visível ----------
-  const authBtn = page.locator('.zoom-controls .auth-btn');
+  const authBtn = page.locator('.auth-btn');
   const btnVisivel = await authBtn.isVisible();
   const btnTexto = (await authBtn.textContent())?.trim();
   check('P19a', btnVisivel && btnTexto?.includes('Entrar'),

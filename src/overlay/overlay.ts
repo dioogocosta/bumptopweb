@@ -253,7 +253,7 @@ export class DomOverlay implements IOverlay {
       this.showAuthModal('signin');
     });
     this.authWrap.appendChild(this.authBtn);
-    zoomWrap.appendChild(this.authWrap);
+    this.root.appendChild(this.authWrap);
 
     this.root.appendChild(zoomWrap);
 

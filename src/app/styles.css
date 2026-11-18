@@ -1459,10 +1459,14 @@ body {
  * --------------------------------------------------------------------------- */
 
 .auth-wrap {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 168px;
   display: flex;
   align-items: center;
   gap: 6px;
   pointer-events: none;
+  z-index: 40;
 }
 
 .auth-btn {
