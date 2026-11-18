@@ -1,16 +1,23 @@
 // ---------------------------------------------------------------------------
 // PR4.5 — Backlog (Taiga): leitura da API do Taiga da FNDE.
-// A API real fica em `taiga-api.fnde.gov.br` (o `taiga.fnde.gov.br` serve
-// só o SPA) e responde com `Access-Control-Allow-Origin: *`.
 // PR4.6 — adiciona fetch de sprints (milestones) e stories por sprint.
-// PR4.7 — suporte a autenticação por Bearer token (JWT) para acessar
-// projetos privados, user stories e sprints da sessão logada.
+// PR4.7 — autenticação por Bearer Token e credenciais com proxy reverso
+// Pages Functions (/api/taiga) para contornar bloqueios de CORS do browser.
 // ---------------------------------------------------------------------------
 
 import type { TaigaStory } from '../core/model/types';
 
-const API = 'https://taiga-api.fnde.gov.br/api/v1';
+const PROXY_API = '/api/taiga';
+const DIRECT_API = 'https://taiga-api.fnde.gov.br/api/v1';
 const TOKEN_KEY = 'bumptop_taiga_token';
+
+/** Obtém a base da URL da API (proxy no browser p/ CORS, direta em node/testes). */
+export function getApiBase(): string {
+  if (typeof window !== 'undefined') {
+    return PROXY_API;
+  }
+  return DIRECT_API;
+}
 
 /** Obtém o token de autenticação salvo no navegador. */
 export function getTaigaToken(): string | null {
@@ -51,6 +58,7 @@ export interface TaigaUser {
   id: number;
   username: string;
   fullName: string;
+  email?: string;
 }
 
 /** Um projeto do Taiga (público ou privado). */
@@ -81,10 +89,19 @@ async function getJson<T>(path: string): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  const base = getApiBase();
   try {
-    r = await fetch(`${API}${path}`, { headers });
+    r = await fetch(`${base}${path}`, { headers });
   } catch {
-    throw new TaigaError('ui.taiga.netError');
+    if (base === PROXY_API) {
+      try {
+        r = await fetch(`${DIRECT_API}${path}`, { headers });
+      } catch {
+        throw new TaigaError('ui.taiga.netError');
+      }
+    } else {
+      throw new TaigaError('ui.taiga.netError');
+    }
   }
 
   if (r.status === 401 || r.status === 403) {
@@ -99,17 +116,71 @@ async function getJson<T>(path: string): Promise<T> {
   }
 }
 
+/** Autentica com usuário e senha no Taiga via /auth e salva o JWT gerado. */
+export async function loginTaiga(username: string, password: string): Promise<string> {
+  const limpo = username.trim();
+  if (!limpo || !password) throw new TaigaError('ui.taiga.missingCredentials');
+
+  const base = getApiBase();
+  let r: Response;
+  const body = JSON.stringify({
+    type: 'normal',
+    username: limpo,
+    password,
+  });
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  try {
+    r = await fetch(`${base}/auth`, {
+      method: 'POST',
+      headers,
+      body,
+    });
+  } catch {
+    if (base === PROXY_API) {
+      try {
+        r = await fetch(`${DIRECT_API}/auth`, {
+          method: 'POST',
+          headers,
+          body,
+        });
+      } catch {
+        throw new TaigaError('ui.taiga.netError');
+      }
+    } else {
+      throw new TaigaError('ui.taiga.netError');
+    }
+  }
+
+  if (!r.ok) {
+    throw new TaigaError('ui.taiga.invalidCredentials');
+  }
+
+  try {
+    const data = (await r.json()) as { auth_token?: string };
+    if (!data || !data.auth_token) throw new TaigaError('ui.taiga.invalidCredentials');
+    setTaigaToken(data.auth_token);
+    return data.auth_token;
+  } catch {
+    throw new TaigaError('ui.taiga.invalidCredentials');
+  }
+}
+
 /** Obtém os dados do usuário autenticado no Taiga. Retorna null se não logado/inválido. */
 export async function fetchTaigaMe(): Promise<TaigaUser | null> {
   const token = getTaigaToken();
   if (!token) return null;
   try {
-    const raw = await getJson<{ id: number; username: string; full_name?: string }>('/users/me');
+    const raw = await getJson<{ id: number; username: string; full_name?: string; email?: string }>('/users/me');
     if (!raw || typeof raw.id !== 'number') return null;
     return {
       id: raw.id,
       username: raw.username,
       fullName: raw.full_name || raw.username,
+      email: raw.email,
     };
   } catch {
     return null;
