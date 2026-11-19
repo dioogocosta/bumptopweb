@@ -143,6 +143,17 @@ export class BuildingView {
   private dotsLayer!:  HTMLDivElement;
   private dotEls: Array<{ el: HTMLDivElement; match: SearchMatch; floorY: number }> = [];
 
+  // PR4.12 — Perfil do usuário e Loading
+  private profileCb: (() => void) | null = null;
+  private profileBtn!: HTMLElement;
+  private profileAvatarEl!: HTMLElement;
+  private profileNameEl!: HTMLElement;
+  private profileStatusDot!: HTMLElement;
+  private profileStatusText!: HTMLElement;
+  private loadingOverlay!: HTMLDivElement;
+  private loadingTitleEl!: HTMLElement;
+  private loadingSubEl!: HTMLElement;
+
   // ── Mount ──────────────────────────────────────────────────────────────
 
   mount(parent: HTMLElement): void {
@@ -325,10 +336,89 @@ export class BuildingView {
 
     this.dashOverlay.appendChild(leftPanel);
 
+    // ── Botão de Perfil do Usuário (Top Right) ─────────────
+    this.profileBtn = el('button', {
+      position: 'absolute', top: '16px', right: '16px',
+      width: '210px', height: '48px',
+      background: 'rgba(10,15,22,0.88)',
+      border: '1px solid rgba(139,92,246,0.35)',
+      borderRadius: '24px', padding: '6px 12px 6px 6px',
+      backdropFilter: 'blur(12px)',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', gap: '10px',
+      cursor: 'pointer', pointerEvents: 'auto',
+      transition: 'border-color 0.15s, transform 0.15s, background 0.15s',
+      color: '#f8fafc',
+    });
+
+    this.profileAvatarEl = el('div', {
+      width: '36px', height: '36px',
+      borderRadius: '50%',
+      background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '13px', fontWeight: '700', color: '#ffffff',
+      overflow: 'hidden', flexShrink: '0',
+      border: '1.5px solid rgba(255,255,255,0.2)',
+    });
+    this.profileAvatarEl.textContent = '👤';
+
+    const pInfo = el('div', {
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'flex-start', overflow: 'hidden', flex: '1',
+      textAlign: 'left',
+    });
+
+    this.profileNameEl = el('div', {
+      fontSize: '12px', fontWeight: '700', color: '#f8fafc',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      width: '100%',
+    });
+    this.profileNameEl.textContent = 'Entrar / Perfil';
+
+    const pStatusLine = el('div', {
+      display: 'flex', alignItems: 'center', gap: '5px',
+      marginTop: '2px',
+    });
+
+    this.profileStatusDot = el('div', {
+      width: '7px', height: '7px', borderRadius: '50%',
+      background: '#64748b', flexShrink: '0',
+    });
+
+    this.profileStatusText = el('div', {
+      fontSize: '10px', color: '#94a3b8',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+    });
+    this.profileStatusText.textContent = 'Conectar';
+
+    pStatusLine.appendChild(this.profileStatusDot);
+    pStatusLine.appendChild(this.profileStatusText);
+    pInfo.appendChild(this.profileNameEl);
+    pInfo.appendChild(pStatusLine);
+
+    this.profileBtn.appendChild(this.profileAvatarEl);
+    this.profileBtn.appendChild(pInfo);
+
+    this.profileBtn.addEventListener('click', () => {
+      this.profileCb?.();
+    });
+    this.profileBtn.addEventListener('mouseenter', () => {
+      this.profileBtn.style.borderColor = 'rgba(139,92,246,0.8)';
+      this.profileBtn.style.transform = 'translateY(-1px)';
+      this.profileBtn.style.background = 'rgba(18,24,38,0.95)';
+    });
+    this.profileBtn.addEventListener('mouseleave', () => {
+      this.profileBtn.style.borderColor = 'rgba(139,92,246,0.35)';
+      this.profileBtn.style.transform = 'none';
+      this.profileBtn.style.background = 'rgba(10,15,22,0.88)';
+    });
+
+    this.dashOverlay.appendChild(this.profileBtn);
+
     // ── Painel Direito (lista de andares) ─────────────────
     const rightPanel = el('div', {
-      position: 'absolute', top: '16px', right: '16px',
-      width: '200px', maxHeight: 'calc(100vh - 100px)',
+      position: 'absolute', top: '74px', right: '16px',
+      width: '210px', maxHeight: 'calc(100vh - 160px)',
       overflowY: 'auto',
       background: 'rgba(10,15,22,0.82)',
       border: '1px solid rgba(56,189,248,0.18)',
@@ -400,6 +490,93 @@ export class BuildingView {
     searchWrap.appendChild(this.searchCountEl);
 
     this.dashOverlay.appendChild(searchWrap);
+
+    // ── Loading Overlay ──────────────────────────────────
+    this.loadingOverlay = el('div', {
+      position: 'absolute', inset: '0',
+      background: 'rgba(6, 10, 16, 0.94)',
+      backdropFilter: 'blur(16px)',
+      display: 'none', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      zIndex: '100', pointerEvents: 'auto',
+      transition: 'opacity 0.25s ease',
+      color: '#f8fafc',
+    });
+
+    const spinner = el('div', {
+      width: '50px', height: '50px',
+      border: '3px solid rgba(56,189,248,0.15)',
+      borderTopColor: '#38bdf8',
+      borderRadius: '50%',
+      animation: 'bv-spin 0.8s linear infinite',
+      marginBottom: '18px',
+    });
+
+    this.loadingTitleEl = el('div', {
+      color: '#f8fafc', fontSize: '18px', fontWeight: '700',
+      marginBottom: '6px', textAlign: 'center', letterSpacing: '-0.02em',
+    });
+    this.loadingTitleEl.textContent = '🏢 Carregando seu Prédio 3D…';
+
+    this.loadingSubEl = el('div', {
+      color: '#94a3b8', fontSize: '13px', textAlign: 'center',
+    });
+    this.loadingSubEl.textContent = 'Sincronizando andares e projetos…';
+
+    this.loadingOverlay.appendChild(spinner);
+    this.loadingOverlay.appendChild(this.loadingTitleEl);
+    this.loadingOverlay.appendChild(this.loadingSubEl);
+    this.container.appendChild(this.loadingOverlay);
+  }
+
+  // ── PR4.12: Métodos de Perfil e Loading ────────────────────────────────
+
+  onProfileClick(cb: () => void): void {
+    this.profileCb = cb;
+  }
+
+  showLoading(title?: string, sub?: string): void {
+    if (this.loadingTitleEl && title) this.loadingTitleEl.textContent = title;
+    if (this.loadingSubEl && sub) this.loadingSubEl.textContent = sub;
+    if (this.loadingOverlay) {
+      this.loadingOverlay.style.display = 'flex';
+      this.loadingOverlay.style.opacity = '1';
+    }
+  }
+
+  hideLoading(): void {
+    if (!this.loadingOverlay) return;
+    this.loadingOverlay.style.opacity = '0';
+    setTimeout(() => {
+      if (this.loadingOverlay) this.loadingOverlay.style.display = 'none';
+    }, 250);
+  }
+
+  setUserProfile(profile: { name: string; email?: string; photo?: string | null; isAuth: boolean }): void {
+    if (!this.profileBtn) return;
+    if (profile.photo) {
+      this.profileAvatarEl.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = profile.photo;
+      img.style.width = '100%';
+      img.style.height = '100%';
+      img.style.borderRadius = '50%';
+      img.style.objectFit = 'cover';
+      this.profileAvatarEl.appendChild(img);
+    } else {
+      this.profileAvatarEl.innerHTML = '';
+      const initials = profile.name
+        .split(' ')
+        .filter(Boolean)
+        .map((s) => s[0])
+        .slice(0, 2)
+        .join('')
+        .toUpperCase() || 'U';
+      this.profileAvatarEl.textContent = profile.isAuth ? initials : '👤';
+    }
+    this.profileNameEl.textContent = profile.name || (profile.isAuth ? 'Usuário' : 'Entrar / Perfil');
+    this.profileStatusDot.style.background = profile.isAuth ? '#10b981' : '#64748b';
+    this.profileStatusText.textContent = profile.isAuth ? (profile.email || 'Conectado') : 'Conectar';
   }
 
   // ── Eventos ───────────────────────────────────────────────────────────
