@@ -1767,3 +1767,52 @@ describe('pickObjectAt com excludeId (drop em pasta — arrastado sob o cursor)'
     expect(world.pickObjectAt({ x: 1, y: 0, z: 1 }, undefined, 'inexistente')).toBe(a);
   });
 });
+
+describe('PR4.11 — Textura na face do card Taiga e supressão de labels DOM', () => {
+  it('itens do Taiga geram textura na face via taigaTextureProvider e não criam label DOM flutuante', async () => {
+    const overlay = makeOverlayMock();
+    const { world, renderer } = await makeWorld(overlay);
+    const box = world.addBoxEntity('Backlog', { x: 400, z: 0 }, 'backlog');
+    world.setCurrentBox(box.id);
+
+    const generatedTextures: Array<{ ref: number; showTitle: boolean }> = [];
+    world.setTaigaTextureProvider((meta, showTitle) => {
+      generatedTextures.push({ ref: meta.taigaRef as number, showTitle });
+      return `data:image/png;base64,mock-tex-${meta.taigaRef}`;
+    });
+
+    world.syncBoxStories(box.id, [
+      {
+        id: 101,
+        ref: 89,
+        subject: 'Criação de Alertas',
+        statusName: 'Aberto',
+        statusColor: '#8b5cf6',
+        isClosed: false,
+      },
+    ]);
+
+    expect(generatedTextures).toHaveLength(1);
+    expect(generatedTextures[0]).toEqual({ ref: 89, showTitle: true });
+    // Textura aplicada no renderer
+    expect(renderer.setTexture).toHaveBeenCalledWith(expect.anything(), 'data:image/png;base64,mock-tex-89');
+
+    // Ao atualizar os labels, o item Taiga NÃO cria label DOM flutuante (overlay.setLabel chamado com null)
+    vi.mocked(overlay.setLabel).mockClear();
+    world.update(1 / 60);
+    // Para itens do Taiga, setLabel deve ser chamado com null (sem poluição visual sobre o card)
+    const calls = vi.mocked(overlay.setLabel).mock.calls;
+    const itemCall = calls.find(([id]) => {
+      const obj = world.getObject(id);
+      return obj?.meta.taigaStoryId === 101;
+    });
+    expect(itemCall).toBeDefined();
+    expect(itemCall![1]).toBeNull();
+
+    // Ao alternar setShowNames, taigaTextureProvider é acionado novamente com showTitle=false
+    generatedTextures.length = 0;
+    world.setShowNames(false);
+    expect(generatedTextures).toHaveLength(1);
+    expect(generatedTextures[0]).toEqual({ ref: 89, showTitle: false });
+  });
+});

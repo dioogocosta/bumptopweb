@@ -16,7 +16,7 @@ import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { CloudflareAuth } from '@auth/cloudflareAuth';
 import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId, initTaigaTokenFromUrl, fetchStoryDetail } from '@taiga/taiga';
-import { makeNoteTexture } from './noteTexture';
+import { makeNoteTexture, makeTaigaCardTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
 import { DEFAULT_ROOM, TypeFlags } from '@core/model/types';
@@ -99,6 +99,17 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       bg: (meta.noteBg as string) ?? undefined,
       drawing: (meta.noteDrawing as string) ?? undefined,
       reminder: typeof meta.noteReminder === 'number' ? (meta.noteReminder as number) : undefined,
+    }),
+  );
+
+  // PR4.11 — card do Taiga: face superior desenhada com quebra de linha do título completo
+  world.setTaigaTextureProvider((meta, showTitle) =>
+    makeTaigaCardTexture({
+      ref: (meta.taigaRef as number) ?? 0,
+      subject: (meta.taigaSubject as string) ?? '',
+      statusName: (meta.taigaStatus as string) ?? '',
+      statusColor: (meta.taigaStatusColor as string) ?? '#8b5cf6',
+      showTitle,
     }),
   );
 
@@ -758,6 +769,20 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       return;
     }
 
+    // PR4.11 — Hover sobre itens do Taiga exibe o título completo em tooltip flutuante
+    if (action.type === 'hover') {
+      const hoverId = world.pickObjectAt(action.world, action.screen);
+      const hoverObj = hoverId ? world.getObject(hoverId) : null;
+      if (hoverObj?.meta?.taigaStoryId !== undefined) {
+        const fullTitle = hoverObj.label || (hoverObj.meta.taigaSubject as string) || '';
+        overlay.setHoverTooltip(fullTitle, action.screen);
+      } else {
+        overlay.setHoverTooltip(null, null);
+      }
+    } else if (action.type === 'pointerDown') {
+      overlay.setHoverTooltip(null, null);
+    }
+
     // Soltar em pasta → move o arquivo (M2)
     if (action.type === 'pointerDown') {
       dragSourceId = world.pickObjectAt(action.world, action.screen);
@@ -808,6 +833,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // PR8 — arrastar arquivo DO SISTEMA (Explorer/Finder) para a cena
   // -------------------------------------------------------------------------
   const canvas = renderer.getCanvas();
+  canvas.addEventListener('pointerleave', () => overlay.setHoverTooltip(null, null));
   const acceptsFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
   canvas.addEventListener('dragover', (e) => {
     if (!acceptsFiles(e)) return;

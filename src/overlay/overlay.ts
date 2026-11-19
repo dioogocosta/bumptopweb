@@ -1543,6 +1543,31 @@ export class DomOverlay implements IOverlay {
     el.style.top = `${clampedY}px`;
   }
 
+  private hoverTooltipEl: HTMLDivElement | null = null;
+
+  /** PR4.11 — Tooltip flutuante exibido no hover com o título completo do item do Taiga. */
+  setHoverTooltip(text: string | null, screen: { x: number; y: number } | null): void {
+    if (!text || !screen) {
+      if (this.hoverTooltipEl) {
+        this.hoverTooltipEl.style.display = 'none';
+      }
+      return;
+    }
+    if (!this.hoverTooltipEl) {
+      this.hoverTooltipEl = document.createElement('div');
+      this.hoverTooltipEl.className = 'story-hover-tooltip';
+      this.root.appendChild(this.hoverTooltipEl);
+    }
+    this.hoverTooltipEl.textContent = text;
+    this.hoverTooltipEl.style.display = 'block';
+
+    const padding = 16;
+    const x = Math.min(screen.x + 16, Math.max(padding, window.innerWidth - 460));
+    const y = Math.max(padding, Math.min(screen.y - 10, window.innerHeight - 80));
+    this.hoverTooltipEl.style.left = `${Math.max(padding, x)}px`;
+    this.hoverTooltipEl.style.top = `${y}px`;
+  }
+
   toast(message: string): void {
     const t = document.createElement('div');
     t.className = 'toast';

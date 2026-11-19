@@ -324,6 +324,8 @@ export interface IOverlay {
     screen: { x: number; y: number } | null,
     opts?: { note?: boolean },
   ): void;
+  /** PR4.11 — Tooltip flutuante exibido no hover de um item (ex: título completo da história no Taiga). */
+  setHoverTooltip?(text: string | null, screen: { x: number; y: number } | null): void;
   toast(message: string): void;
 
   /**
