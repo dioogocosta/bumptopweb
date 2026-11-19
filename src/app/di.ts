@@ -128,6 +128,31 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     }),
   );
 
+  // PR4.11 fix — re-sync automático de cards Taiga "velhos" (snapshot pré-PR4.11)
+  world.setTaigaSyncProvider(async (boxId, type) => {
+    const box = world.getBox(boxId);
+    if (!box || !box.taigaProject) return;
+    try {
+      if (type === 'backlog') {
+        const stories = await fetchTaigaStories(box.taigaProject);
+        world.syncBoxStories(boxId, stories);
+      } else if (type === 'sprint' || type === 'kanban') {
+        let milestoneId = box.taigaSprintId;
+        if (!milestoneId) {
+          const projectId = await resolveProjectId(box.taigaProject);
+          const sprints = await fetchTaigaSprints(projectId);
+          const active = sprints.find((s) => !s.closed) ?? sprints[0];
+          if (!active) return;
+          milestoneId = active.id;
+        }
+        const stories = await fetchSprintStories(milestoneId);
+        world.syncSprintStories(boxId, stories, milestoneId);
+      }
+    } catch {
+      // Silencioso: o usuário pode clicar no andar novamente p/ forçar sync
+    }
+  });
+
   // Tema persistido (settings) — aplica no renderer
   const themeIdx = await repo.getSetting<number>('themeIndex', 0);
   const activeTheme = THEMES[themeIdx % THEMES.length];

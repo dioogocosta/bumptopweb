@@ -181,6 +181,8 @@ export class World {
   private noteTextureProvider: ((meta: Record<string, unknown>) => string | null | Promise<string | null>) | null = null;
   /** PR4.11 — gerador da textura da face do card Taiga (injetado pelo app; core puro). */
   private taigaTextureProvider: ((meta: Record<string, unknown>, showTitle: boolean) => string | null) | null = null;
+  /** PR4.11 fix — callback p/ re-sync de cards Taiga "velhos" (injetado pelo app; core puro). */
+  private taigaSyncProvider: ((boxId: string, type: 'backlog' | 'sprint' | 'kanban') => Promise<void>) | null = null;
   /** PR9 — pilha atualmente ABERTA em grade (painel de vidro + ✕). */
   private openGridPileId: string | null = null;
   /** Exploding piles (P1): arrastar item para fora explode/dissolve a pilha. */
@@ -745,6 +747,27 @@ export class World {
       }
     }
   }
+
+  /** PR4.11 fix — Injeta callback p/ re-sync de cards Taiga antigos (app layer). */
+  setTaigaSyncProvider(
+    fn: ((boxId: string, type: 'backlog' | 'sprint' | 'kanban') => Promise<void>) | null,
+  ): void {
+    this.taigaSyncProvider = fn;
+  }
+
+  /** PR4.11 fix — Agenda re-sync de uma caixa backlog/sprint/kanban com cards "velhos". */
+  private scheduleTaigaSync(boxId: string, type: 'backlog' | 'sprint' | 'kanban'): void {
+    if (this.taigaSyncProvider) {
+      // Debounce simples: evita chamadas duplicadas rápidas p/ mesma caixa
+      if (!this._taigaSyncPending) this._taigaSyncPending = new Set();
+      if (this._taigaSyncPending.has(boxId)) return;
+      this._taigaSyncPending.add(boxId);
+      this.taigaSyncProvider(boxId, type).finally(() => {
+        this._taigaSyncPending?.delete(boxId);
+      });
+    }
+  }
+  private _taigaSyncPending: Set<string> | null = null;
 
   /**
    * PR12 — atualiza as aparências/estado da nota (título, cor de fundo,
@@ -3486,6 +3509,9 @@ export class World {
     }
     this.applyPanBounds();
 
+    // PR4.11 fix — detecta cards Taiga "velhos" (sem taigaRef/taigaStatusColor/taigaStatus/taigaSubject)
+    const staleTaigaBoxes = new Set<string>();
+
     // Remove existentes
     for (const id of [...this.entries.keys()]) this.removeObject(id);
     // Física/render das caixas: a da init já existe; as novas são criadas aqui
@@ -3516,7 +3542,28 @@ export class World {
       // PR9: nota restaurada sem thumb (snapshot antigo) → regenera a face
       if (!thumb && (o.typeFlags & TypeFlags.StickyNote) !== 0) this.applyNoteFace(o.id);
       // PR4.11: card do Taiga restaurado → regenera capa de acordo com showNames
-      if (o.meta?.taigaStoryId !== undefined) this.applyTaigaFace(o.id);
+      if (o.meta?.taigaStoryId !== undefined) {
+        this.applyTaigaFace(o.id);
+        // Detecta cards antigos (snapshot pré-PR4.11): têm taigaStoryId mas faltam
+        // taigaRef/taigaStatusColor/taigaStatus/taigaSubject. Marca a caixa p/ re-sync.
+        const m = o.meta;
+        const stale =
+          m.taigaStoryId !== undefined &&
+          (m.taigaRef === undefined ||
+            m.taigaStatusColor === undefined ||
+            m.taigaStatus === undefined ||
+            m.taigaSubject === undefined);
+        if (stale && typeof m.boxId === 'string' && m.boxId) {
+          staleTaigaBoxes.add(m.boxId);
+        }
+      }
+    }
+    // Agenda re-sync das caixas backlog/sprint com cards Taiga "velhos"
+    for (const bid of staleTaigaBoxes) {
+      const box = this.boxes.get(bid);
+      if (box && (box.type === 'backlog' || box.type === 'sprint' || box.type === 'kanban')) {
+        this.scheduleTaigaSync(bid, box.type);
+      }
     }
     if (snap.camera) this.setCamera(snap.camera);
 
