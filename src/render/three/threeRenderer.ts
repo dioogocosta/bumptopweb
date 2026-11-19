@@ -352,23 +352,9 @@ export class ThreeRenderer implements IRenderer {
       const labelTex = new THREE.CanvasTexture(labelCanvas);
       labelTex.needsUpdate = true;
 
-      // 1) Placa de cabeçalho no CHÃO da raia (horizontal, visível olhando de cima)
-      const floorHeaderGeo = new THREE.PlaneGeometry(laneW * 0.85, 10);
-      const floorHeaderMat = new THREE.MeshBasicMaterial({
-        map: labelTex,
-        transparent: true,
-        opacity: 0.95,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const floorHeaderMesh = new THREE.Mesh(floorHeaderGeo, floorHeaderMat);
-      floorHeaderMesh.rotation.x = -Math.PI / 2;
-      floorHeaderMesh.position.set(laneX + laneW / 2, 0.05, oz - halfSize + 7);
-      group.add(floorHeaderMesh);
-      meshes.push(floorHeaderMesh);
-
-      // 2) Placa na parede frontal da raia (vertical, voltada para dentro da sala)
-      const wallLabelGeo = new THREE.PlaneGeometry(laneW * 0.85, 8);
+      // Placa vertical na parede de trás da raia (elevada, com distância mínima garantida do chão)
+      const labelH = 6.5;
+      const wallLabelGeo = new THREE.PlaneGeometry(laneW * 0.85, labelH);
       const wallLabelMat = new THREE.MeshBasicMaterial({
         map: labelTex,
         transparent: true,
@@ -377,7 +363,9 @@ export class ThreeRenderer implements IRenderer {
         side: THREE.DoubleSide,
       });
       const wallLabelMesh = new THREE.Mesh(wallLabelGeo, wallLabelMat);
-      wallLabelMesh.position.set(laneX + laneW / 2, wallHeight * 0.5, oz - halfSize + 0.3);
+      // PR4.11 — Eleva o texto acima do chão (~14 unidades de distância mínima) p/ evitar conflito com piso/wireframe
+      const labelY = Math.max(14, Math.min(22, wallHeight * 0.32));
+      wallLabelMesh.position.set(laneX + laneW / 2, labelY, oz - halfSize + 0.6);
       group.add(wallLabelMesh);
       meshes.push(wallLabelMesh);
     }

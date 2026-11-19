@@ -179,6 +179,8 @@ export class World {
   private activePeelId: string | null = null;
   /** PR9 — gerador da textura da face da nota (injetado pelo app; core puro). */
   private noteTextureProvider: ((meta: Record<string, unknown>) => string | null | Promise<string | null>) | null = null;
+  /** PR4.11 — gerador da textura da face do card Taiga (injetado pelo app; core puro). */
+  private taigaTextureProvider: ((meta: Record<string, unknown>, showTitle: boolean) => string | null) | null = null;
   /** PR9 — pilha atualmente ABERTA em grade (painel de vidro + ✕). */
   private openGridPileId: string | null = null;
   /** Exploding piles (P1): arrastar item para fora explode/dissolve a pilha. */
@@ -396,8 +398,12 @@ export class World {
       );
       const e = this.entries.get(id)!;
       e.data.meta.taigaStoryId = s.id;
+      e.data.meta.taigaRef = s.ref;
+      e.data.meta.taigaSubject = s.subject;
       e.data.meta.taigaStatus = s.statusName;
+      e.data.meta.taigaStatusColor = s.statusColor || '#8b5cf6';
       e.data.meta.taigaProjectSlug = box.taigaProject;
+      this.applyTaigaFace(id);
     });
 
     // 3) contagens por status → dashboard da parede
@@ -486,9 +492,13 @@ export class World {
         );
         const e = this.entries.get(id)!;
         e.data.meta.taigaStoryId = s.id;
+        e.data.meta.taigaRef = s.ref;
+        e.data.meta.taigaSubject = s.subject;
         e.data.meta.taigaStatus = s.statusName;
+        e.data.meta.taigaStatusColor = s.statusColor || '#8b5cf6';
         e.data.meta.taigaProjectSlug = box.taigaProject;
         e.data.meta.kanbanLane = li;
+        this.applyTaigaFace(id);
       });
       total += Math.min(ss.length, 60);
     }
@@ -701,6 +711,38 @@ export class World {
       void out.then((url) => {
         if (url) this.setObjectThumb(id, url);
       });
+    }
+  }
+
+  /**
+   * PR4.11 — Injeta o gerador de textura da face do card do Taiga (app layer).
+   */
+  setTaigaTextureProvider(
+    fn: ((meta: Record<string, unknown>, showTitle: boolean) => string | null) | null,
+  ): void {
+    this.taigaTextureProvider = fn;
+  }
+
+  /** PR4.11 — Aplica a textura na face do card de história do Taiga. */
+  applyTaigaFace(id: string): void {
+    const e = this.entries.get(id);
+    if (!e || e.data.meta.taigaStoryId === undefined || this.taigaTextureProvider === null) return;
+    const out = this.taigaTextureProvider(e.data.meta, this.showNames);
+    if (out) {
+      this.setObjectThumb(id, out);
+    }
+  }
+
+  /** PR4.11 — Atualiza a textura de todos os cards do Taiga (ex: ao alternar showNames). */
+  applyAllTaigaFaces(): void {
+    if (this.taigaTextureProvider === null) return;
+    for (const [id, e] of this.entries) {
+      if (e.data.meta?.taigaStoryId !== undefined) {
+        const out = this.taigaTextureProvider(e.data.meta, this.showNames);
+        if (out) {
+          this.setObjectThumb(id, out);
+        }
+      }
     }
   }
 
@@ -1937,6 +1979,7 @@ export class World {
   setShowNames(enabled: boolean): void {
     this.showNames = enabled;
     this.dirty = true; // re-sincroniza (cria/remove) os labels no overlay
+    this.applyAllTaigaFaces(); // PR4.11 — atualiza capa dos cards do Taiga com/sem título
   }
 
   /** Os nomes dos arquivos estão visíveis? */
@@ -3279,8 +3322,8 @@ export class World {
       return;
     }
     for (const e of this.entries.values()) {
-      if ((e.data.typeFlags & TypeFlags.StickyNote) !== 0) {
-        // PR9: o texto da nota vive na FACE do card (textura) — sem label DOM
+      if ((e.data.typeFlags & TypeFlags.StickyNote) !== 0 || e.data.meta?.taigaStoryId !== undefined) {
+        // PR9 & PR4.11: o texto da nota e do card Taiga vive na FACE (textura) — sem label DOM flutuante
         overlay.setLabel(e.data.id, null, null);
         continue;
       }
@@ -3472,6 +3515,8 @@ export class World {
       this.entries.set(o.id, { data: o, body, render });
       // PR9: nota restaurada sem thumb (snapshot antigo) → regenera a face
       if (!thumb && (o.typeFlags & TypeFlags.StickyNote) !== 0) this.applyNoteFace(o.id);
+      // PR4.11: card do Taiga restaurado → regenera capa de acordo com showNames
+      if (o.meta?.taigaStoryId !== undefined) this.applyTaigaFace(o.id);
     }
     if (snap.camera) this.setCamera(snap.camera);
 

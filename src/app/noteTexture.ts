@@ -158,3 +158,114 @@ export function makeNoteTexture(
     img.src = drawing;
   });
 }
+
+/** PR4.11 — Entrada para textura da face do card de história do Taiga. */
+export interface TaigaCardFaceInput {
+  ref: number;
+  subject: string;
+  statusName: string;
+  statusColor?: string;
+  showTitle?: boolean;
+}
+
+/**
+ * PR4.11 — Gera a textura (dataURL) para a face superior do card do Taiga.
+ * Quando showTitle=true, renderiza o título completo na capa do card com quebra de linha.
+ * Quando showTitle=false, exibe o cabeçalho de status e o #ref em destaque central.
+ */
+export function makeTaigaCardTexture(input: TaigaCardFaceInput): string | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const statusColor = input.statusColor || '#8b5cf6';
+  const showTitle = input.showTitle ?? true;
+
+  // Fundo branco limpo estilo card físico
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Borda perimetral suave com a cor do status
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = statusColor;
+  ctx.strokeRect(5, 5, SIZE - 10, SIZE - 10);
+
+  // Barra de cabeçalho colorida com status
+  ctx.fillStyle = statusColor;
+  ctx.fillRect(10, 10, SIZE - 20, 86);
+
+  // #ref no cabeçalho (esquerda)
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `bold 42px ${FONT_STACK}`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(`#${input.ref}`, 26, 53);
+
+  // Nome do status no cabeçalho (direita)
+  if (input.statusName) {
+    ctx.font = `bold 22px ${FONT_STACK}`;
+    ctx.textAlign = 'right';
+    const statusText = input.statusName.toUpperCase();
+    ctx.fillText(statusText, SIZE - 26, 53);
+  }
+
+  // Título completo na capa do card
+  if (showTitle && input.subject) {
+    const text = input.subject.trim();
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#0f172a';
+
+    const maxW = SIZE - 48;
+    const startX = 24;
+    const startY = 118;
+    const maxHeight = SIZE - 138;
+
+    // Ajusta o tamanho da fonte dinamicamente para o título caber 100% completo sem cortes
+    let fontSize = 34;
+    let lineHeight = 44;
+    let lines: string[] = [];
+
+    while (fontSize >= 18) {
+      ctx.font = `600 ${fontSize}px ${FONT_STACK}`;
+      lineHeight = Math.round(fontSize * 1.32);
+      lines = [];
+      const words = text.split(/\s+/);
+      let curLine = '';
+      for (const w of words) {
+        const testLine = curLine ? `${curLine} ${w}` : w;
+        if (ctx.measureText(testLine).width <= maxW) {
+          curLine = testLine;
+        } else {
+          if (curLine) lines.push(curLine);
+          curLine = w;
+        }
+      }
+      if (curLine) lines.push(curLine);
+
+      if (lines.length * lineHeight <= maxHeight) {
+        break;
+      }
+      fontSize -= 2;
+    }
+
+    ctx.font = `600 ${fontSize}px ${FONT_STACK}`;
+    let y = startY;
+    for (const l of lines) {
+      ctx.fillText(l, startX, y);
+      y += lineHeight;
+    }
+  } else {
+    // Quando nomes estão desativados: exibe #ref em tamanho grande no centro
+    ctx.fillStyle = statusColor;
+    ctx.font = `bold 96px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`#${input.ref}`, SIZE / 2, 280);
+  }
+
+  return canvas.toDataURL('image/png');
+}
