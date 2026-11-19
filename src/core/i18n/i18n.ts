@@ -275,6 +275,8 @@ const ptBR: Dict = {
   // PR4.4 — Prédio de caixas (Building View)
   'ui.buildingView': 'Vista do Prédio',
   'ui.buildingBack': '↩ Voltar ao Prédio',
+  'ui.floorsPanel': '🏢 Andares',
+  'ui.summaryPanel': '📊 Resumo',
   'ui.buildingEnter': 'Entrar na caixa',
   'ui.buildingFloor': 'Andar {n}',
   'ui.buildingEmpty': 'Nenhuma caixa ainda — crie uma para começar.',
@@ -595,6 +597,8 @@ const en: Dict = {
   // PR4.4 — Building View
   'ui.buildingView': 'Building View',
   'ui.buildingBack': '↩ Back to Building',
+  'ui.floorsPanel': '🏢 Floors',
+  'ui.summaryPanel': '📊 Summary',
   'ui.buildingEnter': 'Enter box',
   'ui.buildingFloor': 'Floor {n}',
   'ui.buildingEmpty': 'No boxes yet — create one to start.',

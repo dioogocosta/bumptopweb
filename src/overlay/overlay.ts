@@ -122,6 +122,8 @@ export function htmlToNoteMd(html: string): string {
 
 export class DomOverlay implements IOverlay {
   private root: HTMLElement;
+  /** PR4.13 — camada de labels/destaques ABAIXO do prédio 3D (z 2). */
+  private underlay: HTMLDivElement;
   private menuEl: HTMLDivElement | null = null;
   private labels = new Map<string, HTMLDivElement>();
   private lassoEl: HTMLDivElement | null = null;
@@ -200,6 +202,10 @@ export class DomOverlay implements IOverlay {
   private buildingBtn: HTMLButtonElement | null = null;
   private buildingBackBtn: HTMLButtonElement | null = null;
 
+  /** PR4.13 — ícones que abrem/fecham os painéis Andares e Resumo. */
+  private floorsBtn: HTMLButtonElement | null = null;
+  private statsBtn: HTMLButtonElement | null = null;
+
   /** Menu de seleção de temas. */
   private themeBtn: HTMLButtonElement | null = null;
   private themeMenu: HTMLElement | null = null;
@@ -212,6 +218,16 @@ export class DomOverlay implements IOverlay {
     root.style.inset = '0';
     root.style.pointerEvents = 'none';
     root.style.zIndex = '10';
+
+    // PR4.13 — camada ABAIXO do prédio 3D (z 2): rótulos de objeto e
+    // destaques de busca ficam atrás do canvas do prédio (como antes do PR44,
+    // que montou o prédio em z 50), mas acima da cena das caixas (z auto).
+    this.underlay = document.createElement('div');
+    this.underlay.style.position = 'fixed';
+    this.underlay.style.inset = '0';
+    this.underlay.style.pointerEvents = 'none';
+    this.underlay.style.zIndex = '2';
+    (root.parentNode ?? document.body).appendChild(this.underlay);
 
     // PR11 — controles de zoom na tela (topo central)
     // PR16 — ícones em SVG (o emoji 🔍+ renderizava mal nos dispositivos)
@@ -308,7 +324,12 @@ export class DomOverlay implements IOverlay {
     this.lassoBtn.className = 'lasso-btn';
     this.lassoBtn.title = t('ui.lassoMode');
     this.lassoBtn.setAttribute('aria-label', t('ui.lassoMode'));
-    this.lassoBtn.textContent = '⬭';
+    // Ícone em SVG (PR16): o glifo ⬭ renderizava diferente entre plataformas
+    this.lassoBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<ellipse cx="12" cy="9.5" rx="8" ry="5.5" stroke="currentColor" stroke-width="2"/>` +
+      `<path d="M5.5 14.4c-1.7 1.6-2.7 3.5-3 5.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>` +
+      `</svg>`;
     this.lassoBtn.addEventListener('click', () => {
       this.root.dispatchEvent(new CustomEvent('lassomode', { bubbles: true }));
     });
@@ -399,6 +420,38 @@ export class DomOverlay implements IOverlay {
     });
     zoomWrap.appendChild(this.buildingBackBtn);
 
+    // PR4.13 — botão ☰ "Andares": abre/fecha a lista de andares p/ pular
+    // rapidamente entre as caixas (funciona no prédio e no ambiente das caixas)
+    this.floorsBtn = document.createElement('button');
+    this.floorsBtn.type = 'button';
+    this.floorsBtn.className = 'floors-btn';
+    this.floorsBtn.title = t('ui.floorsPanel');
+    this.floorsBtn.setAttribute('aria-label', t('ui.floorsPanel'));
+    this.floorsBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<rect x="3.5" y="4.5" width="17" height="5" rx="1.4" stroke="currentColor" stroke-width="2"/>` +
+      `<rect x="3.5" y="14.5" width="17" height="5" rx="1.4" stroke="currentColor" stroke-width="2"/>` +
+      `</svg>`;
+    this.floorsBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('floorspanel', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.floorsBtn);
+
+    // PR4.13 — botão 📊 "Resumo": abre/fecha o painel de estatísticas
+    this.statsBtn = document.createElement('button');
+    this.statsBtn.type = 'button';
+    this.statsBtn.className = 'stats-btn';
+    this.statsBtn.title = t('ui.summaryPanel');
+    this.statsBtn.setAttribute('aria-label', t('ui.summaryPanel'));
+    this.statsBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">` +
+      `<path d="M4.5 20V11.5M12 20V4.5M19.5 20v-6" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/>` +
+      `</svg>`;
+    this.statsBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('statspanel', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.statsBtn);
+
     this.root.appendChild(zoomWrap);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
@@ -466,6 +519,11 @@ export class DomOverlay implements IOverlay {
   /** PR15 — estado visual do botão "Modo laço" (ligado = realçado). */
   setLassoModeActive(on: boolean): void {
     this.lassoBtn?.classList.toggle('sel', on);
+  }
+
+  /** PR4.13 — estado visual dos ícones de painel (aceso = painel aberto). */
+  setPanelActive(which: 'floors' | 'summary', on: boolean): void {
+    (which === 'floors' ? this.floorsBtn : this.statsBtn)?.classList.toggle('sel', on);
   }
 
   // -------------------------------------------------------------------------
@@ -1300,7 +1358,7 @@ export class DomOverlay implements IOverlay {
       if (!el) {
         el = document.createElement('div');
         el.className = 'search-hl';
-        this.root.appendChild(el);
+        this.underlay.appendChild(el);
         this.searchMarks.set(m.id, el);
       }
       el.classList.toggle('cur', m.cur);
@@ -1526,7 +1584,7 @@ export class DomOverlay implements IOverlay {
     if (!el) {
       el = document.createElement('div');
       el.className = 'obj-label';
-      this.root.appendChild(el);
+      this.underlay.appendChild(el);
       this.labels.set(id, el);
     }
     // Nota adesiva: bloco amarelo sobre o card, multi-linha, truncado pelo
