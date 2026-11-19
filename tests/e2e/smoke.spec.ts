@@ -4,6 +4,11 @@
  *  - SQLite (OPFS ou fallback IndexedDB) inicializa e relata backend
  *  - cena de demonstração semeada
  *  - uma interação (arraste/toss) não quebra
+ *
+ * PR4.4 — desde o prédio 3D como primeira tela, os testes que interagem com a
+ * cena das caixas abrem com `?nobuilding=1` (entram direto na caixa, sem o
+ * prédio cobrindo o canvas). Exceções: o teste de carga e o M1 cobrem a
+ * primeira tela (prédio + HUD/tema).
  */
 import { test, expect } from '@playwright/test';
 
@@ -66,6 +71,7 @@ test('app inicializa com canvas, SQLite e cena semeada', async ({ page }) => {
 });
 
 test('M1: labels de arquivo, presets de câmera e tema funcionam', async ({ page }) => {
+  // Primeira tela (prédio 3D): HUD, labels e tema têm de funcionar aqui
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
@@ -95,8 +101,51 @@ test('M1: labels de arquivo, presets de câmera e tema funcionam', async ({ page
   expect(themeIdx).toBe(1);
 });
 
+test('PR4.13: ícones abrem/fecham os painéis Andares e Resumo nas caixas', async ({ page }) => {
+  await page.goto('/?nobuilding=1');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+  await page.waitForTimeout(1200);
+
+  const summary = page.locator('.bv-summary');
+  const floors = page.locator('.bv-floors');
+  const floorsBtn = page.locator('.floors-btn');
+  const statsBtn = page.locator('.stats-btn');
+
+  // Nas caixas os dois painéis nascem fechados (cena limpa) e os ícones apagados
+  await expect(summary).toBeHidden();
+  await expect(floors).toBeHidden();
+  await expect(floorsBtn).not.toHaveClass(/sel/);
+  await expect(statsBtn).not.toHaveClass(/sel/);
+
+  // ☰ Andares: abre com a lista de caixas (navegação rápida entre andares)
+  await floorsBtn.click();
+  await expect(floors).toBeVisible();
+  await expect(floors.getByText('F1', { exact: true })).toBeVisible();
+  await expect(floorsBtn).toHaveClass(/sel/);
+
+  // 📊 Resumo: abre por cima, sem fechar o de andares
+  await statsBtn.click();
+  await expect(summary).toBeVisible();
+  await expect(summary.getByText('Resumo')).toBeVisible();
+  await expect(floors).toBeVisible();
+  await expect(statsBtn).toHaveClass(/sel/);
+
+  // Fechar um não fecha o outro
+  await floorsBtn.click();
+  await expect(floors).toBeHidden();
+  await expect(summary).toBeVisible();
+  await expect(floorsBtn).not.toHaveClass(/sel/);
+
+  // Navegar para um andar a partir do painel e o menu permanece aberto
+  await floorsBtn.click();
+  await floors.getByText('F1', { exact: true }).click();
+  await page.waitForTimeout(600);
+  await expect(floors).toBeVisible();
+  await expect(floorsBtn).toHaveClass(/sel/);
+});
+
 test('M2: serviço de filesystem ativo (modo + importação não quebra)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Modo FS reportado (fs-access no Chromium headless com permissão, senão opfs)
@@ -114,7 +163,7 @@ test('M2: serviço de filesystem ativo (modo + importação não quebra)', async
 });
 
 test('M6: notas adesivas criam/editam via API da cena', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const before = await page.evaluate(() => window.__bumptop!.world.objectCount());
@@ -144,7 +193,7 @@ test('M6: notas adesivas criam/editam via API da cena', async ({ page }) => {
 });
 
 test('interação (arraste) não lança erro', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const box = await page.locator('#scene-root > canvas').boundingBox();
@@ -164,7 +213,7 @@ test('interação (arraste) não lança erro', async ({ page }) => {
   expect(count).toBeGreaterThan(0);
 });
 
-test('menu de contexto: botão direito → criar nota → editar → excluir', async ({ page }) => {  await page.goto('/');
+test('menu de contexto: botão direito → criar nota → editar → excluir', async ({ page }) => {  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const box = (await page.locator('#scene-root > canvas').boundingBox())!;
@@ -207,7 +256,7 @@ test('menu de contexto: botão direito → criar nota → editar → excluir', a
 });
 
 test('laço (Fase 7): mouse no chão vazio desenha o retângulo e seleciona', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const box = (await page.locator('#scene-root > canvas').boundingBox())!;
@@ -235,7 +284,7 @@ test('laço (Fase 7): mouse no chão vazio desenha o retângulo e seleciona', as
 });
 
 test('laço: clicar no chão vazio sem arrastar NÃO deixa seleção', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const box = (await page.locator('#scene-root > canvas').boundingBox())!;
@@ -248,7 +297,7 @@ test('laço: clicar no chão vazio sem arrastar NÃO deixa seleção', async ({ 
 });
 
 test('P0: botão Reset Camera restaura a vista padrão', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Sai da vista padrão (preset 2 = top-down, distância 300)
@@ -256,9 +305,9 @@ test('P0: botão Reset Camera restaura a vista padrão', async ({ page }) => {
   const moved = await page.evaluate(
     () => (window.__bumptop!.world.getCamera() as { distance: number }).distance,
   );
-  expect(moved).not.toBe(210);
+  expect(moved).not.toBe(329);
 
-  // Botão no canto superior direito → volta ao preset 1 (distância 210)
+  // Botão no canto superior direito → volta ao preset 1 (distância 329)
   const btn = page.getByRole('button', { name: 'Redefinir câmera' });
   await expect(btn).toBeVisible();
   await btn.click();
@@ -266,11 +315,11 @@ test('P0: botão Reset Camera restaura a vista padrão', async ({ page }) => {
   const after = await page.evaluate(
     () => (window.__bumptop!.world.getCamera() as { distance: number }).distance,
   );
-  expect(after).toBe(210);
+  expect(after).toBe(329);
 });
 
 test('P0: todo item do menu de contexto tem tooltip (data-hint)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const box = (await page.locator('#scene-root > canvas').boundingBox())!;
@@ -289,7 +338,7 @@ test('P0: todo item do menu de contexto tem tooltip (data-hint)', async ({ page 
 });
 
 test('P1: Pile Widget Halo aparece ao pairar sobre uma pilha com botões e tooltips', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Aguarda os itens da cena demo assentarem no chão com a física
@@ -348,7 +397,7 @@ test('P1: Pile Widget Halo aparece ao pairar sobre uma pilha com botões e toolt
 });
 
 test('P1: Dwell & Scrub exibe anel verde e faixa de miniaturas ao repousar sobre pilha', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Aguarda os itens da cena demo assentarem no chão com a física
@@ -404,7 +453,7 @@ test('P1: Dwell & Scrub exibe anel verde e faixa de miniaturas ao repousar sobre
 });
 
 test('P1: Exploding Piles & Auto-Align toggles no menu de contexto e Sacudir pilha', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const box = (await page.locator('#scene-root > canvas').boundingBox())!;
@@ -462,7 +511,7 @@ test('P1: Exploding Piles & Auto-Align toggles no menu de contexto e Sacudir pil
 });
 
 test('P1: duplo-clique na parede foca a câmera na vista frontal (item 4)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Aguarda os itens da cena demo assentarem no chão com a física
@@ -498,7 +547,7 @@ test('P1: duplo-clique na parede foca a câmera na vista frontal (item 4)', asyn
 });
 
 test('P1: modal de preview in-app abre imagem/texto/pdf e fecha (item 3)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   const modal = page.locator('[data-testid="file-preview"]');
@@ -543,7 +592,7 @@ test('P1: modal de preview in-app abre imagem/texto/pdf e fecha (item 3)', async
 });
 
 test('P1: Nova pasta no menu do chão cria pasta virtual na cena (item 6)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Aguarda os itens assentarem
@@ -592,7 +641,7 @@ test('P1: Nova pasta no menu do chão cria pasta virtual na cena (item 6)', asyn
 });
 
 test('P1: soltar arquivo sobre a pasta no MEIO da sala move o arquivo (fix do drop)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
   await page.waitForFunction(() => {
     const w = window.__bumptop?.world;
@@ -683,7 +732,7 @@ test('P1: soltar arquivo sobre a pasta no MEIO da sala move o arquivo (fix do dr
 });
 
 test('P1: excluir pasta remove ícone + diretório OPFS e o watcher não recria', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
   await page.waitForFunction(() => {
     const w = window.__bumptop?.world;
@@ -737,7 +786,7 @@ test('P1: excluir pasta remove ícone + diretório OPFS e o watcher não recria'
 
 test.describe('PR8', () => {
   test('arrastar arquivo DO SO para a cena cria o objeto com conteúdo real', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -805,7 +854,7 @@ test.describe('PR8', () => {
   });
 
   test('clique na nota lê o conteúdo completo; card mostra texto truncado', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -853,7 +902,7 @@ test.describe('PR8', () => {
 
 test.describe('PR9', () => {
   test('duplo-clique na pilha abre grade com painel de vidro + ✕; ✕ fecha a pilha', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -923,7 +972,7 @@ test.describe('PR9', () => {
   });
 
   test('duplo-clique numa pasta abre o modal de vidro com o conteúdo', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -970,7 +1019,7 @@ test.describe('PR9', () => {
 
 test.describe('PR10', () => {
   test('item pregado desliza na parede (continua pregado) e desprega arrastando ao chão', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -1040,7 +1089,7 @@ test.describe('PR10', () => {
   });
 
   test('imagem importada vira quadro; botão direito → Configurações da imagem → moldura on/off', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -1097,7 +1146,7 @@ test.describe('PR10', () => {
   });
 
   test('pasta mostra contador que muda com moveInto; modal tira (⇪) e exclui (✕)', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -1178,7 +1227,7 @@ test.describe('PR10', () => {
 
 test.describe('PR13', () => {
   test('nota abre o editor WYSIWYG GRANDE; negrito renderiza ao vivo e persiste', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -1251,7 +1300,7 @@ test.describe('PR13', () => {
   });
 
   test('checkbox clicável com riscado e lembrete ⏰ funcionam no editor', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForFunction(() => {
       const w = window.__bumptop?.world;
@@ -1318,7 +1367,7 @@ test.describe('PR13', () => {
 
 test.describe('PR16 — colar com formatação + ícones de zoom', () => {
   test('colar HTML (estilo Google Keep) preserva parágrafos e negrito/itálico', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
     const notaId = await page.evaluate(() => {
@@ -1336,7 +1385,8 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
       return window.__bumptop!.renderer.projectToScreen(pos);
     }, notaId);
     const box = (await page.locator('#scene-root > canvas').boundingBox())!;
-    await page.mouse.click(box.x + tela.x, box.y + tela.y);
+    // f17d34b — notas abrem no DUPLO-clique (clique simples só seleciona)
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
     const modal = page.locator('[data-testid="note-rich"]');
     await expect(modal).toBeVisible({ timeout: 4000 });
 
@@ -1380,16 +1430,18 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
 
-  test('botões de zoom usam ícones SVG (não emoji)', async ({ page }) => {
-    await page.goto('/');
+  test('botões da barra usam ícones SVG (não emoji)', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
     await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
     await page.waitForTimeout(600);
+    // Todos os botões da barra têm ícone SVG: reset de câmera, tema, laço,
+    // busca (PR18), engrenagem (PR4a), conta (PR27), prédio (PR4.4),
+    // voltar (PR4.4) e os ícones de painel (PR4.13: andares/resumo).
+    const total = await page.locator('.zoom-controls button').count();
     const svgs = await page.locator('.zoom-controls button svg').count();
-    expect(svgs).toBe(6); // zoom-in, zoom-out, busca 🔍 (PR18), engrenagem (PR4a), conta (PR27) e prédio (PR4.4)
-    // O "+" do zoom-in e o traço do zoom-out desenhados no SVG
-    const zin = await page.locator('.zoom-controls button').first().locator('svg line').count();
-    expect(zin).toBe(3); // alça + traços do +
-    const zout = await page.locator('.zoom-controls button').nth(1).locator('svg line').count();
-    expect(zout).toBe(2); // alça + traço do −
+    expect(svgs).toBe(total);
+    expect(svgs).toBeGreaterThanOrEqual(8);
+    // PR842ec9b — os botões +/− viraram barra deslizável de zoom
+    await expect(page.locator('.zoom-slider')).toBeVisible();
   });
 });

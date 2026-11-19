@@ -19,8 +19,8 @@ TypeScript, Vite 8, three.js (render), Rapier 3D WASM (física), SQLite WASM em 
 npm install
 npm run dev          # http://localhost:5173
 npm run typecheck
-npm test             # unit (Vitest)  — 219 testes
-npm run test:e2e     # E2E (Playwright) — 63 passam; 6 pulados; 1 falha pré-existente (PR10, ver §5.5)
+npm test             # unit (Vitest)  — 226 testes
+npm run test:e2e     # E2E (Playwright) — 66 passam; 6 pulados; 0 falhas (PR #56)
 npm run lint:arch    # garante que src/core/** continua puro
 npm run build
 node scripts/validate-sheets.mjs   # validação das folhas finas (BASE_URL=http://localhost:5174 se a porta padrão estiver ocupada)
@@ -49,7 +49,7 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 
 ## 4. Estado atual: o que foi feito nesta sessão (todo já na `main`)
 
-> **Nota (18/11/2026):** esta tabela é o histórico da primeira sessão (PR1/PR2). O estado **recente** do projeto — Control Manager (fases 4a, 4.2, 4.3 e 4.4), login/D1 (PR27) e as pendências abertas — está em **§8**. Contadores atualizados em §2 (219 unit / 63 E2E passando).
+> **Nota (18/11/2026):** esta tabela é o histórico da primeira sessão (PR1/PR2). O estado **recente** do projeto — Control Manager (fases 4a, 4.2, 4.3 e 4.4), login/D1 (PR27), perfil do usuário (PR4.12) e as pendências abertas — está em **§8**. Contadores atualizados em §2 (226 unit / 66 E2E passando).
 
 | Commit / PR | O que mudou |
 |---|---|
@@ -127,7 +127,10 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
    - **PR4.3 ✅ — Tipos de caixa**: `BoxType` funcional (`'comum'|'root'|'kanban'|'backlog'`). `World.setBoxType` (recusa `box-default`) + porta `setRoomType`/`setRoomDashboard` em IRenderer. **ROOT** = dashboard pixel-voxel na parede norte (canvas 512×256, NearestFilter; `syncDashboard()` no `update()` só empurra stats quando a assinatura muda — dirty flag). **Kanban** = 3 raias verticais no chão (A Fazer/Fazendo/Feito) + `meta.kanbanLane` 0..2 pela posição x, atualizado em `addBox`/`placeAt`. Painel: select `.boxes-type-sel` (Backlog desabilitado), badge `.boxes-type-badge` no item, `boxcreate` com `detail` do tipo. Sonda: `scripts/validate-pr4c.mjs` (8/8 no wrangler e em produção — ATENÇÃO: fecha o modal e espera 10 s antes do reload; recarregar com save em andamento abre o OPFS em conflito e o snapshot não carrega). Regressões produção: PR4b 8/8 · PR4a 6/6 · PR27 13/13 · PR18 6/6 · PR17 4/4. Playwright 63/64 (falha pré-existente PR10).
    - **PR4.4 ✅ — Tela de entrada = PRÉDIO com andares** (PR #39, +431 linhas, `src/building/BuildingView.ts` com 306): prédio 3D onde **cada andar = uma caixa existente** (rótulo `F{n}` em sprite, cor por `BoxType`, `cam.ty` recentrado no meio do prédio; sem caixas → "chão" placeholder `__empty__`). Render em canvas próprio (scene/camera/WebGLRenderer próprios, container `z-index: 50`) com fade in/out (~370 ms), órbita por arrastar/zoom e raycast no clique do andar. Fluxo: **clique no andar** → fade-out → `setCurrentBox` + toast "Entrando na caixa" → mostra **"↩ Voltar ao Prédio"** (`.building-back-btn`); **botão 🏢** (`.building-btn`, barra de zoom) alterna prédio/caixa a qualquer momento. Referência do dono: arc0050 (`C:\Projetos\BumpTop3D\arc0050-1.0.1\arc0050`, imagem `image-1.png`). **Validado em produção (18/11/2026)**: bundle `index-*.js` contém as strings do PR + sonda funcional **6/6** (botão presente, prédio visível, entra no andar com fade+toast, volta ao prédio, 0 erros de console).
    - **Pendente do item 4 — Backlog (Taiga)**: select de tipo já oferece "Backlog (em breve)" desabilitado; a implementação (mapear caixas/issues do **Taiga** `taiga.fnde.gov.br` — API `/api/v1` via Pages Functions por CORS) é **PR próprio** — é o "item 6" da lista do dono (planejar antes de codar).
+   - **PR4.12 ✅ — perfil do usuário + loading do prédio** (PR #55): modal de perfil (avatar, troca de senha, logout via Taiga), `initUserBuilding()` com tela de loading e sync de projetos.
+   - **PR4.13 ✅ — ícones de painel nas caixas + fix do tema** (PR #56): (a) o container do prédio estava em `z-index: 50` sobre `document.body` e cobria o `#overlay-root` (z 10) — a **barra de botões inteira era inacessível na primeira tela** (não dava para trocar o tema); agora `z 5` (acima da cena, abaixo do HUD). (b) novos botões **☰ Andares** e **📊 Resumo** na barra abrem/fecham os painéis **também no ambiente das caixas** (host `boxPanelHost` z 8, fora do fade do prédio; labels/`search-hl` foram para uma camada `underlay` z 2 para continuarem atrás do prédio). `show()` reabre os dois painéis / `hide()` fecha (navegar entre andares não fecha o menu). Bug colateral corrigido: com `?nobuilding=1` o `loadingOverlay` (invisível, `pointer-events: auto`) bloqueava os cliques nos ~1.5 s iniciais. Suíte E2E atualizada para o comportamento do `main` (notas por duplo-clique `f17d34b`, preset 1 = 329, voo da busca centralizando `423579d`, testes de cena com `?nobuilding=1`): **66/66 verdes** (o `main` tinha 42 falhas — ver §5.6).
 2. Reset/backup por usuário: a cena vai em UMA linha por usuário (sem histórico de versões) — merge de mudanças offline não existe (nuvem manda).
 3. Rate limit global (KV/DO) e verificação de e-mail: não implementados (v1).
 4. PWA: cache do SW pode servir bundle velho — Ctrl+F5; após bind do D1, o re-deploy é o que ativa o binding das Functions.
-5. **Quebra pré-existente na `main` (nov 2026)**: teste E2E PR10 "item pregado desliza na parede" (mobile) falha SEM nenhuma mudança local (reproduzido no stash, ambiente SwiftShader) — investigar física/pendência separada.
+5. ~~**Quebra pré-existente na `main` (nov 2026)**~~ — **RESOLVIDA no PR #56**: os testes de cena agora abrem com `?nobuilding=1` (a primeira tela é o prédio desde o PR4.4 e o canvas das caixas ficava coberto); o `loadingOverlay` com `?nobuilding=1` também foi corrigido (bloqueava cliques iniciais). Playwright **66/66**.
+6. **Estado dos deploys**: Vercel com conta bloqueada (check vermelho pré-existente em todos os PRs — ignorar); Netlify de produção pausado; **Cloudflare Pages** é o deploy real (`bumptopweb.pages.dev`, publica a `main`); deploy previews saem no Netlify/Cloudflare.

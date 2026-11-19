@@ -300,7 +300,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
 
   // PR4.12 — Carrega o Prédio 3D do Usuário com tela de loading e sincronização automática
   async function initUserBuilding(): Promise<void> {
-    buildingView.showLoading(t('ui.building.loading'), t('ui.building.loadingSub'));
+    // Com ?nobuilding=1 o prédio fica invisível (container opacity 0), mas o
+    // loadingOverlay é filho dele com pointer-events:auto → bloqueava a cena
+    // inteira nos ~1.5s iniciais (cliques do menu de contexto "não abriam").
+    if (!skipBuilding) {
+      buildingView.showLoading(t('ui.building.loading'), t('ui.building.loadingSub'));
+    }
 
     // 1) Carrega cena persistida
     try {
@@ -430,6 +435,15 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       }
     });
   });
+
+  // PR4.13 — ícones do HUD (☰ Andares / 📊 Resumo) espelham o estado dos
+  // painéis: aceso = aberto. show() dispara a sincronização inicial.
+  buildingView.onPanelsChange((floors, summary) => {
+    overlay.setPanelActive('floors', floors);
+    overlay.setPanelActive('summary', summary);
+  });
+  overlay.setPanelActive('floors', buildingView.isPanelOpen('floors'));
+  overlay.setPanelActive('summary', buildingView.isPanelOpen('summary'));
 
   if (!skipBuilding) {
     buildingView.show();
@@ -1328,6 +1342,15 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       buildingView.show();
     }
   });
+
+  // PR4.13 — ☰ Andares / 📊 Resumo: abrem e fecham TAMBÉM no ambiente das
+  // caixas (os painéis saem do dashboard do prédio e flutuam sobre a cena).
+  overlayRoot.addEventListener('floorspanel', () => {
+    if (buildingView.togglePanel('floors')) updateBuildingStats();
+  });
+  overlayRoot.addEventListener('statspanel', () => {
+    if (buildingView.togglePanel('summary')) updateBuildingStats();
+  });
   overlayRoot.addEventListener('buildingback', () => {
     overlay.hideBuildingBack();
     buildingView.setBoxes(world.listBoxes());
@@ -1538,7 +1561,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   overlay.onZoomSlider((distance: number) => {
     world.setCamera({ ...world.getCamera(), distance });
   });
-  // Inicializa o slider com a distância padrão do preset 1 (distance: 210)
+  // Inicializa o slider com a distância do preset 1 (distance: 329)
   overlay.setZoomSliderValue(329);
   overlay.onPileCloseClick(() => {
     if (world.closeOpenPile()) overlay.toast(t('toast.pileClosed'));

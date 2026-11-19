@@ -155,6 +155,11 @@ test('PR15: modo laço no toque — botão liga, arrasto seleciona vários, toqu
 // teclado nunca cobre o campo de digitação nem a barra de ferramentas.
 // -------------------------------------------------------------------------
 test('PR17: editor da nota em folha tela-cheia no mobile + meta resizes-content', async ({ page }) => {
+  // PR4.4 — a primeira tela é o prédio; este teste interage com a cena das
+  // caixas, então recarrega direto nela (sem o prédio cobrindo o canvas)
+  await page.goto('/?nobuilding=1');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
   // 1) meta viewport pede resize do conteúdo com o teclado (Chrome/Android)
   const meta = await page.evaluate(() =>
     document.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? '',
@@ -175,7 +180,8 @@ test('PR17: editor da nota em folha tela-cheia no mobile + meta resizes-content'
     return window.__bumptop!.renderer.projectToScreen(pos);
   }, notaId);
   const box = (await page.locator('#scene-root > canvas').boundingBox())!;
-  await page.mouse.click(box.x + tela.x, box.y + tela.y);
+  // f17d34b — notas abrem no DUPLO-clique (clique simples só seleciona)
+  await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
   const modal = page.locator('[data-testid="note-rich"]');
   await expect(modal).toBeVisible({ timeout: 4000 });
 
@@ -202,6 +208,11 @@ test('PR17: editor da nota em folha tela-cheia no mobile + meta resizes-content'
 // Enter vai para a 1ª (zoom in) e as setas ‹ › navegam com contador.
 // -------------------------------------------------------------------------
 test('PR18: busca nas notas — destaque, voo até a nota e navegação', async ({ page }) => {
+  // PR4.4 — a primeira tela é o prédio; este teste interage com a cena das
+  // caixas, então recarrega direto nela (sem o prédio cobrindo o canvas)
+  await page.goto('/?nobuilding=1');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
   const [a, b] = await page.evaluate(() => {
     const w = window.__bumptop!.world;
     for (const o of w.listObjects()) {
@@ -225,13 +236,17 @@ test('PR18: busca nas notas — destaque, voo até a nota e navegação', async 
   await expect(page.locator('.search-hl')).toHaveCount(2);
   await expect(page.locator('.search-count')).toHaveText('0/2');
 
-  // 3) Enter → voa para a 1ª nota (contador 1/2, câmera aproxima)
+  // 3) Enter → voa para a 1ª nota (contador 1/2, câmera centraliza na nota)
   const cam0 = await page.evaluate(() => window.__bumptop!.world.getCamera());
   await page.locator('.search-input').press('Enter');
   await page.waitForTimeout(1400);
   const cam1 = await page.evaluate(() => window.__bumptop!.world.getCamera());
   await expect(page.locator('.search-count')).toHaveText('1/2');
-  expect(cam1.distance).toBeLessThan(cam0.distance * 0.8);
+  // 423579d — o voo mantém o zoom padrão (d1 = distância inicial) e apenas
+  // centraliza o alvo na nota; antes aproximava (d1 ≤ 110)
+  const nota = { x: -18, z: -18 };
+  expect(Math.hypot(cam1.target.x - nota.x, cam1.target.z - nota.z)).toBeLessThan(1);
+  expect(cam1.distance).toBeLessThanOrEqual(cam0.distance * 1.35); // dip de zoom no meio
 
   // 4) Setas: › → 2/2, ‹ → 1/2
   await page.locator('.search-next').click();

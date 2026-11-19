@@ -143,6 +143,16 @@ export class BuildingView {
   private dotsLayer!:  HTMLDivElement;
   private dotEls: Array<{ el: HTMLDivElement; match: SearchMatch; floorY: number }> = [];
 
+  // PR4.13 — painéis Resumo/Andares: referências p/ poder movê-los entre o
+  // dashboard do prédio e o host flutuante usado no ambiente das caixas.
+  private summaryPanel!: HTMLElement;
+  private floorsPanel!: HTMLElement;
+  private barsWrap!:     HTMLElement;
+  private boxPanelHost!: HTMLDivElement;
+  private summaryOpen = false;
+  private floorsOpen  = false;
+  private panelsChangeCb: ((floors: boolean, summary: boolean) => void) | null = null;
+
   // PR4.12 — Perfil do usuário e Loading
   private profileCb: (() => void) | null = null;
   private profileBtn!: HTMLElement;
@@ -157,12 +167,24 @@ export class BuildingView {
   // ── Mount ──────────────────────────────────────────────────────────────
 
   mount(parent: HTMLElement): void {
+    // z-index 5: ACIMA da cena (#scene-root, z auto) e ABAIXO do HUD
+    // (#overlay-root, z 10) — antes era 50 e o canvas do prédio cobria toda a
+    // barra de botões (tema/zoom ficavam inacessíveis na primeira tela).
     this.container = el('div', {
       position: 'absolute', inset: '0',
-      zIndex: '50', opacity: '0',
+      zIndex: '5', opacity: '0',
       pointerEvents: 'none', transition: 'none',
     });
     parent.appendChild(this.container);
+
+    // PR4.13 — host dos painéis quando abertos no ambiente das caixas.
+    // Vive FORA do container (não recebe o fade do prédio) e em z 8: abaixo do
+    // HUD (z 10) p/ os botões continuarem clicáveis por cima, acima da cena.
+    this.boxPanelHost = el('div', {
+      position: 'fixed', inset: '0',
+      zIndex: '8', pointerEvents: 'none',
+    });
+    parent.appendChild(this.boxPanelHost);
 
     // Tooltip flutuante
     this.tooltip = el('div', {
@@ -220,6 +242,9 @@ export class BuildingView {
     this.container.appendChild(this.dotsLayer);
 
     this._bindEvents();
+    // Estado inicial dos painéis: nas caixas (prédio ainda não mostrado) ficam
+    // fechados; show() reabre os dois quando o prédio é exibido.
+    this._applyPanels();
     this._tick();
   }
 
@@ -234,8 +259,10 @@ export class BuildingView {
     this.container.appendChild(this.dashOverlay);
 
     // ── Painel Esquerdo ───────────────────────────────────
+    // top 60px: o HUD (barra de zoom/tema) renderiza ACIMA do prédio desde o
+    // PR4.13 — o painel desce para não ficar escondido sob a barra.
     const leftPanel = el('div', {
-      position: 'absolute', top: '16px', left: '16px',
+      position: 'absolute', top: '60px', left: '16px',
       width: '200px',
       background: 'rgba(10,15,22,0.82)',
       border: '1px solid rgba(56,189,248,0.18)',
@@ -333,6 +360,12 @@ export class BuildingView {
     const barsWrap = el('div', { display: 'flex', flexDirection: 'column', gap: '4px' });
     barsWrap.id = 'bv-bars';
     leftPanel.appendChild(barsWrap);
+
+    // PR4.13 — refs p/ mover o painel entre o prédio e as caixas (e p/ o
+    // setStats achar as barras sem depender de querySelector no dashOverlay)
+    this.barsWrap     = barsWrap;
+    this.summaryPanel = leftPanel;
+    leftPanel.className = 'bv-summary';
 
     this.dashOverlay.appendChild(leftPanel);
 
@@ -438,6 +471,10 @@ export class BuildingView {
 
     this.floorListEl = el('div', { display: 'flex', flexDirection: 'column', gap: '5px' });
     rightPanel.appendChild(this.floorListEl);
+
+    // PR4.13 — ref p/ mover o painel entre o prédio e as caixas
+    this.floorsPanel = rightPanel;
+    rightPanel.className = 'bv-floors';
 
     this.dashOverlay.appendChild(rightPanel);
 
@@ -963,8 +1000,8 @@ export class BuildingView {
       { value: others, color: '#475569' },
     ]);
 
-    // Barras por andar
-    const barsWrap = this.dashOverlay.querySelector('#bv-bars') as HTMLElement | null;
+    // Barras por andar (ref direta: o painel pode estar fora do dashOverlay)
+    const barsWrap = this.barsWrap;
     if (barsWrap) {
       barsWrap.innerHTML = '';
       const maxItems = Math.max(1, ...data.boxes.map(b => b.notes + b.photos + b.documents + b.others));
@@ -1080,6 +1117,10 @@ export class BuildingView {
     this.visible  = true;
     this.fadeDir  = 1;
     this.fadeCb   = cb ?? null;
+    // No prédio os dois painéis nascem abertos (comportamento original)
+    this.summaryOpen = true;
+    this.floorsOpen  = true;
+    this._applyPanels();
   }
 
   hide(cb?: () => void): void {
@@ -1087,9 +1128,56 @@ export class BuildingView {
     this.visible  = false;
     this.fadeDir  = -1;
     this.fadeCb   = cb ?? null;
+    // Saindo do prédio os painéis voltam pro host e fecham (cena limpa nas
+    // caixas) — reabrem pelos ícones do HUD. Se já estamos nas caixas, o
+    // early-return acima preserva o que o usuário abriu (navegação entre
+    // andares não fecha o menu).
+    this.summaryOpen = false;
+    this.floorsOpen  = false;
+    this._applyPanels();
   }
 
   isVisible(): boolean { return this.visible; }
+
+  // ── PR4.13 — Painéis Resumo/Andares no prédio E nas caixas ─────────────
+
+  /** Alterna um painel; retorna true se ele ficou aberto. */
+  togglePanel(which: 'summary' | 'floors'): boolean {
+    if (which === 'summary') this.summaryOpen = !this.summaryOpen;
+    else this.floorsOpen = !this.floorsOpen;
+    this._applyPanels();
+    return which === 'summary' ? this.summaryOpen : this.floorsOpen;
+  }
+
+  isPanelOpen(which: 'summary' | 'floors'): boolean {
+    return which === 'summary' ? this.summaryOpen : this.floorsOpen;
+  }
+
+  /** Sincroniza os ícones do HUD com o estado dos painéis. */
+  onPanelsChange(cb: (floors: boolean, summary: boolean) => void): void {
+    this.panelsChangeCb = cb;
+  }
+
+  /**
+   * Coloca cada painel no lugar certo: no prédio vivem no dashboard; nas
+   * caixas (container com fade/opacity 0) vão para o host flutuante, fora do
+   * fade, para continuarem visíveis e clicáveis sobre a cena.
+   */
+  private _applyPanels(): void {
+    if (!this.boxPanelHost || !this.dashOverlay) return;
+    const inBox = !this.visible;
+    const place = (panel: HTMLElement, open: boolean): void => {
+      panel.style.display = open ? '' : 'none';
+      const target = inBox && open ? this.boxPanelHost : this.dashOverlay;
+      if (panel.parentElement !== target) target.appendChild(panel);
+    };
+    place(this.summaryPanel, this.summaryOpen);
+    place(this.floorsPanel, this.floorsOpen);
+    // Nas caixas não existe o botão de perfil no canto → o painel de andares
+    // pode subir para o topo; no prédio ele fica abaixo do perfil (74px).
+    this.floorsPanel.style.top = inBox ? '16px' : '74px';
+    this.panelsChangeCb?.(this.floorsOpen, this.summaryOpen);
+  }
 
   onFloorClick(cb: FloorClickCallback):   void { this.clickCb     = cb; }
   onItemDotClick(cb: ItemClickCallback):  void { this.itemClickCb = cb; }
@@ -1104,5 +1192,6 @@ export class BuildingView {
     cancelAnimationFrame(this.raf);
     this.renderer.dispose();
     this.container.remove();
+    this.boxPanelHost.remove();
   }
 }

@@ -247,10 +247,25 @@ body {
     min-width: 16px;
   }
 }
-/* PR15 — botão "Modo laço" / PR18 — busca / PR27 — conta / PR4a — engrenagem */
+/* PR4.13 — painel Resumo: no celular a barra de controles quebra em 2-3
+   linhas, então o painel desce para não ficar escondido sob ela; e em telas
+   baixas ele rola em vez de estourar a viewport */
+.bv-summary {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+@media (max-width: 640px) {
+  .bv-summary {
+    top: 124px !important;
+  }
+}
+/* PR15 — botão "Modo laço" / PR18 — busca / PR27 — conta / PR4a — engrenagem
+   / PR4.13 — ícones de painel (Andares/Resumo): aceso = painel aberto */
 .zoom-controls .lasso-btn.sel,
 .zoom-controls .search-btn.sel,
-.zoom-controls .settings-btn.sel {
+.zoom-controls .settings-btn.sel,
+.zoom-controls .floors-btn.sel,
+.zoom-controls .stats-btn.sel {
   background: #2f6fed;
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5);
 }
