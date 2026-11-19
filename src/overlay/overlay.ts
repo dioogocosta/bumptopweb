@@ -1781,6 +1781,331 @@ export class DomOverlay implements IOverlay {
     });
   }
 
+  /** PR4.12 — Modal de Perfil de Usuário com troca de foto, troca de senha e logout. */
+  showUserProfileModal(spec: {
+    name: string;
+    email?: string;
+    username?: string;
+    photo?: string | null;
+    isAuth: boolean;
+    taigaConnected: boolean;
+    onChangePhoto?: (dataUrl: string) => void;
+    onChangePassword?: (currentPass: string, newPass: string) => Promise<{ ok: boolean; error?: string }>;
+    onSignOut?: () => void;
+    onConnectTaiga?: (user: string, pass: string, token?: string) => Promise<{ ok: boolean; error?: string }>;
+  }): void {
+    const existing = this.root.querySelector('.user-profile-modal');
+    if (existing) existing.remove();
+
+    const m = document.createElement('div');
+    m.className = 'user-profile-modal';
+    m.style.pointerEvents = 'auto';
+
+    const card = document.createElement('div');
+    card.className = 'user-profile-card';
+    card.style.pointerEvents = 'auto';
+
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    card.addEventListener('click', (e) => e.stopPropagation());
+    m.addEventListener('pointerdown', (e) => {
+      if (e.target === m) e.stopPropagation();
+    });
+
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey);
+      m.remove();
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cleanup();
+    };
+    window.addEventListener('keydown', onKey);
+
+    m.addEventListener('click', (e) => {
+      if (e.target === m) cleanup();
+    });
+
+    // Botão Fechar
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'user-profile-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = 'Fechar';
+    closeBtn.addEventListener('click', cleanup);
+    card.appendChild(closeBtn);
+
+    // Header com Avatar e Nome
+    const header = document.createElement('div');
+    header.className = 'user-profile-header';
+
+    const avatarWrap = document.createElement('div');
+    avatarWrap.className = 'user-profile-avatar-wrap';
+
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'user-profile-avatar-large';
+
+    const renderAvatarImg = (photoSrc: string | null | undefined) => {
+      avatarEl.innerHTML = '';
+      if (photoSrc) {
+        const img = document.createElement('img');
+        img.src = photoSrc;
+        avatarEl.appendChild(img);
+      } else {
+        const initials = spec.name
+          .split(' ')
+          .filter(Boolean)
+          .map((s) => s[0])
+          .slice(0, 2)
+          .join('')
+          .toUpperCase() || 'U';
+        avatarEl.textContent = spec.isAuth ? initials : '👤';
+      }
+    };
+    renderAvatarImg(spec.photo);
+
+    // Botão de trocar foto de perfil
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          renderAvatarImg(reader.result);
+          spec.onChangePhoto?.(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    const changePhotoBtn = document.createElement('button');
+    changePhotoBtn.type = 'button';
+    changePhotoBtn.className = 'user-profile-change-photo-btn';
+    changePhotoBtn.innerHTML = '📷 ' + t('ui.profile.changePhoto');
+    changePhotoBtn.addEventListener('click', () => fileInput.click());
+
+    avatarWrap.appendChild(avatarEl);
+    avatarWrap.appendChild(fileInput);
+    avatarWrap.appendChild(changePhotoBtn);
+    header.appendChild(avatarWrap);
+
+    // Nome
+    const nameEl = document.createElement('div');
+    nameEl.className = 'user-profile-name';
+    nameEl.textContent = spec.name || (spec.isAuth ? 'Usuário Autenticado' : 'Visitante');
+    header.appendChild(nameEl);
+
+    // Email
+    if (spec.email) {
+      const emailEl = document.createElement('div');
+      emailEl.className = 'user-profile-email';
+      emailEl.textContent = spec.email;
+      header.appendChild(emailEl);
+    }
+
+    // Badge de status
+    const badge = document.createElement('div');
+    badge.className = `user-profile-badge ${spec.taigaConnected ? 'connected' : 'disconnected'}`;
+    badge.textContent = spec.taigaConnected
+      ? '✓ Taiga FNDE Conectado'
+      : '○ Não conectado ao Taiga';
+    header.appendChild(badge);
+
+    card.appendChild(header);
+
+    // Seção de Trocar Senha ou Fazer Login
+    if (spec.isAuth || spec.taigaConnected) {
+      // 1. Seção Trocar Senha
+      const passSec = document.createElement('div');
+      passSec.className = 'user-profile-section';
+
+      const togglePassBtn = document.createElement('button');
+      togglePassBtn.type = 'button';
+      togglePassBtn.className = 'user-profile-btn-outline';
+      togglePassBtn.innerHTML = '🔑 ' + t('ui.profile.changePassword');
+
+      const passForm = document.createElement('form');
+      passForm.className = 'user-profile-form';
+      passForm.style.display = 'none';
+
+      const curPassInput = document.createElement('input');
+      curPassInput.type = 'password';
+      curPassInput.className = 'user-profile-input';
+      curPassInput.placeholder = t('ui.profile.currentPass');
+      curPassInput.required = true;
+
+      const newPassInput = document.createElement('input');
+      newPassInput.type = 'password';
+      newPassInput.className = 'user-profile-input';
+      newPassInput.placeholder = t('ui.profile.newPass');
+      newPassInput.required = true;
+
+      const confirmPassInput = document.createElement('input');
+      confirmPassInput.type = 'password';
+      confirmPassInput.className = 'user-profile-input';
+      confirmPassInput.placeholder = t('ui.profile.confirmPass');
+      confirmPassInput.required = true;
+
+      const passStatus = document.createElement('div');
+      passStatus.style.fontSize = '12px';
+      passStatus.style.display = 'none';
+
+      const submitPassBtn = document.createElement('button');
+      submitPassBtn.type = 'submit';
+      submitPassBtn.className = 'user-profile-submit';
+      submitPassBtn.textContent = t('ui.profile.updatePassBtn');
+
+      passForm.appendChild(curPassInput);
+      passForm.appendChild(newPassInput);
+      passForm.appendChild(confirmPassInput);
+      passForm.appendChild(passStatus);
+      passForm.appendChild(submitPassBtn);
+
+      togglePassBtn.addEventListener('click', () => {
+        const isHidden = passForm.style.display === 'none';
+        passForm.style.display = isHidden ? 'flex' : 'none';
+        if (isHidden) curPassInput.focus();
+      });
+
+      passForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const cur = curPassInput.value;
+        const n1 = newPassInput.value;
+        const n2 = confirmPassInput.value;
+        if (n1 !== n2) {
+          passStatus.style.display = 'block';
+          passStatus.style.color = '#f87171';
+          passStatus.textContent = t('ui.profile.passMismatch');
+          return;
+        }
+        submitPassBtn.disabled = true;
+        submitPassBtn.textContent = '...';
+        passStatus.style.display = 'none';
+        try {
+          const res = await spec.onChangePassword?.(cur, n1);
+          if (res?.ok) {
+            passStatus.style.display = 'block';
+            passStatus.style.color = '#34d399';
+            passStatus.textContent = t('ui.profile.passSuccess');
+            curPassInput.value = '';
+            newPassInput.value = '';
+            confirmPassInput.value = '';
+            this.toast(t('ui.profile.passSuccess'));
+          } else {
+            passStatus.style.display = 'block';
+            passStatus.style.color = '#f87171';
+            passStatus.textContent = res?.error || t('ui.taiga.invalidCredentials');
+          }
+        } catch (err: unknown) {
+          passStatus.style.display = 'block';
+          passStatus.style.color = '#f87171';
+          passStatus.textContent = err instanceof Error ? t(err.message) : t('ui.taiga.httpError');
+        } finally {
+          submitPassBtn.disabled = false;
+          submitPassBtn.textContent = t('ui.profile.updatePassBtn');
+        }
+      });
+
+      passSec.appendChild(togglePassBtn);
+      passSec.appendChild(passForm);
+      card.appendChild(passSec);
+
+      // 2. Seção Sair do Sistema
+      const outSec = document.createElement('div');
+      outSec.className = 'user-profile-section';
+
+      const signOutBtn = document.createElement('button');
+      signOutBtn.type = 'button';
+      signOutBtn.className = 'user-profile-btn-danger';
+      signOutBtn.innerHTML = '🚪 ' + t('ui.profile.signOut');
+      signOutBtn.addEventListener('click', () => {
+        cleanup();
+        spec.onSignOut?.();
+      });
+
+      outSec.appendChild(signOutBtn);
+      card.appendChild(outSec);
+    } else {
+      // Seção Login / Conectar Taiga
+      const loginSec = document.createElement('div');
+      loginSec.className = 'user-profile-section';
+
+      const loginTitle = document.createElement('div');
+      loginTitle.style.fontSize = '13px';
+      loginTitle.style.fontWeight = '700';
+      loginTitle.style.marginBottom = '10px';
+      loginTitle.textContent = t('ui.profile.signIn');
+
+      const loginForm = document.createElement('form');
+      loginForm.className = 'user-profile-form';
+
+      const userInput = document.createElement('input');
+      userInput.type = 'text';
+      userInput.className = 'user-profile-input';
+      userInput.placeholder = t('ui.taiga.userPh');
+      userInput.required = true;
+
+      const passInput = document.createElement('input');
+      passInput.type = 'password';
+      passInput.className = 'user-profile-input';
+      passInput.placeholder = t('ui.taiga.passLabel');
+      passInput.required = true;
+
+      const loginStatus = document.createElement('div');
+      loginStatus.style.fontSize = '12px';
+      loginStatus.style.display = 'none';
+
+      const loginBtn = document.createElement('button');
+      loginBtn.type = 'submit';
+      loginBtn.className = 'user-profile-submit';
+      loginBtn.textContent = t('ui.taiga.testAndAuth');
+
+      loginForm.appendChild(userInput);
+      loginForm.appendChild(passInput);
+      loginForm.appendChild(loginStatus);
+      loginForm.appendChild(loginBtn);
+
+      loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        loginBtn.disabled = true;
+        loginBtn.textContent = '...';
+        loginStatus.style.display = 'none';
+        try {
+          const res = await spec.onConnectTaiga?.(userInput.value, passInput.value);
+          if (res?.ok) {
+            cleanup();
+          } else {
+            loginStatus.style.display = 'block';
+            loginStatus.style.color = '#f87171';
+            loginStatus.textContent = res?.error || t('ui.taiga.invalidCredentials');
+          }
+        } catch (err: unknown) {
+          loginStatus.style.display = 'block';
+          loginStatus.style.color = '#f87171';
+          loginStatus.textContent = err instanceof Error ? t(err.message) : t('ui.taiga.invalidCredentials');
+        } finally {
+          loginBtn.disabled = false;
+          loginBtn.textContent = t('ui.taiga.testAndAuth');
+        }
+      });
+
+      loginSec.appendChild(loginTitle);
+      loginSec.appendChild(loginForm);
+      card.appendChild(loginSec);
+    }
+
+    m.appendChild(card);
+    this.root.appendChild(m);
+  }
+
+  hideUserProfileModal(): void {
+    const existing = this.root.querySelector('.user-profile-modal');
+    if (existing) existing.remove();
+  }
+
   /** PR4.9 — Modal de inspeção e detalhes completos de uma User Story do Taiga. */
   showStoryModal(story: TaigaStoryDetail): void {
     const existing = this.root.querySelector('.story-modal');

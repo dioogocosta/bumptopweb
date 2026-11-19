@@ -15,7 +15,22 @@ import { SqliteRepo } from '@persistence/sqlite/sqliteRepo';
 import { PointerInput } from '@input/pointer/pointerInput';
 import { DomOverlay } from '@overlay/overlay';
 import { CloudflareAuth } from '@auth/cloudflareAuth';
-import { TaigaError, fetchTaigaStories, fetchSprintStories, fetchTaigaSprints, resolveProjectId, initTaigaTokenFromUrl, fetchStoryDetail } from '@taiga/taiga';
+import {
+  TaigaError,
+  fetchTaigaStories,
+  fetchSprintStories,
+  fetchTaigaSprints,
+  fetchTaigaProjects,
+  resolveProjectId,
+  initTaigaTokenFromUrl,
+  fetchStoryDetail,
+  fetchTaigaMe,
+  getTaigaToken,
+  setTaigaToken,
+  loginTaiga,
+  changeTaigaPassword,
+  type TaigaUser,
+} from '@taiga/taiga';
 import { makeNoteTexture, makeTaigaCardTexture } from './noteTexture';
 import { isImagePath } from '../fs/thumbnails';
 import { MainLoop } from './main-loop';
@@ -213,6 +228,169 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     buildingView.setStats({ boxes });
   };
   updateBuildingStats();
+
+  // PR4.12 — Abre o modal de perfil de usuário unificado
+  async function openUserProfileModal(): Promise<void> {
+    const customAvatar = await repo.getSetting<string | null>('userAvatar', null);
+    const me = await fetchTaigaMe().catch(() => null);
+    const token = getTaigaToken();
+    const isAuth = !!me || !!auth.current();
+
+    overlay.showUserProfileModal({
+      name: me?.fullName || me?.username || auth.current()?.email || 'Visitante',
+      email: me?.email || auth.current()?.email,
+      username: me?.username,
+      photo: customAvatar || me?.photo || null,
+      isAuth,
+      taigaConnected: !!token && !!me,
+      onChangePhoto: (dataUrl) => {
+        void repo.setSetting('userAvatar', dataUrl);
+        buildingView.setUserProfile({
+          name: me?.fullName || me?.username || 'Usuário',
+          email: me?.email,
+          photo: dataUrl,
+          isAuth: true,
+        });
+        overlay.toast(t('ui.profile.changePhoto') + ': ' + t('ui.profile.passSuccess'));
+      },
+      onChangePassword: async (curPass, newPass) => {
+        try {
+          await changeTaigaPassword(curPass, newPass);
+          return { ok: true };
+        } catch (err: unknown) {
+          const msg = err instanceof TaigaError ? t(err.message) : t('ui.taiga.httpError');
+          return { ok: false, error: msg };
+        }
+      },
+      onSignOut: () => {
+        setTaigaToken(null);
+        void auth.signOut();
+        buildingView.setUserProfile({
+          name: 'Entrar / Perfil',
+          photo: null,
+          isAuth: false,
+        });
+        overlay.toast(t('ui.taiga.tokenRemoved'));
+      },
+      onConnectTaiga: async (user, pass, tok) => {
+        try {
+          if (user && pass) {
+            const newToken = await loginTaiga(user, pass);
+            setTaigaToken(newToken);
+          } else if (tok) {
+            setTaigaToken(tok);
+          }
+          const newMe = await fetchTaigaMe();
+          if (newMe) {
+            overlay.toast(`${t('ui.taiga.authSuccess')} (${newMe.fullName})`);
+            void initUserBuilding();
+            return { ok: true };
+          } else {
+            setTaigaToken(null);
+            return { ok: false, error: t('ui.taiga.invalidCredentials') };
+          }
+        } catch (err: unknown) {
+          setTaigaToken(null);
+          const msg = err instanceof TaigaError ? t(err.message) : t('ui.taiga.invalidCredentials');
+          return { ok: false, error: msg };
+        }
+      },
+    });
+  }
+
+  // PR4.12 — Carrega o Prédio 3D do Usuário com tela de loading e sincronização automática
+  async function initUserBuilding(): Promise<void> {
+    buildingView.showLoading(t('ui.building.loading'), t('ui.building.loadingSub'));
+
+    // 1) Carrega cena persistida
+    try {
+      const saved = await repo.loadScene();
+      if (saved && Array.isArray(saved.objects) && saved.objects.length > 0) {
+        world.loadSnapshot(saved);
+      } else {
+        seedDemoScene(world);
+      }
+    } catch {
+      seedDemoScene(world);
+    }
+
+    // 2) Avatar customizado salvo
+    const customAvatar = await repo.getSetting<string | null>('userAvatar', null);
+
+    // 3) Verifica sessão no Taiga
+    initTaigaTokenFromUrl();
+    const token = getTaigaToken();
+    let me: TaigaUser | null = null;
+    if (token) {
+      try {
+        me = await fetchTaigaMe();
+      } catch {}
+    }
+
+    if (me) {
+      const photo = customAvatar || me.photo || null;
+      buildingView.setUserProfile({
+        name: me.fullName || me.username,
+        email: me.email,
+        photo,
+        isAuth: true,
+      });
+
+      // Puxa projetos da conta logada no Taiga
+      try {
+        const projects = await fetchTaigaProjects();
+        if (projects.length > 0) {
+          let added = false;
+          for (const p of projects) {
+            const existing = world.listBoxes().find((b) => b.taigaProject === p.slug);
+            if (!existing) {
+              world.addBoxEntity(`[${p.name}]`, undefined, 'backlog', p.slug);
+              added = true;
+            }
+          }
+
+          // Se tem o projeto principal Marcos Prescricionais, garante também caixa de Sprint
+          const marcos = projects.find((p) => p.slug.includes('marcos'));
+          if (marcos) {
+            const hasSprint = world.listBoxes().some(
+              (b) => (b.type === 'sprint' || b.type === 'kanban') && b.taigaProject === marcos.slug,
+            );
+            if (!hasSprint) {
+              world.addBoxEntity(`Sprint - [${marcos.name}]`, undefined, 'sprint', marcos.slug);
+              added = true;
+            }
+          }
+
+          if (added) {
+            await repo.saveScene(world.toSnapshot()).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao sincronizar projetos do Taiga no prédio:', err);
+      }
+    } else {
+      buildingView.setUserProfile({
+        name: 'Entrar / Perfil',
+        photo: customAvatar,
+        isAuth: false,
+      });
+    }
+
+    // 4) Atualiza o Prédio 3D com todos os andares e estatísticas
+    buildingView.setBoxes(world.listBoxes());
+    updateBuildingStats();
+    buildingView.selectFloor(world.getCurrentBoxId());
+
+    // 5) Remove loading
+    buildingView.hideLoading();
+  }
+
+  buildingView.onProfileClick(() => {
+    void openUserProfileModal();
+  });
+
+  // Dispara a inicialização e sincronização do Prédio do usuário
+  void initUserBuilding();
 
   // Busca global no dashboard do prédio
   buildingView.onSearch((query) => {
@@ -1054,18 +1232,6 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (st) overlay.setSearchCount(st.index + 1, st.ids.length);
   });
 
-  // Persistência: carrega cena salva ou cria cenário de demonstração
-  const saved = await repo.loadScene();
-  if (saved && saved.objects.length > 0) {
-    world.loadSnapshot(saved);
-    overlay.toast(
-      t('toast.sceneRestored', { n: saved.objects.length, backend: repo.backend() }),
-    );
-  } else {
-    seedDemoScene(world);
-    overlay.toast(t('toast.newScene', { backend: repo.backend() }));
-  }
-
   // =========================================================================
   // PR4a — Control Manager: engrenagem abre o painel com as CAIXAS (espaços
   // chão+4 paredes onde pastas/arquivos/notas acontecem); clicar numa caixa
@@ -1173,12 +1339,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   });
 
   // =========================================================================
-  // PR27 — Conta (login/cadastro com Cloudflare D1) + sync da cena na nuvem
+  // PR27 / PR4.12 — Conta (login/cadastro) + Perfil unificado
   // =========================================================================
   overlayRoot.addEventListener('authtoggle', () => {
-    const cur = auth.current();
-    if (cur) overlay.showAuthModal({ mode: 'logged', email: cur.email, error: null });
-    else overlay.showAuthModal({ mode: 'in', email: '', error: null });
+    void openUserProfileModal();
   });
   overlayRoot.addEventListener('authswitch', () => {
     const mode = overlay.getAuthMode() === 'in' ? 'up' : 'in';

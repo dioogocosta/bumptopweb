@@ -59,6 +59,7 @@ export interface TaigaUser {
   username: string;
   fullName: string;
   email?: string;
+  photo?: string | null;
 }
 
 /** Um projeto do Taiga (público ou privado). */
@@ -174,17 +175,59 @@ export async function fetchTaigaMe(): Promise<TaigaUser | null> {
   const token = getTaigaToken();
   if (!token) return null;
   try {
-    const raw = await getJson<{ id: number; username: string; full_name?: string; email?: string }>('/users/me');
+    const raw = await getJson<{
+      id: number;
+      username: string;
+      full_name?: string;
+      email?: string;
+      photo?: string;
+      big_photo?: string;
+    }>('/users/me');
     if (!raw || typeof raw.id !== 'number') return null;
     return {
       id: raw.id,
       username: raw.username,
       fullName: raw.full_name || raw.username,
       email: raw.email,
+      photo: raw.big_photo || raw.photo || null,
     };
   } catch {
     return null;
   }
+}
+
+/** Troca a senha do usuário autenticado no Taiga via /users/change_password. */
+export async function changeTaigaPassword(currentPassword: string, newPassword: string): Promise<boolean> {
+  const token = getTaigaToken();
+  if (!token) throw new TaigaError('ui.taiga.missingCredentials');
+  const base = getApiBase();
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+  const body = JSON.stringify({
+    current_password: currentPassword,
+    password: newPassword,
+  });
+  let r: Response;
+  try {
+    r = await fetch(`${base}/users/change_password`, { method: 'POST', headers, body });
+  } catch {
+    if (base === PROXY_API) {
+      try {
+        r = await fetch(`${DIRECT_API}/users/change_password`, { method: 'POST', headers, body });
+      } catch {
+        throw new TaigaError('ui.taiga.netError');
+      }
+    } else {
+      throw new TaigaError('ui.taiga.netError');
+    }
+  }
+  if (!r.ok) {
+    throw new TaigaError('ui.taiga.invalidCredentials');
+  }
+  return true;
 }
 
 /** Lista os projetos disponíveis (públicos e privados da conta logada). */
