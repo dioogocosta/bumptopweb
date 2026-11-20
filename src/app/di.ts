@@ -366,7 +366,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       buildingView.hide();
       buildingView.hideLoading();
       overlay.setAuthState(null);
-      overlay.showAuthModal({ mode: 'in', email: '', error: null });
+      // Perfil completo na cara: abas Conta do BumpTop × Taiga FNDE + cadastro
+      // e "Esqueci a senha" — o visitante escolhe por onde entrar.
+      void openUserProfileModal();
       return; // sem snapshot, sem seedDemoScene, sem caixas: visitante vê zero
     }
 

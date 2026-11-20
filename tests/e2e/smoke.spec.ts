@@ -156,8 +156,9 @@ test('PR4.14: visitante confirmado (sem login) vê o muro e nada é carregado', 
   await page.goto('/');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
-  // Modal de login/cadastro na cara do visitante
-  await expect(page.locator('.auth-modal')).toBeVisible();
+  // Perfil/login na cara do visitante (abas Conta do BumpTop × Taiga FNDE)
+  await expect(page.locator('.user-profile-modal')).toBeVisible();
+  await expect(page.locator('.user-profile-tab').first()).toBeVisible();
 
   // Sem sessão = sem cena: nem snapshot, nem seed de demonstração
   const count = await page.evaluate(() => window.__bumptop!.world.objectCount());
@@ -168,7 +169,7 @@ test('PR4.14: visitante confirmado (sem login) vê o muro e nada é carregado', 
   await expect(page.locator('.bv-summary')).toBeHidden();
 
   // Fechar o muro não revela nada: cena continua vazia
-  await page.locator('.auth-close').click();
+  await page.locator('.user-profile-close').click();
   await page.waitForTimeout(400);
   const count2 = await page.evaluate(() => window.__bumptop!.world.objectCount());
   expect(count2).toBe(0);
@@ -186,6 +187,7 @@ test('PR4.14: com sessão confirmada o prédio e a cena abrem normalmente', asyn
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
 
   // Sem muro para usuário logado
+  await expect(page.locator('.user-profile-modal')).toBeHidden();
   await expect(page.locator('.auth-modal')).toBeHidden();
 
   // Cena carregada (demo da primeira visita)
