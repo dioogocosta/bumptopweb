@@ -19,9 +19,22 @@ export class CloudflareAuth implements IAuthPort {
    * funcional em modo local. Em produção com D1 bindado NUNCA dá 404.
    */
   private apiDown = false;
+  /**
+   * Muro de login (PR4.14) — `true` quando a ÚLTIMA checagem obteve JSON
+   * válido do backend: a sessão é CONHECIDA (logado ou visitante de fato).
+   * API ausente/quebrada (dev, preview, rede) → `false` = indeterminado, e o
+   * app segue em modo demo (fail-open) em vez de bloquear o acesso.
+   */
+  private sessionKnown = false;
 
   private markApiDown(): void {
     this.apiDown = true;
+    this.sessionKnown = false;
+  }
+
+  /** A sessão foi confirmada pelo backend na última checagem? */
+  isSessionKnown(): boolean {
+    return this.sessionKnown;
   }
 
   async getSession(): Promise<AuthSession | null> {
@@ -38,13 +51,18 @@ export class CloudflareAuth implements IAuthPort {
       }
       if (!r.ok) {
         this.session = null;
+        this.sessionKnown = false;
         return null;
       }
       const j = (await r.json().catch(() => null)) as { authenticated?: boolean; email?: string } | null;
+      // Só marca "conhecida" com JSON de forma válida — uma resposta que não é
+      // JSON (ex.: SPA fallback devolvendo index.html) fica indeterminada.
+      this.sessionKnown = j !== null && typeof j === 'object';
       this.session = j?.authenticated && j.email ? { email: j.email } : null;
       return this.session;
     } catch {
       this.session = null;
+      this.sessionKnown = false;
       return null;
     }
   }

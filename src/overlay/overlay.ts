@@ -8,6 +8,7 @@ import { THEMES } from '@core/theme/theme';
 import { NOTE_COLORS, computeReminder, noteTextToHtml } from '@core/util/notes';
 import {
   fetchTaigaProjects,
+  pickMyProjects,
   getTaigaToken,
   setTaigaToken,
   fetchTaigaMe,
@@ -561,7 +562,8 @@ export class DomOverlay implements IOverlay {
   private async fillProjectDatalist(dl: HTMLDataListElement): Promise<void> {
     try {
       dl.textContent = '';
-      const projetos = await fetchTaigaProjects();
+      // PR4.14 — só sugere projetos dos quais o usuário é membro
+      const projetos = pickMyProjects(await fetchTaigaProjects());
       this.cachedProjects = projetos;
       for (const p of projetos.slice(0, 100)) {
         const opt = document.createElement('option');
@@ -1268,6 +1270,13 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('authswitch', { bubbles: true }));
     });
     this.authForm.append(emailWrap, passWrap, this.authSubmitBtn, this.authSwitchBtn);
+    // PR4.14 — "Esqueci a senha" (recuperação de conta)
+    const forgotBtn = document.createElement('button');
+    forgotBtn.type = 'button';
+    forgotBtn.className = 'auth-forgot';
+    forgotBtn.textContent = t('ui.authForgot');
+    forgotBtn.addEventListener('click', () => this.showForgotPasswordModal());
+    this.authForm.appendChild(forgotBtn);
     // Sessão ativa: e-mail + botão Sair
     this.authLogged = document.createElement('div');
     this.authLogged.className = 'auth-logged';
@@ -1851,6 +1860,7 @@ export class DomOverlay implements IOverlay {
     onChangePassword?: (currentPass: string, newPass: string) => Promise<{ ok: boolean; error?: string }>;
     onSignOut?: () => void;
     onConnectTaiga?: (user: string, pass: string, token?: string) => Promise<{ ok: boolean; error?: string }>;
+    onAppAuth?: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   }): void {
     const existing = this.root.querySelector('.user-profile-modal');
     if (existing) existing.remove();
@@ -2087,18 +2097,111 @@ export class DomOverlay implements IOverlay {
       outSec.appendChild(signOutBtn);
       card.appendChild(outSec);
     } else {
-      // Seção Login / Conectar Taiga
+      // Seção Login / Cadastro — oferece ambos: Conta do App + Taiga FNDE
       const loginSec = document.createElement('div');
       loginSec.className = 'user-profile-section';
 
-      const loginTitle = document.createElement('div');
-      loginTitle.style.fontSize = '13px';
-      loginTitle.style.fontWeight = '700';
-      loginTitle.style.marginBottom = '10px';
-      loginTitle.textContent = t('ui.profile.signIn');
+      // Abas para alternar entre App Auth e Taiga Auth
+      const tabs = document.createElement('div');
+      tabs.className = 'user-profile-tabs';
 
-      const loginForm = document.createElement('form');
-      loginForm.className = 'user-profile-form';
+      const appTab = document.createElement('button');
+      appTab.type = 'button';
+      appTab.className = 'user-profile-tab active';
+      appTab.textContent = t('ui.profile.appAuth');
+
+      const taigaTab = document.createElement('button');
+      taigaTab.type = 'button';
+      taigaTab.className = 'user-profile-tab';
+      taigaTab.textContent = t('ui.profile.taigaAuth');
+
+      tabs.appendChild(appTab);
+      tabs.appendChild(taigaTab);
+      loginSec.appendChild(tabs);
+
+      // Painel App Auth (e-mail/senha do BumpTop)
+      const appPanel = document.createElement('div');
+      appPanel.className = 'user-profile-panel active';
+
+      const appTitle = document.createElement('div');
+      appTitle.style.fontSize = '13px';
+      appTitle.style.fontWeight = '700';
+      appTitle.style.marginBottom = '10px';
+      appTitle.textContent = t('ui.profile.signIn');
+      appPanel.appendChild(appTitle);
+
+      const appForm = document.createElement('form');
+      appForm.className = 'user-profile-form';
+
+      const appEmailInput = document.createElement('input');
+      appEmailInput.type = 'email';
+      appEmailInput.className = 'user-profile-input';
+      appEmailInput.placeholder = t('ui.authEmail');
+      appEmailInput.required = true;
+      appEmailInput.autocomplete = 'email';
+
+      const appPassInput = document.createElement('input');
+      appPassInput.type = 'password';
+      appPassInput.className = 'user-profile-input';
+      appPassInput.placeholder = t('ui.authPassword');
+      appPassInput.required = true;
+      appPassInput.autocomplete = 'current-password';
+
+      const appStatus = document.createElement('div');
+      appStatus.style.fontSize = '12px';
+      appStatus.style.display = 'none';
+
+      const appSubmitBtn = document.createElement('button');
+      appSubmitBtn.type = 'submit';
+      appSubmitBtn.className = 'user-profile-submit';
+      appSubmitBtn.textContent = t('ui.authSubmit');
+
+      // Link "Esqueci a senha"
+      const appForgotLink = document.createElement('a');
+      appForgotLink.href = '#';
+      appForgotLink.className = 'user-profile-forgot';
+      appForgotLink.textContent = t('ui.authForgot');
+      appForgotLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.showForgotPasswordModal();
+      });
+
+      appForm.appendChild(appEmailInput);
+      appForm.appendChild(appPassInput);
+      appForm.appendChild(appStatus);
+      appForm.appendChild(appSubmitBtn);
+      appForm.appendChild(appForgotLink);
+      appPanel.appendChild(appForm);
+
+      // Link "Criar conta" (alterna p/ modo cadastro no modal de auth)
+      const appSwitchLink = document.createElement('a');
+      appSwitchLink.href = '#';
+      appSwitchLink.style.fontSize = '12px';
+      appSwitchLink.style.marginTop = '8px';
+      appSwitchLink.style.display = 'block';
+      appSwitchLink.textContent = t('ui.authSwitchUp');
+      appSwitchLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        cleanup();
+        // Abre o modal de auth em modo cadastro
+        this.showAuthModal({ mode: 'up', email: '', error: null });
+      });
+      appPanel.appendChild(appSwitchLink);
+
+      // Painel Taiga Auth
+      const taigaPanel = document.createElement('div');
+      taigaPanel.className = 'user-profile-panel';
+      taigaPanel.style.display = 'none';
+
+      const taigaTitle = document.createElement('div');
+      taigaTitle.style.fontSize = '13px';
+      taigaTitle.style.fontWeight = '700';
+      taigaTitle.style.marginBottom = '10px';
+      taigaTitle.textContent = t('ui.profile.signIn');
+      taigaPanel.appendChild(taigaTitle);
+
+      const taigaForm = document.createElement('form');
+      taigaForm.className = 'user-profile-form';
 
       const userInput = document.createElement('input');
       userInput.type = 'text';
@@ -2112,51 +2215,203 @@ export class DomOverlay implements IOverlay {
       passInput.placeholder = t('ui.taiga.passLabel');
       passInput.required = true;
 
-      const loginStatus = document.createElement('div');
-      loginStatus.style.fontSize = '12px';
-      loginStatus.style.display = 'none';
+      const tokenInput = document.createElement('input');
+      tokenInput.type = 'text';
+      tokenInput.className = 'user-profile-input';
+      tokenInput.placeholder = t('ui.taiga.tokenPh');
+      tokenInput.style.marginTop = '8px';
 
-      const loginBtn = document.createElement('button');
-      loginBtn.type = 'submit';
-      loginBtn.className = 'user-profile-submit';
-      loginBtn.textContent = t('ui.taiga.testAndAuth');
+      const taigaStatus = document.createElement('div');
+      taigaStatus.style.fontSize = '12px';
+      taigaStatus.style.display = 'none';
 
-      loginForm.appendChild(userInput);
-      loginForm.appendChild(passInput);
-      loginForm.appendChild(loginStatus);
-      loginForm.appendChild(loginBtn);
+      const taigaBtn = document.createElement('button');
+      taigaBtn.type = 'submit';
+      taigaBtn.className = 'user-profile-submit';
+      taigaBtn.textContent = t('ui.taiga.testAndAuth');
 
-      loginForm.addEventListener('submit', async (e) => {
+      taigaForm.appendChild(userInput);
+      taigaForm.appendChild(passInput);
+      taigaForm.appendChild(tokenInput);
+      taigaForm.appendChild(taigaStatus);
+      taigaForm.appendChild(taigaBtn);
+      taigaPanel.appendChild(taigaForm);
+
+      loginSec.appendChild(appPanel);
+      loginSec.appendChild(taigaPanel);
+      card.appendChild(loginSec);
+
+      // Alternância de abas
+      const switchTab = (showApp: boolean) => {
+        appTab.classList.toggle('active', showApp);
+        taigaTab.classList.toggle('active', !showApp);
+        appPanel.style.display = showApp ? 'block' : 'none';
+        taigaPanel.style.display = showApp ? 'none' : 'block';
+      };
+      appTab.addEventListener('click', () => switchTab(true));
+      taigaTab.addEventListener('click', () => switchTab(false));
+
+      // Submit App Auth
+      appForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        loginBtn.disabled = true;
-        loginBtn.textContent = '...';
-        loginStatus.style.display = 'none';
+        appSubmitBtn.disabled = true;
+        appSubmitBtn.textContent = '...';
+        appStatus.style.display = 'none';
         try {
-          const res = await spec.onConnectTaiga?.(userInput.value, passInput.value);
+          const email = appEmailInput.value.trim().toLowerCase();
+          const password = appPassInput.value;
+          // Usa o auth do app (cloudflareAuth)
+          const res = await spec.onAppAuth?.(email, password);
           if (res?.ok) {
             cleanup();
           } else {
-            loginStatus.style.display = 'block';
-            loginStatus.style.color = '#f87171';
-            loginStatus.textContent = res?.error || t('ui.taiga.invalidCredentials');
+            appStatus.style.display = 'block';
+            appStatus.style.color = '#f87171';
+            appStatus.textContent = res?.error || t('toast.authFailed');
           }
         } catch (err: unknown) {
-          loginStatus.style.display = 'block';
-          loginStatus.style.color = '#f87171';
-          loginStatus.textContent = err instanceof Error ? t(err.message) : t('ui.taiga.invalidCredentials');
+          appStatus.style.display = 'block';
+          appStatus.style.color = '#f87171';
+          appStatus.textContent = err instanceof Error ? t(err.message) : t('toast.authFailed');
         } finally {
-          loginBtn.disabled = false;
-          loginBtn.textContent = t('ui.taiga.testAndAuth');
+          appSubmitBtn.disabled = false;
+          appSubmitBtn.textContent = t('ui.authSubmit');
         }
       });
 
-      loginSec.appendChild(loginTitle);
-      loginSec.appendChild(loginForm);
-      card.appendChild(loginSec);
+      // Submit Taiga Auth
+      taigaForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        taigaBtn.disabled = true;
+        taigaBtn.textContent = '...';
+        taigaStatus.style.display = 'none';
+        try {
+          const res = await spec.onConnectTaiga?.(userInput.value, passInput.value, tokenInput.value || undefined);
+          if (res?.ok) {
+            cleanup();
+          } else {
+            taigaStatus.style.display = 'block';
+            taigaStatus.style.color = '#f87171';
+            taigaStatus.textContent = res?.error || t('ui.taiga.invalidCredentials');
+          }
+        } catch (err: unknown) {
+          taigaStatus.style.display = 'block';
+          taigaStatus.style.color = '#f87171';
+          taigaStatus.textContent = err instanceof Error ? t(err.message) : t('ui.taiga.invalidCredentials');
+        } finally {
+          taigaBtn.disabled = false;
+          taigaBtn.textContent = t('ui.taiga.testAndAuth');
+        }
+      });
     }
 
     m.appendChild(card);
     this.root.appendChild(m);
+  }
+
+  /** PR4.12 fix — Modal "Esqueci a senha" (app auth). */
+  showForgotPasswordModal(): void {
+    const existing = this.root.querySelector('.forgot-password-modal');
+    if (existing) existing.remove();
+
+    const m = document.createElement('div');
+    m.className = 'forgot-password-modal';
+    m.style.pointerEvents = 'auto';
+
+    const card = document.createElement('div');
+    card.className = 'forgot-password-card';
+    card.style.pointerEvents = 'auto';
+
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    card.addEventListener('click', (e) => e.stopPropagation());
+    m.addEventListener('pointerdown', (e) => {
+      if (e.target === m) m.remove();
+    });
+
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey);
+      m.remove();
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cleanup();
+    };
+    window.addEventListener('keydown', onKey);
+
+    m.addEventListener('click', (e) => {
+      if (e.target === m) cleanup();
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'forgot-password-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.title = 'Fechar';
+    closeBtn.addEventListener('click', cleanup);
+    card.appendChild(closeBtn);
+
+    const title = document.createElement('h2');
+    title.className = 'forgot-password-title';
+    title.textContent = t('ui.authForgot');
+    card.appendChild(title);
+
+    const desc = document.createElement('p');
+    desc.style.fontSize = '13px';
+    desc.style.color = 'var(--muted, #64748b)';
+    desc.style.margin = '0 0 16px';
+    desc.textContent = t('ui.authResetSent');
+    card.appendChild(desc);
+
+    const form = document.createElement('form');
+    form.className = 'forgot-password-form';
+
+    const emailInput = document.createElement('input');
+    emailInput.type = 'email';
+    emailInput.className = 'forgot-password-input';
+    emailInput.placeholder = t('ui.authEmail');
+    emailInput.required = true;
+    emailInput.autocomplete = 'email';
+
+    const status = document.createElement('div');
+    status.style.fontSize = '12px';
+    status.style.display = 'none';
+
+    const submitBtn = document.createElement('button');
+    submitBtn.type = 'submit';
+    submitBtn.className = 'forgot-password-submit';
+    submitBtn.textContent = t('ui.authForgot');
+
+    form.appendChild(emailInput);
+    form.appendChild(status);
+    form.appendChild(submitBtn);
+    card.appendChild(form);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.textContent = '...';
+      status.style.display = 'none';
+      try {
+        // TODO: integrar com backend de reset de senha quando houver
+        // Por enquanto simula sucesso (não expõe se e-mail existe)
+        await new Promise((r) => setTimeout(r, 500));
+        status.style.display = 'block';
+        status.style.color = '#34d399';
+        status.textContent = t('ui.authResetSent');
+        setTimeout(cleanup, 1500);
+      } catch (err: unknown) {
+        status.style.display = 'block';
+        status.style.color = '#f87171';
+        status.textContent = t('ui.authResetError');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = t('ui.authForgot');
+      }
+    });
+
+    m.appendChild(card);
+    this.root.appendChild(m);
+    emailInput.focus();
   }
 
   hideUserProfileModal(): void {

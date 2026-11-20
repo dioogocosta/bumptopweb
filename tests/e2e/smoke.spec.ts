@@ -144,6 +144,56 @@ test('PR4.13: ícones abrem/fecham os painéis Andares e Resumo nas caixas', asy
   await expect(floorsBtn).toHaveClass(/sel/);
 });
 
+test('PR4.14: visitante confirmado (sem login) vê o muro e nada é carregado', async ({ page }) => {
+  // O backend de auth responde dizendo "não autenticado" → muro deve subir
+  await page.route('**/api/session', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: false }),
+    }),
+  );
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+  // Modal de login/cadastro na cara do visitante
+  await expect(page.locator('.auth-modal')).toBeVisible();
+
+  // Sem sessão = sem cena: nem snapshot, nem seed de demonstração
+  const count = await page.evaluate(() => window.__bumptop!.world.objectCount());
+  expect(count).toBe(0);
+
+  // Painéis do prédio fechados (sem andares/resumo para visitante)
+  await expect(page.locator('.bv-floors')).toBeHidden();
+  await expect(page.locator('.bv-summary')).toBeHidden();
+
+  // Fechar o muro não revela nada: cena continua vazia
+  await page.locator('.auth-close').click();
+  await page.waitForTimeout(400);
+  const count2 = await page.evaluate(() => window.__bumptop!.world.objectCount());
+  expect(count2).toBe(0);
+});
+
+test('PR4.14: com sessão confirmada o prédio e a cena abrem normalmente', async ({ page }) => {
+  await page.route('**/api/session', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ authenticated: true, email: 'teste@bumptop.dev' }),
+    }),
+  );
+  await page.goto('/');
+  await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+  // Sem muro para usuário logado
+  await expect(page.locator('.auth-modal')).toBeHidden();
+
+  // Cena carregada (demo da primeira visita)
+  await page.waitForFunction(() => window.__bumptop!.world.objectCount() > 0, { timeout: 20000 });
+  const count = await page.evaluate(() => window.__bumptop!.world.objectCount());
+  expect(count).toBeGreaterThan(0);
+});
+
 test('M2: serviço de filesystem ativo (modo + importação não quebra)', async ({ page }) => {
   await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
@@ -165,6 +215,10 @@ test('M2: serviço de filesystem ativo (modo + importação não quebra)', async
 test('M6: notas adesivas criam/editam via API da cena', async ({ page }) => {
   await page.goto('/?nobuilding=1');
   await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+  // A seed da cena é assíncrona (initUserBuilding roda depois do bootstrap e,
+  // desde o PR4.14, consulta a sessão ANTES de carregar a cena) — espera a
+  // cena existir para contar objetos de forma determinística.
+  await page.waitForFunction(() => window.__bumptop!.world.objectCount() > 0, { timeout: 20000 });
 
   const before = await page.evaluate(() => window.__bumptop!.world.objectCount());
   const id = await page.evaluate(() => window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'hello'));

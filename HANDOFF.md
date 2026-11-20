@@ -19,8 +19,8 @@ TypeScript, Vite 8, three.js (render), Rapier 3D WASM (física), SQLite WASM em 
 npm install
 npm run dev          # http://localhost:5173
 npm run typecheck
-npm test             # unit (Vitest)  — 226 testes
-npm run test:e2e     # E2E (Playwright) — 66 passam; 6 pulados; 0 falhas (PR #56)
+npm test             # unit (Vitest)  — 238 testes
+npm run test:e2e     # E2E (Playwright) — 70 passam; 6 pulados; 0 falhas (PR4.14)
 npm run lint:arch    # garante que src/core/** continua puro
 npm run build
 node scripts/validate-sheets.mjs   # validação das folhas finas (BASE_URL=http://localhost:5174 se a porta padrão estiver ocupada)
@@ -49,7 +49,7 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 
 ## 4. Estado atual: o que foi feito nesta sessão (todo já na `main`)
 
-> **Nota (18/11/2026):** esta tabela é o histórico da primeira sessão (PR1/PR2). O estado **recente** do projeto — Control Manager (fases 4a, 4.2, 4.3 e 4.4), login/D1 (PR27), perfil do usuário (PR4.12) e as pendências abertas — está em **§8**. Contadores atualizados em §2 (226 unit / 66 E2E passando).
+> **Nota (18/11/2026):** esta tabela é o histórico da primeira sessão (PR1/PR2). O estado **recente** do projeto — Control Manager (fases 4a, 4.2, 4.3 e 4.4), login/D1 (PR27), perfil do usuário (PR4.12) e as pendências abertas — está em **§8**. Contadores atualizados em §2 (238 unit / 70 E2E passando).
 
 | Commit / PR | O que mudou |
 |---|---|
@@ -118,7 +118,7 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
 
 ### Validação
 - Sonda: `BASE_URL=... node scripts/validate-pr27.mjs` — 13/13 com D1 local (`npx wrangler pages dev dist --d1 DB`); em produção o P27c só roda com o D1 bindado (sonda POST dummy: 503 → pula, 400 → roda).
-- Unitários do adapter: `tests/auth/cloudflareAuth.test.ts` (7 testes).
+- Unitários do adapter: `tests/auth/cloudflareAuth.test.ts` (13 testes — os 6 do PR4.14 cobrem `isSessionKnown`).
 
 ### Pendências abertas (pós-PR27)
 1. **Control Manager (item 4 do dono) — EM ANDAMENTO por fases** (✅ publicadas: **4a · 4.2 · 4.3 · 4.4**; ⏳ pendente: Backlog/Taiga): ref. horizonx.so (Energy Command Dashboard: torre diagonal de blocos selecionáveis + dashboard lateral de vidro). **CONCEITO (do dono): CAIXA = o espaço (chão + 4 paredes) onde TUDO acontece — pastas/arquivos/notas ficam DENTRO dela; caixa ≠ pasta.** Modelo escolhido: caixas LADO A LADO no mesmo mundo 3D (cada uma com chão+paredes próprios); a sala original migrou para ser a 1ª caixa ("Caixa Comum", `box-default`).
@@ -129,8 +129,11 @@ Regras: `core/` não importa nada de fora dele. Toda engine entra por porta. O i
    - **Pendente do item 4 — Backlog (Taiga)**: select de tipo já oferece "Backlog (em breve)" desabilitado; a implementação (mapear caixas/issues do **Taiga** `taiga.fnde.gov.br` — API `/api/v1` via Pages Functions por CORS) é **PR próprio** — é o "item 6" da lista do dono (planejar antes de codar).
    - **PR4.12 ✅ — perfil do usuário + loading do prédio** (PR #55): modal de perfil (avatar, troca de senha, logout via Taiga), `initUserBuilding()` com tela de loading e sync de projetos.
    - **PR4.13 ✅ — ícones de painel nas caixas + fix do tema** (PR #56): (a) o container do prédio estava em `z-index: 50` sobre `document.body` e cobria o `#overlay-root` (z 10) — a **barra de botões inteira era inacessível na primeira tela** (não dava para trocar o tema); agora `z 5` (acima da cena, abaixo do HUD). (b) novos botões **☰ Andares** e **📊 Resumo** na barra abrem/fecham os painéis **também no ambiente das caixas** (host `boxPanelHost` z 8, fora do fade do prédio; labels/`search-hl` foram para uma camada `underlay` z 2 para continuarem atrás do prédio). `show()` reabre os dois painéis / `hide()` fecha (navegar entre andares não fecha o menu). Bug colateral corrigido: com `?nobuilding=1` o `loadingOverlay` (invisível, `pointer-events: auto`) bloqueava os cliques nos ~1.5 s iniciais. Suíte E2E atualizada para o comportamento do `main` (notas por duplo-clique `f17d34b`, preset 1 = 329, voo da busca centralizando `423579d`, testes de cena com `?nobuilding=1`): **66/66 verdes** (o `main` tinha 42 falhas — ver §5.6).
+   - **PR4.14 ✅ — muro de login, isolamento de projetos e conta acessível**: (a) **visitante confirmado** (sem sessão Taiga/conta e `GET /api/session` respondendo JSON `authenticated:false`) **não carrega nada**: `initUserBuilding` checa a sessão ANTES do snapshot/seed, esconde o prédio e abre o modal de login/cadastro; fechar o muro não revela cena (fica vazia). **Fail-open**: sem backend (dev/preview sem `/api`, rede) a sessão é "indeterminada" (`CloudflareAuth.isSessionKnown`) e o app segue em modo demo — por isso a suíte E2E (preview,404) continua verde. Login/cadastro religa o prédio (flag `loginWalled` → `show()`), logout devolve o muro. (b) **Isolamento por usuário no Taiga**: o `/projects` devolve seus projetos + os **públicos do servidor** (causa dos "andares que não são do meu controle") — agora só vira caixa o que tem `i_am_member`/`i_am_owner` (`pickMyProjects`), caixas de projetos alheios já sincronizados são **removidas da cena** (com os cards dentro), o display filtra `!taigaProject || meus` e o datalist de slug só sugere projetos do usuário. (c) **Conta acessível**: perfil com abas **Conta do BumpTop (e-mail/senha)** × **Taiga FNDE**, link **Criar conta** (abre o modal em cadastro) e **Esqueci a senha** (modal de recuperação — o envio real ainda é simulado, ver pendência). Testes: +6 unit (`isSessionKnown`, `pickMyProjects`/parse) e +2 E2E do muro; M6 agora espera a seed (assíncrona). **70/70 E2E / 238 unit**.
 2. Reset/backup por usuário: a cena vai em UMA linha por usuário (sem histórico de versões) — merge de mudanças offline não existe (nuvem manda).
 3. Rate limit global (KV/DO) e verificação de e-mail: não implementados (v1).
 4. PWA: cache do SW pode servir bundle velho — Ctrl+F5; após bind do D1, o re-deploy é o que ativa o binding das Functions.
 5. ~~**Quebra pré-existente na `main` (nov 2026)**~~ — **RESOLVIDA no PR #56**: os testes de cena agora abrem com `?nobuilding=1` (a primeira tela é o prédio desde o PR4.4 e o canvas das caixas ficava coberto); o `loadingOverlay` com `?nobuilding=1` também foi corrigido (bloqueava cliques iniciais). Playwright **66/66**.
 6. **Estado dos deploys**: Vercel com conta bloqueada (check vermelho pré-existente em todos os PRs — ignorar); Netlify de produção pausado; **Cloudflare Pages** é o deploy real (`bumptopweb.pages.dev`, publica a `main`); deploy previews saem no Netlify/Cloudflare.
+7. **Reset de senha REAL (PR4.14 deixou a UI pronta)**: o modal "Esqueci a senha" hoje só simula o envio — falta a rota `POST /api/reset` em `functions/api/` (gerar token de reset no D1 + enviar e-mail via provedor; hoje não há e-mail configurado). Enquanto isso, o dono recupera conta pelo wrangler/D1.
+8. **Otimização mobile (relato do dono20/11)**: telas com informações sobrepostas/sem clique em viewport retrato — revisar media queries dos painéis/modais (`.bv-*`, `.user-profile-*`, story modal) e alvos de toque.
