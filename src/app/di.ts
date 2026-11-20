@@ -5,7 +5,7 @@
  * Pointer, DOM). O `core` continua puro. Em Tauri/Electron, troca-se só aqui.
  */
 import { World } from '@core/world';
-import type { Vec3 } from '@core/model/types';
+import type { Vec3, BoxEntityData } from '@core/model/types';
 import { rotateVec3ByQuat } from '@core/util/math';
 import type { ContextMenuItem, IFileSystem, IRepo, InputAction } from '@core/ports/index';
 import { isLang, setLang, t } from '@core/i18n/i18n';
@@ -21,6 +21,7 @@ import {
   fetchSprintStories,
   fetchTaigaSprints,
   fetchTaigaProjects,
+  pickMyProjects,
   resolveProjectId,
   initTaigaTokenFromUrl,
   fetchStoryDetail,
@@ -290,11 +291,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       onSignOut: () => {
         setTaigaToken(null);
         void auth.signOut();
-        buildingView.setUserProfile({
-          name: 'Entrar / Perfil',
-          photo: null,
-          isAuth: false,
-        });
+        void initUserBuilding(); // Re-inicializa prédio (ficará vazio sem auth)
         overlay.toast(t('ui.taiga.tokenRemoved'));
       },
       onConnectTaiga: async (user, pass, tok) => {
@@ -320,10 +317,28 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           return { ok: false, error: msg };
         }
       },
+      // PR4.12 fix — login/cadastro com conta do app (cloudflareAuth)
+      onAppAuth: async (email, password) => {
+        try {
+          const res = await auth.signIn(email, password);
+          if (res.ok) {
+            overlay.toast(t('toast.authWelcome', { email: auth.current()!.email }));
+            void initUserBuilding();
+            return { ok: true };
+          }
+          return { ok: false, error: res.error };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : t('toast.authFailed');
+          return { ok: false, error: msg };
+        }
+      },
     });
   }
 
   // PR4.12 — Carrega o Prédio 3D do Usuário com tela de loading e sincronização automática
+  // PR4.14 — Muro de login: sem sessão confirmada NADA é carregado (nem cena,
+  // nem caixas, nem o demo) — e o modal de login/cadastro abre na cara.
+  let loginWalled = false;
   async function initUserBuilding(): Promise<void> {
     // Com ?nobuilding=1 o prédio fica invisível (container opacity 0), mas o
     // loadingOverlay é filho dele com pointer-events:auto → bloqueava a cena
@@ -332,7 +347,32 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       buildingView.showLoading(t('ui.building.loading'), t('ui.building.loadingSub'));
     }
 
-    // 1) Carrega cena persistida
+    // 1) Sessões ANTES de qualquer carga de cena (é o que decide o muro)
+    initTaigaTokenFromUrl();
+    const token = getTaigaToken();
+    let me: TaigaUser | null = null;
+    if (token) {
+      try {
+        me = await fetchTaigaMe();
+      } catch {}
+    }
+    const appSession = auth.current() ?? (await auth.getSession().catch(() => null));
+
+    // Visitante CONFIRMADO = sem Taiga, sem conta e o backend de auth respondeu
+    // dizendo "não autenticado". Sem backend (dev/preview sem /api, rede fora)
+    // a sessão fica indeterminada → fail-open, segue o modo demo normal.
+    if (!me && !appSession && auth.isSessionKnown()) {
+      loginWalled = true;
+      buildingView.hide();
+      buildingView.hideLoading();
+      overlay.setAuthState(null);
+      // Perfil completo na cara: abas Conta do BumpTop × Taiga FNDE + cadastro
+      // e "Esqueci a senha" — o visitante escolhe por onde entrar.
+      void openUserProfileModal();
+      return; // sem snapshot, sem seedDemoScene, sem caixas: visitante vê zero
+    }
+
+    // 2) Carrega cena persistida (só autenticados chegam aqui)
     try {
       const saved = await repo.loadScene();
       if (saved && Array.isArray(saved.objects) && saved.objects.length > 0) {
@@ -344,19 +384,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       seedDemoScene(world);
     }
 
-    // 2) Avatar customizado salvo
+    // 3) Avatar customizado salvo
     const customAvatar = await repo.getSetting<string | null>('userAvatar', null);
 
-    // 3) Verifica sessão no Taiga
-    initTaigaTokenFromUrl();
-    const token = getTaigaToken();
-    let me: TaigaUser | null = null;
-    if (token) {
-      try {
-        me = await fetchTaigaMe();
-      } catch {}
-    }
-
+    // 4) Projetos do Taiga (isolamento: só os de MEMBRO — o /projects também
+    //    devolve os públicos do servidor, que não são "do usuário")
+    let mySlugs: Set<string> | null = null;
     if (me) {
       const photo = customAvatar || me.photo || null;
       buildingView.setUserProfile({
@@ -366,16 +399,17 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         isAuth: true,
       });
 
-      // Puxa projetos da conta logada no Taiga
       try {
-        const projects = await fetchTaigaProjects();
+        const allProjects = await fetchTaigaProjects();
+        const projects = pickMyProjects(allProjects);
+        mySlugs = new Set(projects.map((p) => p.slug));
         if (projects.length > 0) {
-          let added = false;
+          let changed = false;
           for (const p of projects) {
             const existing = world.listBoxes().find((b) => b.taigaProject === p.slug);
             if (!existing) {
               world.addBoxEntity(`[${p.name}]`, undefined, 'backlog', p.slug);
-              added = true;
+              changed = true;
             }
           }
 
@@ -387,18 +421,41 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
             );
             if (!hasSprint) {
               world.addBoxEntity(`Sprint - [${marcos.name}]`, undefined, 'sprint', marcos.slug);
-              added = true;
+              changed = true;
             }
           }
 
-          if (added) {
+          // Limpeza: caixa de projeto visível no servidor mas do qual NÃO sou
+          // membro (sincronizações antigas) sai de cena — com os cards dentro.
+          const visibleSlugs = new Set(allProjects.map((p) => p.slug));
+          for (const b of world.listBoxes()) {
+            if (!b.taigaProject) continue; // caixas locais/notes são do usuário
+            if (visibleSlugs.has(b.taigaProject) && !mySlugs.has(b.taigaProject)) {
+              for (const o of world.listObjects()) {
+                if (o.meta?.boxId === b.id) world.removeObject(o.id);
+              }
+              world.removeBoxEntity(b.id);
+              changed = true;
+            }
+          }
+
+          if (changed) {
             await repo.saveScene(world.toSnapshot()).catch(() => {});
           }
         }
       } catch (err) {
         console.warn('Erro ao sincronizar projetos do Taiga no prédio:', err);
       }
+    } else if (appSession) {
+      // Autenticado só na conta do app (sem Taiga) — cena local/demo disponível
+      buildingView.setUserProfile({
+        name: appSession.email,
+        email: appSession.email,
+        photo: customAvatar,
+        isAuth: true,
+      });
     } else {
+      // Fail-open sem backend: visitante em modo demo (sem dados de ninguém)
       buildingView.setUserProfile({
         name: 'Entrar / Perfil',
         photo: customAvatar,
@@ -406,12 +463,26 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       });
     }
 
-    // 4) Atualiza o Prédio 3D com todos os andares e estatísticas
-    buildingView.setBoxes(world.listBoxes());
+    // 5) Caixas exibidas: com Taiga, locais + só MEUS projetos; sem Taiga, a
+    //    cena local inteira (não há dados de terceiros nela).
+    const boxesToShow: BoxEntityData[] =
+      mySlugs !== null
+        ? world
+            .listBoxes()
+            .filter((b) => !b.taigaProject || mySlugs!.has(b.taigaProject))
+        : world.listBoxes();
+
+    buildingView.setBoxes(boxesToShow);
     updateBuildingStats();
     buildingView.selectFloor(world.getCurrentBoxId());
 
-    // 5) Remove loading
+    // PR4.14 — saiu do muro (login/cadastro): reabre o dashboard do prédio
+    if (loginWalled) {
+      loginWalled = false;
+      if (!skipBuilding) buildingView.show();
+    }
+
+    // 6) Remove loading
     buildingView.hideLoading();
   }
 
@@ -1432,6 +1503,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       overlay.hideAuthModal();
       overlay.setAuthState(auth.current());
       overlay.toast(t('toast.authWelcome', { email: auth.current()!.email }));
+      // PR4.14 — saiu do muro: (re)monta o prédio e a cena da conta
+      void initUserBuilding();
     })();
   });
   overlayRoot.addEventListener('authsignout', () => {
@@ -1440,6 +1513,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       overlay.hideAuthModal();
       overlay.setAuthState(null);
       overlay.toast(t('toast.authBye'));
+      // PR4.14 — deslogou: prédio escondido e muro de volta
+      void initUserBuilding();
     })();
   });
   // authclose: o modal já se esconde sozinho no overlay; nada a fazer aqui.

@@ -67,6 +67,11 @@ export interface TaigaProject {
   id: number;
   slug: string;
   name: string;
+  /**
+   * O usuário autenticado é membro/owner (`i_am_member`/`i_am_owner` do
+   * Taiga). `undefined` quando a API não retorna as flags (versão antiga).
+   */
+  isMember?: boolean;
 }
 
 /** Uma sprint (milestone) do Taiga. */
@@ -232,13 +237,32 @@ export async function changeTaigaPassword(currentPassword: string, newPassword: 
 
 /** Lista os projetos disponíveis (públicos e privados da conta logada). */
 export async function fetchTaigaProjects(): Promise<TaigaProject[]> {
-  const raw = await getJson<Array<{ id: number; slug: string; name: string }>>(
-    '/projects?limit=100',
-  );
+  const raw = await getJson<
+    Array<{ id: number; slug: string; name: string; i_am_member?: boolean; i_am_owner?: boolean }>
+  >('/projects?limit=100');
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((p) => p && typeof p.slug === 'string')
-    .map((p) => ({ id: p.id, slug: p.slug, name: p.name || p.slug }));
+    .map((p) => {
+      const comFlag = p.i_am_member !== undefined || p.i_am_owner !== undefined;
+      return {
+        id: p.id,
+        slug: p.slug,
+        name: p.name || p.slug,
+        isMember: comFlag ? p.i_am_member === true || p.i_am_owner === true : undefined,
+      };
+    });
+}
+
+/**
+ * PR4.14 — Isolamento por usuário: o `/projects` do Taiga retorna os projetos
+ * do usuário MAIS os públicos do servidor; aqui ficam só os de MEMBRO.
+ * Se nenhuma projeto trouxe as flags (API antiga), mantém a lista inteira
+ * (sem regressão — nesse caso não há como distinguir membership).
+ */
+export function pickMyProjects(all: TaigaProject[]): TaigaProject[] {
+  const comFlag = all.some((p) => p.isMember !== undefined);
+  return comFlag ? all.filter((p) => p.isMember === true) : all;
 }
 
 /**

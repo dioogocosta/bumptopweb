@@ -113,3 +113,48 @@ describe('CloudflareAuth (PR27)', () => {
     expect(f).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('CloudflareAuth — sessão conhecida / muro de login (PR4.14)', () => {
+  it('começa indeterminada (sem checagem não há muro)', () => {
+    const auth = new CloudflareAuth();
+    expect(auth.isSessionKnown()).toBe(false);
+  });
+
+  it('resposta JSON válida (200 authenticated:false) → sessão conhecida = visitante confirmado', async () => {
+    vi.stubGlobal('fetch', fetchJson(200, { authenticated: false }));
+    const auth = new CloudflareAuth();
+    expect(await auth.getSession()).toBeNull();
+    expect(auth.isSessionKnown()).toBe(true);
+  });
+
+  it('logado → sessão presente E conhecida', async () => {
+    vi.stubGlobal('fetch', fetchJson(200, { authenticated: true, email: 'x@y.io' }));
+    const auth = new CloudflareAuth();
+    expect(await auth.getSession()).toEqual({ email: 'x@y.io' });
+    expect(auth.isSessionKnown()).toBe(true);
+  });
+
+  it('404 (API ausente) → indeterminada: app segue em modo demo (fail-open)', async () => {
+    vi.stubGlobal('fetch', fetchJson(404, { error: 'not found' }));
+    const auth = new CloudflareAuth();
+    expect(await auth.getSession()).toBeNull();
+    expect(auth.isSessionKnown()).toBe(false);
+  });
+
+  it('resposta que não é JSON (SPA fallback) → indeterminada', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<!doctype html><title>app</title>', { status: 200 })),
+    );
+    const auth = new CloudflareAuth();
+    expect(await auth.getSession()).toBeNull();
+    expect(auth.isSessionKnown()).toBe(false);
+  });
+
+  it('erro de rede → indeterminada', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    const auth = new CloudflareAuth();
+    expect(await auth.getSession()).toBeNull();
+    expect(auth.isSessionKnown()).toBe(false);
+  });
+});
