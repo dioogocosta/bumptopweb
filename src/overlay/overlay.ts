@@ -515,6 +515,35 @@ export class DomOverlay implements IOverlay {
     this.searchBar.appendChild(nextBtn);
     this.searchBar.appendChild(closeBtn);
     this.root.appendChild(this.searchBar);
+
+    // PR mobile — publica no CSS a altura REAL do HUD e da barra de busca
+    // (--hud-h / --search-h). No celular a barra de controles quebra em 2-3
+    // linhas; com offset fixo a busca/painéis ficavam por cima dos botões.
+    this._syncHudMetrics(zoomWrap);
+  }
+
+  /**
+   * PR mobile — mede o HUD (.zoom-controls) e a barra de busca e expõe as
+   * alturas como variáveis CSS em :root. `ResizeObserver` cobre tanto a quebra
+   * em várias linhas da barra (largura da tela) quanto a abertura/fechamento
+   * da busca; o CSS posiciona busca, menu de temas e painéis ABAIXO dessas
+   * medidas, então nada se sobrepõe em telas estreitas.
+   */
+  private _syncHudMetrics(zoomWrap: HTMLElement): void {
+    const sync = (): void => {
+      const root = document.documentElement;
+      const hud = Math.round(zoomWrap.getBoundingClientRect().height);
+      if (hud > 0) root.style.setProperty('--hud-h', `${hud}px`);
+      const search = Math.round(this.searchBar?.getBoundingClientRect().height ?? 0);
+      root.style.setProperty('--search-h', search > 0 ? `${search + 8}px` : '0px');
+    };
+    sync();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(sync);
+      ro.observe(zoomWrap);
+      if (this.searchBar) ro.observe(this.searchBar);
+    }
+    window.addEventListener('resize', sync);
   }
 
   /** PR15 — estado visual do botão "Modo laço" (ligado = realçado). */
