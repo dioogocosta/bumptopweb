@@ -390,9 +390,12 @@ export class World {
     return true;
   }
 
+  private scatterCooldown = new Map<string, number>();
+
   /**
    * Modo Game (TRON) — arremessa papéis, notas e documentos próximos à moto
-   * para o ar e para os lados usando a física real do BumpTop.
+   * para o ar e para os lados usando a física real do BumpTop (com cooldown
+   * por item para manter 60 FPS fluidos).
    */
   scatterObjectsNear(
     worldX: number,
@@ -403,10 +406,13 @@ export class World {
     boxId?: string,
   ): number {
     const r2 = radius * radius;
+    const now = Date.now();
     let hit = 0;
-    for (const e of this.entries.values()) {
+    for (const [id, e] of this.entries) {
       if (e.data.meta?.pinned) continue;
       if (boxId && (e.data.meta?.boxId ?? 'box-default') !== boxId) continue;
+      const until = this.scatterCooldown.get(id) ?? 0;
+      if (now < until) continue;
       const pose = this.deps.physics.getPose(e.body);
       if (pose.position.y > 10) continue; // já está voando alto
       const dx = pose.position.x - worldX;
@@ -415,16 +421,17 @@ export class World {
       if (d2 > r2) continue;
 
       const dist = Math.max(0.5, Math.sqrt(d2));
-      // Empurra para fora da linha da moto + para cima
       const nx = dx / dist;
       const nz = dz / dist;
       this.deps.physics.setFrozen(e.body, false);
       this.deps.physics.setVelocity(e.body, {
-        x: nx * 42 + dirX * 26,
-        y: 26 + (hit % 3) * 6,
-        z: nz * 42 + dirZ * 26,
+        x: nx * 40 + dirX * 24,
+        y: 24 + (hit % 3) * 5,
+        z: nz * 40 + dirZ * 24,
       });
+      this.scatterCooldown.set(id, now + 700);
       hit++;
+      if (hit >= 4) break;
     }
     return hit;
   }

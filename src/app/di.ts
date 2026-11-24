@@ -1688,21 +1688,35 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (activeTronGame) return;
     overlay.showTronGameGridModal((playerColor) => {
       const wasInBuilding = buildingView.isVisible();
-      if (wasInBuilding) buildingView.hide();
       const boxId = world.getCurrentBoxId();
-      void import('../game/TronGameView').then(({ TronGameView }) => {
-        activeTronGame = new TronGameView({
-          parent: document.body || sceneRoot,
-          renderer,
-          world,
-          playerColor,
-          boxId,
-          onExit: () => {
-            activeTronGame = null;
-            if (wasInBuilding) buildingView.show();
-          },
+      const prevShowNames = world.isShowNames();
+
+      const launchTron = () => {
+        // Esconde o HUD do BumpTop e os labels DOM durante o jogo para não sobrepor nem pesar
+        overlayRoot.style.display = 'none';
+        if (prevShowNames) world.setShowNames(false);
+        void import('../game/TronGameView').then(({ TronGameView }) => {
+          activeTronGame = new TronGameView({
+            parent: document.body || sceneRoot,
+            renderer,
+            world,
+            playerColor,
+            boxId,
+            onExit: () => {
+              activeTronGame = null;
+              overlayRoot.style.display = '';
+              if (prevShowNames) world.setShowNames(true);
+              if (wasInBuilding) buildingView.show();
+            },
+          });
         });
-      });
+      };
+
+      if (wasInBuilding) {
+        buildingView.hide(launchTron);
+      } else {
+        launchTron();
+      }
     });
   });
 
