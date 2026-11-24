@@ -180,6 +180,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   async function syncBacklog(boxId: string): Promise<void> {
     const box = world.getBox(boxId);
     if (!box || box.type !== 'backlog') return;
+    overlay.hideSprintBadge();
     if (!box.taigaProject) {
       overlay.toast(t('toast.backlogNoSlug'));
       return;
@@ -194,23 +195,28 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     }
   }
 
-  // PR4.6 — Sprint (Taiga): sincroniza uma caixa sprint com a sprint ativa.
-  async function syncSprint(boxId: string): Promise<void> {
+  // PR4.6/PR4.15 — Sprint (Taiga): sincroniza uma caixa sprint com a sprint ativa ou selecionada.
+  async function syncSprint(boxId: string, forcedSprintId?: number, forcedSprintName?: string): Promise<void> {
     const box = world.getBox(boxId);
-    if (!box || (box.type !== 'sprint' && box.type !== 'kanban')) return;
+    if (!box || (box.type !== 'sprint' && box.type !== 'kanban')) {
+      overlay.hideSprintBadge();
+      return;
+    }
     if (!box.taigaProject) {
       overlay.toast(t('toast.backlogNoSlug'));
+      overlay.hideSprintBadge();
       return;
     }
     try {
-      let milestoneId = box.taigaSprintId;
-      let sprintName = box.taigaSprintName;
+      let milestoneId = forcedSprintId ?? box.taigaSprintId;
+      let sprintName = forcedSprintName ?? box.taigaSprintName;
       if (!milestoneId) {
         const projectId = await resolveProjectId(box.taigaProject);
         const sprints = await fetchTaigaSprints(projectId);
         const active = sprints.find((s) => !s.closed) ?? sprints[0];
         if (!active) {
           overlay.toast(t('toast.backlogEmpty', { slug: box.taigaProject }));
+          overlay.setSprintBadge('Sem sprints', false);
           return;
         }
         milestoneId = active.id;
@@ -218,8 +224,43 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       }
       const stories = await fetchSprintStories(milestoneId);
       const n = world.syncSprintStories(boxId, stories, milestoneId, sprintName);
+      overlay.setSprintBadge(sprintName || `Sprint #${milestoneId}`, true);
       if (n === 0) overlay.toast(t('toast.backlogEmpty', { slug: box.taigaProject }));
       else if (n > 0) overlay.toast(t('toast.backlogSynced', { name: box.name, n }));
+    } catch (err) {
+      overlay.toast(err instanceof TaigaError ? t(err.message) : t('ui.taiga.httpError'));
+    }
+  }
+
+  // PR4.15 — Abre o seletor modal de Sprints do projeto vinculado à caixa
+  async function openSprintSelector(boxId: string): Promise<void> {
+    const box = world.getBox(boxId);
+    if (!box || !box.taigaProject) {
+      overlay.toast(t('toast.backlogNoSlug'));
+      return;
+    }
+
+    overlay.toast(t('ui.sprintLoading'));
+    try {
+      const projectId = await resolveProjectId(box.taigaProject);
+      const sprints = await fetchTaigaSprints(projectId);
+      if (sprints.length === 0) {
+        overlay.toast(t('ui.sprintNoSprints'));
+        return;
+      }
+
+      overlay.showSprintPickerModal({
+        boxName: box.name,
+        projectName: box.taigaProject,
+        currentSprintId: box.taigaSprintId,
+        sprints,
+        onSelect: async (selected) => {
+          world.setBoxSprint(box.id, selected.id, selected.name);
+          await syncSprint(box.id, selected.id, selected.name);
+          await repo.saveScene(world.toSnapshot()).catch(() => {});
+          overlay.toast(t('toast.sprintChanged', { name: selected.name }));
+        },
+      });
     } catch (err) {
       overlay.toast(err instanceof TaigaError ? t(err.message) : t('ui.taiga.httpError'));
     }
@@ -408,7 +449,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           for (const p of projects) {
             const existing = world.listBoxes().find((b) => b.taigaProject === p.slug);
             if (!existing) {
-              world.addBoxEntity(`[${p.name}]`, undefined, 'backlog', p.slug);
+              const cleanName = p.name.trim();
+              const boxTitle = cleanName.toLowerCase().startsWith('backlog') ? cleanName : `Backlog ${cleanName}`;
+              world.addBoxEntity(boxTitle, undefined, 'backlog', p.slug);
               changed = true;
             }
           }
@@ -420,7 +463,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
               (b) => (b.type === 'sprint' || b.type === 'kanban') && b.taigaProject === marcos.slug,
             );
             if (!hasSprint) {
-              world.addBoxEntity(`Sprint - [${marcos.name}]`, undefined, 'sprint', marcos.slug);
+              const marcosClean = marcos.name.trim();
+              const sprintTitle = marcosClean.toLowerCase().startsWith('sprint') ? marcosClean : `Sprint - ${marcosClean}`;
+              world.addBoxEntity(sprintTitle, undefined, 'sprint', marcos.slug);
               changed = true;
             }
           }
@@ -1431,7 +1476,12 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   overlayRoot.addEventListener('buildingtoggle', () => {
     if (buildingView.isVisible()) {
       buildingView.hide();
+      const curBox = world.getBox(world.getCurrentBoxId());
+      if (curBox?.type === 'sprint' || (curBox?.type === 'kanban' && curBox?.taigaProject)) {
+        overlay.setSprintBadge(curBox.taigaSprintName || 'Sprint', true);
+      }
     } else {
+      overlay.hideSprintBadge();
       buildingView.setBoxes(world.listBoxes());
       updateBuildingStats();
       buildingView.selectFloor(world.getCurrentBoxId());
@@ -1449,12 +1499,23 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   });
   overlayRoot.addEventListener('buildingback', () => {
     overlay.hideBuildingBack();
+    overlay.hideSprintBadge();
     buildingView.setBoxes(world.listBoxes());
     updateBuildingStats();
     buildingView.selectFloor(world.getCurrentBoxId());
     buildingView.show(() => {
       overlay.toast(t('toast.buildingBack'));
     });
+  });
+
+  // PR4.15 — Seletor de Sprint do Taiga na caixa ativa ou pelo painel de caixas
+  overlayRoot.addEventListener('sprintpick', () => {
+    const curId = world.getCurrentBoxId();
+    void openSprintSelector(curId);
+  });
+  overlayRoot.addEventListener('boxsprintpick', (e) => {
+    const id = (e as CustomEvent).detail as string;
+    void openSprintSelector(id);
   });
 
   // =========================================================================
