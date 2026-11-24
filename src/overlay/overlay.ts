@@ -28,6 +28,7 @@ import type {
   PileHaloData,
   ScrubStripData,
 } from '@core/ports/index';
+import { renderTronRankingBox, type TronRankingResponse } from '../game/tronRanking';
 
 // -------------------------------------------------------------------------
 // PR16 — colar com formatação: HTML da área de transferência → markdown-lite
@@ -2986,12 +2987,20 @@ export class DomOverlay implements IOverlay {
     this.root.appendChild(m);
   }
 
-  /** TRON — Game Grid (4 quadrantes) + seleção da Moto de Luz (Azul ou Vermelha). */
-  showTronGameGridModal(onStart: (color: 'blue' | 'red') => void): void {
+  /** TRON — Game Grid (4 quadrantes) + seleção da Moto de Luz + Nickname & Ranking (só logados). */
+  showTronGameGridModal(
+    onStart: (color: 'blue' | 'red', nickname?: string) => void,
+    opts?: {
+      isLoggedIn: boolean;
+      initialNickname?: string;
+      loadRanking?: () => Promise<TronRankingResponse | null>;
+    },
+  ): void {
     const existing = this.root.querySelector('.tron-grid-modal');
     if (existing) existing.remove();
 
     let selectedColor: 'blue' | 'red' = 'blue';
+    let nickInput: HTMLInputElement | null = null;
 
     const m = document.createElement('div');
     m.className = 'tron-grid-modal';
@@ -3103,6 +3112,35 @@ export class DomOverlay implements IOverlay {
     obj.textContent = t('ui.tron.objective');
     card.appendChild(obj);
 
+    // Nickname + Ranking (apenas para usuários logados)
+    if (opts?.isLoggedIn) {
+      const nickWrap = document.createElement('div');
+      nickWrap.className = 'tron-nick-wrap';
+      const nickLbl = document.createElement('label');
+      nickLbl.className = 'tron-pick-label';
+      nickLbl.textContent = t('ui.tron.nicknameLabel');
+      nickInput = document.createElement('input');
+      nickInput.type = 'text';
+      nickInput.maxLength = 20;
+      nickInput.className = 'tron-nick-input';
+      nickInput.placeholder = t('ui.tron.nicknamePh');
+      nickInput.value = opts.initialNickname ?? '';
+      nickWrap.append(nickLbl, nickInput);
+      card.appendChild(nickWrap);
+
+      const rankingBox = document.createElement('div');
+      rankingBox.className = 'tron-ranking-box';
+      card.appendChild(rankingBox);
+      if (opts.loadRanking) {
+        void opts.loadRanking().then((data) => {
+          if (data?.me?.nickname && nickInput && !nickInput.value.trim()) {
+            nickInput.value = data.me.nickname;
+          }
+          renderTronRankingBox(rankingBox, data);
+        });
+      }
+    }
+
     // Footer com botão Iniciar
     const footer = document.createElement('div');
     footer.className = 'tron-grid-footer';
@@ -3112,8 +3150,9 @@ export class DomOverlay implements IOverlay {
     startBtn.textContent = `▶ ${t('ui.tron.start')}`;
     startBtn.addEventListener('click', () => {
       const chosen = selectedColor;
+      const nick = nickInput?.value.trim() || undefined;
       cleanup();
-      onStart(chosen);
+      onStart(chosen, nick);
     });
     footer.appendChild(startBtn);
     card.appendChild(footer);

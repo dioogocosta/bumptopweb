@@ -1682,42 +1682,80 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     void openSprintSelector(id);
   });
 
-  // TRON Light Cycles — Modo Game (imersivo no ambiente 3D do BumpTop)
+  // TRON Light Cycles — Modo Game (imersivo no ambiente 3D do BumpTop + Ranking/Nickname para logados)
   let activeTronGame: { dispose: () => void } | null = null;
   overlayRoot.addEventListener('gamemode', () => {
     if (activeTronGame) return;
-    overlay.showTronGameGridModal((playerColor) => {
-      const wasInBuilding = buildingView.isVisible();
-      const boxId = world.getCurrentBoxId();
-      const prevShowNames = world.isShowNames();
+    void (async () => {
+      const { fetchTronRanking, submitTronScore, getSavedTronNickname } = await import('../game/tronRanking');
+      const appSession = auth.current();
+      const taigaToken = getTaigaToken();
+      const taigaMe = taigaToken ? await fetchTaigaMe().catch(() => null) : null;
+      const isLoggedIn = !!appSession || !!taigaMe;
+      const defaultNick =
+        getSavedTronNickname() ||
+        taigaMe?.fullName ||
+        taigaMe?.username ||
+        appSession?.email?.split('@')[0] ||
+        '';
 
-      const launchTron = () => {
-        // Esconde o HUD do BumpTop e os labels DOM durante o jogo para não sobrepor nem pesar
-        overlayRoot.style.display = 'none';
-        if (prevShowNames) world.setShowNames(false);
-        void import('../game/TronGameView').then(({ TronGameView }) => {
-          activeTronGame = new TronGameView({
-            parent: document.body || sceneRoot,
-            renderer,
-            world,
-            playerColor,
-            boxId,
-            onExit: () => {
-              activeTronGame = null;
-              overlayRoot.style.display = '';
-              if (prevShowNames) world.setShowNames(true);
-              if (wasInBuilding) buildingView.show();
-            },
-          });
-        });
-      };
+      overlay.showTronGameGridModal(
+        (playerColor, nickname) => {
+          const wasInBuilding = buildingView.isVisible();
+          const boxId = world.getCurrentBoxId();
+          const prevShowNames = world.isShowNames();
+          const chosenNick = nickname || defaultNick || undefined;
 
-      if (wasInBuilding) {
-        buildingView.hide(launchTron);
-      } else {
-        launchTron();
-      }
-    });
+          const launchTron = () => {
+            overlayRoot.style.display = 'none';
+            if (prevShowNames) world.setShowNames(false);
+            void import('../game/TronGameView').then(({ TronGameView }) => {
+              activeTronGame = new TronGameView({
+                parent: document.body || sceneRoot,
+                renderer,
+                world,
+                playerColor,
+                boxId,
+                rankingOpts: {
+                  isLoggedIn,
+                  onScoreSubmit: (score, level) =>
+                    submitTronScore({
+                      nickname: chosenNick,
+                      score,
+                      level,
+                      taigaToken,
+                      taigaName: taigaMe?.fullName || taigaMe?.username || null,
+                    }),
+                },
+                onExit: () => {
+                  activeTronGame = null;
+                  overlayRoot.style.display = '';
+                  if (prevShowNames) world.setShowNames(true);
+                  if (wasInBuilding) buildingView.show();
+                },
+              });
+            });
+          };
+
+          if (wasInBuilding) {
+            buildingView.hide(launchTron);
+          } else {
+            launchTron();
+          }
+        },
+        {
+          isLoggedIn,
+          initialNickname: defaultNick,
+          loadRanking: isLoggedIn
+            ? () =>
+                fetchTronRanking({
+                  taigaToken,
+                  taigaName: taigaMe?.fullName || taigaMe?.username || null,
+                })
+            : undefined,
+        },
+      );
+    })();
   });
 
   // =========================================================================

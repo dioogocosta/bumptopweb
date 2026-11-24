@@ -357,6 +357,15 @@ const ptBR: Dict = {
   'ui.tron.lostSub': 'Pontuação final: {score}',
   'ui.tron.nextLevel': 'Próximo Nível',
   'ui.tron.retry': 'Jogar Novamente',
+  'ui.tron.rankingTitle': 'Ranking dos Pilotos',
+  'ui.tron.nicknameLabel': 'Seu Nickname no Jogo',
+  'ui.tron.nicknamePh': 'ex.: Flynn (máx. 20 caracteres)',
+  'ui.tron.colPos': '#',
+  'ui.tron.colPilot': 'Piloto',
+  'ui.tron.colLevel': 'Nível',
+  'ui.tron.colScore': 'Recorde',
+  'ui.tron.noRanking': 'Nenhuma pontuação registrada ainda. Seja o primeiro!',
+  'ui.tron.personalBest': 'Seu recorde: {score} pts · Nível {level}',
 
   // --- PR12 — sistema de notas (editor rico) ---
   'ui.noteTitlePlaceholder': 'Título',
@@ -735,6 +744,15 @@ const en: Dict = {
   'ui.tron.lostSub': 'Final score: {score}',
   'ui.tron.nextLevel': 'Next Level',
   'ui.tron.retry': 'Play Again',
+  'ui.tron.rankingTitle': 'Pilots Leaderboard',
+  'ui.tron.nicknameLabel': 'Your Game Nickname',
+  'ui.tron.nicknamePh': 'e.g. Flynn (max 20 chars)',
+  'ui.tron.colPos': '#',
+  'ui.tron.colPilot': 'Pilot',
+  'ui.tron.colLevel': 'Level',
+  'ui.tron.colScore': 'Best Score',
+  'ui.tron.noRanking': 'No scores recorded yet. Be the first!',
+  'ui.tron.personalBest': 'Personal best: {score} pts · Level {level}',
 
   // --- PR12 — note system (rich editor) ---
   'ui.noteTitlePlaceholder': 'Title',
