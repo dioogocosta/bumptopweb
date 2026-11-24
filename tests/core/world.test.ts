@@ -1841,4 +1841,16 @@ describe('PR4.11 — Textura na face do card Taiga e supressão de labels DOM', 
     expect(generatedTextures).toHaveLength(1);
     expect(generatedTextures[0]).toEqual({ ref: 89, showTitle: false });
   });
+
+  it('TRON scatterObjectsNear arremessa itens próximos à moto para cima e para longe', async () => {
+    const { world, physics } = await makeWorld(makeOverlayMock());
+    world.addStickyNote({ x: 5, y: 1.2, z: 5 }, 'perto');
+    world.addStickyNote({ x: 80, y: 1.2, z: 80 }, 'longe');
+
+    const hit = world.scatterObjectsNear(0, 0, 12, 0, -1, 'box-default');
+    expect(hit).toBe(1);
+    expect(physics.setVelocity).toHaveBeenCalledTimes(1);
+    const vel = vi.mocked(physics.setVelocity).mock.calls[0]![1];
+    expect(vel.y).toBeGreaterThan(20);
+  });
 });
