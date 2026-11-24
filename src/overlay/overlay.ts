@@ -467,7 +467,7 @@ export class DomOverlay implements IOverlay {
     this.favFilterBtn.title = t('ui.favoritesFilter');
     this.favFilterBtn.setAttribute('aria-label', t('ui.favoritesFilter'));
     this.favFilterBtn.setAttribute('aria-pressed', 'false');
-    this.favFilterBtn.innerHTML = `<span aria-hidden="true" style="font-size:16px;line-height:1">★</span>`;
+    this.favFilterBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8l-5.8 3.1 1.1-6.5L2.6 8.8l6.5-.9z"/></svg>`;
     this.favFilterBtn.addEventListener('click', () => {
       const on = !this.favFilterOn;
       this.setFavoriteFilterActive(on);
@@ -484,7 +484,7 @@ export class DomOverlay implements IOverlay {
     this.viewSwitchBtn.setAttribute('aria-label', t('ui.viewSwitch'));
     this.viewSwitchBtn.setAttribute('aria-pressed', 'false');
     this.viewSwitchBtn.style.display = 'none';
-    this.viewSwitchBtn.innerHTML = `<span aria-hidden="true" style="font-size:15px;line-height:1">🏠</span>`;
+    this.viewSwitchBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>`;
     this.viewSwitchBtn.addEventListener('click', () => {
       const next = this.viewMode === 'personal' ? 'work' : 'personal';
       this.setViewMode(next);
@@ -614,8 +614,9 @@ export class DomOverlay implements IOverlay {
   setViewMode(mode: 'personal' | 'work'): void {
     this.viewMode = mode;
     if (!this.viewSwitchBtn) return;
-    this.viewSwitchBtn.innerHTML =
-      `<span aria-hidden="true" style="font-size:15px;line-height:1">${mode === 'work' ? '🏢' : '🏠'}</span>`;
+    const houseIcon = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>`;
+    const buildingIcon = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M10 21v-3h4v3"/></svg>`;
+    this.viewSwitchBtn.innerHTML = mode === 'work' ? buildingIcon : houseIcon;
     this.viewSwitchBtn.title =
       mode === 'work' ? t('ui.viewSwitchToPersonal') : t('ui.viewSwitchToWork');
     this.viewSwitchBtn.setAttribute('aria-label', this.viewSwitchBtn.title);
