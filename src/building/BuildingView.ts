@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import type { BoxType } from '@core/ports/index';
 import type { BoxEntityData } from '@core/model/types';
+import { t } from '@core/i18n/i18n';
 
 // ── Tipos públicos ─────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ export interface SearchMatch {
 export type FloorClickCallback  = (boxId: string)  => void;
 export type ItemClickCallback   = (itemId: string, boxId: string) => void;
 export type SearchQueryCallback = (query: string)  => void;
+export type FavoriteCallback    = (boxId: string, isFavorite: boolean) => void;
 
 // ── Constantes ────────────────────────────────────────────────────────────
 
@@ -116,9 +118,12 @@ export class BuildingView {
   private clickableObjects: THREE.Object3D[] = [];
   private selectedId:  string | null = null;
   private hoveredId:   string | null = null;
-  private clickCb:     FloorClickCallback  | null = null;
-  private itemClickCb: ItemClickCallback   | null = null;
-  private searchCb:    SearchQueryCallback | null = null;
+  private clickCb:      FloorClickCallback  | null = null;
+  private itemClickCb:  ItemClickCallback   | null = null;
+  private searchCb:     SearchQueryCallback | null = null;
+  private favoriteCb:   FavoriteCallback    | null = null;
+  /** PR4.16 — filtro ⭐ do HUD: só andares/projetos favoritados. */
+  private favoriteFilterOn = false;
 
   private visible  = false;
   private fadeAlpha = 0;
@@ -472,8 +477,17 @@ export class BuildingView {
       color: '#38bdf8', fontWeight: '700',
       fontSize: '11px', letterSpacing: '0.12em',
       textTransform: 'uppercase', marginBottom: '10px',
+      cursor: 'grab', touchAction: 'none', userSelect: 'none',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: '8px',
     });
     rTitle.textContent = '🏢 Andares';
+    // PR4.16 — pegador de arrasto: puxa o painel da DIREITA p/ a ESQUERDA
+    // (e volta), para o usuário posicionar a lista onde consegue ler.
+    const dragHint = el('span', { fontSize: '10px', color: '#64748b', letterSpacing: '0' });
+    dragHint.textContent = '⠿';
+    dragHint.title = t('ui.floorsDragHint');
+    rTitle.appendChild(dragHint);
     rightPanel.appendChild(rTitle);
 
     this.floorListEl = el('div', { display: 'flex', flexDirection: 'column', gap: '5px' });
@@ -484,6 +498,13 @@ export class BuildingView {
     rightPanel.className = 'bv-floors';
 
     this.dashOverlay.appendChild(rightPanel);
+
+    // PR4.16 — arrastar pelo título (muda left/right) + redimensionar
+    // pela borda ESQUERDA (arrasta p/ a direita = painel mais largo, o
+    // texto deixa de ser cortado). No celular o CSS toma left/right/width
+    // com !important, então o arrasto vira no-op (painel já é full-width).
+    this._makeDraggable(rightPanel, rTitle);
+    this._makeResizable(rightPanel);
 
     // ── Barra de busca global (centro-baixo) ─────────────
     const searchWrap = el('div', {
@@ -813,6 +834,27 @@ export class BuildingView {
     this._rebuild();
   }
 
+  /**
+   * PR4.16 — filtro ⭐: quando ligado, SÓ os andares marcados com estrela
+   * aparecem (na lista E na pilha 3D). Com zero favoritos o prédio fica vazio
+   * e a lista explica por quê — o usuário desliga o filtro pelo mesmo botão.
+   */
+  setFavoriteFilter(on: boolean): void {
+    if (this.favoriteFilterOn === on) return;
+    this.favoriteFilterOn = on;
+    this._rebuild();
+  }
+
+  isFavoriteFilterOn(): boolean {
+    return this.favoriteFilterOn;
+  }
+
+  /** Caixas que devem aparecer respeitando o filtro ⭐. */
+  private _visibleBoxes(): BoxEntityData[] {
+    if (!this.favoriteFilterOn) return this.rawBoxes;
+    return this.rawBoxes.filter((b) => b.isFavorite === true);
+  }
+
   private _rebuild(): void {
     while (this.group.children.length > 0) {
       const c = this.group.children[0];
@@ -828,9 +870,16 @@ export class BuildingView {
     this.floors = [];
     this.clickableObjects = [];
 
-    const items = this.rawBoxes.length > 0
-      ? this.rawBoxes
-      : [{ id: '__empty__', name: 'Caixa Comum', type: 'comum' as BoxType, pos: { x: 0, z: 0 }, halfSize: 40, wallHeight: 20, wallThickness: 2 }];
+    const visible = this._visibleBoxes();
+    // Placeholder "Caixa Comum" só quando NÃO há caixas de verdade. Com o
+    // filtro ⭐ ligado sem favoritos a cena fica vazia de propósito (senão o
+    // usuário veria justamente os andares que pediu para esconder).
+    const items =
+      visible.length > 0
+        ? visible
+        : this.rawBoxes.length === 0
+          ? [{ id: '__empty__', name: 'Caixa Comum', type: 'comum' as BoxType, pos: { x: 0, z: 0 }, halfSize: 40, wallHeight: 20, wallThickness: 2 }]
+          : [];
 
     const geo = new THREE.BoxGeometry(FLOOR_WIDTH, FLOOR_HEIGHT - FLOOR_GAP, FLOOR_DEPTH);
 
@@ -931,12 +980,27 @@ export class BuildingView {
     if (!this.floorListEl) return;
     this.floorListEl.innerHTML = '';
 
-    const items = this.rawBoxes.length > 0 ? this.rawBoxes : [];
+    const items = this._visibleBoxes();
+
+    // Filtro ⭐ ligado sem nenhum favorito: explica em vez de listar nada.
+    if (this.favoriteFilterOn && items.length === 0) {
+      const hint = el('div', {
+        color: '#94a3b8', fontSize: '12px', lineHeight: '1.5',
+        padding: '10px 6px', textAlign: 'center',
+      });
+      hint.textContent = t('ui.favoritesEmpty');
+      this.floorListEl.appendChild(hint);
+      return;
+    }
+
     for (let i = 0; i < items.length; i++) {
       const box = items[i];
+      // F1/F2… = posição na lista VISÍVEL (a mesma que a pilha 3D desenha
+      // com o filtro ⭐ ligado) — lista e cena precisam bater para o clique.
       const stats = this.statsData?.boxes.find(s => s.boxId === box.id);
       const matchCount = this.searchMatches.filter(m => m.boxId === box.id).length;
       const hasMatch = matchCount > 0;
+      const isFav = box.isFavorite === true;
 
       const row = el('div', {
         display: 'flex', alignItems: 'center', gap: '8px',
@@ -950,6 +1014,7 @@ export class BuildingView {
         transition: 'all 0.2s',
         boxShadow: hasMatch ? '0 0 12px rgba(56,189,248,0.25)' : 'none',
       });
+      row.classList.add('bv-floor-row'); // alvo dos testes E2E (PR4.16)
       row.style.pointerEvents = 'auto';
 
       // Badge de andar
@@ -979,7 +1044,25 @@ export class BuildingView {
         info.appendChild(mc);
       }
 
-      row.appendChild(badge); row.appendChild(nameEl); row.appendChild(info);
+      // Estrela de favorito
+      const favBtn = el('button', {
+        background: 'transparent', border: 'none', cursor: 'pointer',
+        padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: isFav ? '#fbbf24' : '#64748b', fontSize: '16px',
+        transition: 'color 0.2s, transform 0.1s',
+      });
+      favBtn.classList.add('floor-fav-btn');
+      favBtn.innerHTML = isFav ? '★' : '☆';
+      favBtn.title = isFav ? 'Remover dos favoritos' : 'Adicionar aos favoritos';
+      favBtn.style.pointerEvents = 'auto';
+      favBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.favoriteCb?.(box.id, !isFav);
+      });
+      favBtn.addEventListener('mouseenter', () => { favBtn.style.transform = 'scale(1.2)'; });
+      favBtn.addEventListener('mouseleave', () => { favBtn.style.transform = 'scale(1)'; });
+
+      row.appendChild(badge); row.appendChild(nameEl); row.appendChild(info); row.appendChild(favBtn);
 
       row.addEventListener('click', () => {
         this.selectedId = box.id;
@@ -1164,6 +1247,17 @@ export class BuildingView {
 
   isVisible(): boolean { return this.visible; }
 
+  /**
+   * PR4.16 — fecha os painéis (Andares/Resumo) sem depender do estado do
+   * prédio. Usado no logout: `hide()` tem early-return quando já estamos
+   * "nas caixas", e aí os painéis ficariam abertos por cima do muro.
+   */
+  closePanels(): void {
+    this.summaryOpen = false;
+    this.floorsOpen  = false;
+    this._applyPanels();
+  }
+
   // ── PR4.13 — Painéis Resumo/Andares no prédio E nas caixas ─────────────
 
   /** Alterna um painel; retorna true se ele ficou aberto. */
@@ -1181,6 +1275,107 @@ export class BuildingView {
   /** Sincroniza os ícones do HUD com o estado dos painéis. */
   onPanelsChange(cb: (floors: boolean, summary: boolean) => void): void {
     this.panelsChangeCb = cb;
+  }
+
+  // ── PR4.16 — painel de andares arrastável (dir. → esq.) e redimensionável
+
+  /**
+   * Arrasta o painel pelo cabeçalho. No PRIMEIRO movimento converte o
+   * âncora `right` em `left` (o painel nasce colado à direita) e daí em
+   * diante só o `left` muda — o usuário puxa da direita p/ a esquerda e
+   * solta onde consegue ler. Limite: sempre dentro da janela.
+   */
+  private _makeDraggable(panel: HTMLElement, handle: HTMLElement): void {
+    let dragging = false;
+    let startX = 0;
+    let startLeft = 0;
+
+    const onMove = (e: PointerEvent): void => {
+      if (!dragging) return;
+      const rect = panel.getBoundingClientRect();
+      // Converte right → left no primeiro arrasto
+      if (startLeft === 0) {
+        startLeft = rect.left;
+        startX = e.clientX;
+        panel.style.left = `${rect.left}px`;
+        panel.style.right = 'auto';
+        return;
+      }
+      const maxLeft = window.innerWidth - rect.width - 8;
+      const next = Math.min(Math.max(startLeft + (e.clientX - startX), 8), Math.max(8, maxLeft));
+      panel.style.left = `${next}px`;
+    };
+
+    const onUp = (e: PointerEvent): void => {
+      if (!dragging) return;
+      dragging = false;
+      handle.style.cursor = 'grab';
+      try {
+        handle.releasePointerCapture(e.pointerId);
+      } catch {
+        // pointer já solto — nada a fazer
+      }
+    };
+
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      dragging = true;
+      startX = e.clientX;
+      startLeft = 0; // 0 = ainda não converteu a âncora
+      handle.style.cursor = 'grabbing';
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      e.stopPropagation(); // não inicia o arrasto da câmera da cena
+    });
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  }
+
+  /**
+   * Alça de redimensionar na borda ESQUERDA do painel: arrastar p/ a
+   * direita alarga (texto deixa de ser cortado), p/ a esquerda estreita.
+   * No celular o CSS trava left/right/width com !important → no-op.
+   */
+  private _makeResizable(panel: HTMLElement): void {
+    const grip = el('div', {
+      position: 'absolute', left: '-4px', top: '0', bottom: '0',
+      width: '12px', cursor: 'ew-resize', touchAction: 'none',
+      borderRadius: '14px 0 0 14px', zIndex: '3',
+    });
+    grip.title = t('ui.floorsResizeHint');
+    panel.appendChild(grip);
+
+    let resizing = false;
+    let startX = 0;
+    let startW = 0;
+
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      resizing = true;
+      startX = e.clientX;
+      startW = panel.getBoundingClientRect().width;
+      grip.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    grip.addEventListener('pointermove', (e) => {
+      if (!resizing) return;
+      const next = Math.min(Math.max(startW - (e.clientX - startX), 180), 560);
+      panel.style.width = `${next}px`;
+      panel.style.right = 'auto';
+    });
+    const stop = (e: PointerEvent): void => {
+      if (!resizing) return;
+      resizing = false;
+      try {
+        grip.releasePointerCapture(e.pointerId);
+      } catch {
+        // pointer já solto
+      }
+    };
+    grip.addEventListener('pointerup', stop);
+    grip.addEventListener('pointercancel', stop);
   }
 
   /**
@@ -1204,9 +1399,10 @@ export class BuildingView {
     this.panelsChangeCb?.(this.floorsOpen, this.summaryOpen);
   }
 
-  onFloorClick(cb: FloorClickCallback):   void { this.clickCb     = cb; }
-  onItemDotClick(cb: ItemClickCallback):  void { this.itemClickCb = cb; }
-  onSearch(cb: SearchQueryCallback):       void { this.searchCb    = cb; }
+  onFloorClick(cb: FloorClickCallback):    void { this.clickCb     = cb; }
+  onItemDotClick(cb: ItemClickCallback):   void { this.itemClickCb = cb; }
+  onSearch(cb: SearchQueryCallback):        void { this.searchCb    = cb; }
+  onFloorFavorite(cb: FavoriteCallback):    void { this.favoriteCb   = cb; }
 
   selectFloor(id: string | null): void {
     this.selectedId = id;

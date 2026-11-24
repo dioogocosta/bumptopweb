@@ -1501,3 +1501,247 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
     await expect(page.locator('.zoom-slider')).toBeVisible();
   });
 });
+
+test.describe('PR4.16 — favoritos de andares e filtro ⭐', () => {
+  test('filtro ⭐ mostra só favoritos; estrela marca/desmarca no painel', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const floorsBtn = page.locator('.floors-btn');
+    await floorsBtn.click();
+    const floors = page.locator('.bv-floors');
+    await expect(floors).toBeVisible();
+
+    // Cena demo (nobuilding) tem só a caixa raiz box-default → 1 linha
+    const rows = floors.locator('.bv-floor-row');
+    await expect(rows).toHaveCount(1);
+
+    // Liga o filtro ⭐ ANTES de favoritar → 0 linhas + texto vazio
+    const favFilter = page.locator('.fav-filter-btn');
+    await favFilter.click();
+    await expect(rows).toHaveCount(0);
+    await expect(floors).toContainText('Nenhum favorito ainda');
+
+    // Desliga → volta a 1 linha
+    await favFilter.click();
+    await expect(rows).toHaveCount(1);
+
+    // Marca a única caixa como favorita → estrela ★
+    const favBtn = rows.locator('.floor-fav-btn').first();
+    await favBtn.click();
+    await expect(favBtn).toHaveText('★');
+    const isFav = await page.evaluate(
+      () => window.__bumptop!.world.listBoxes()[0].isFavorite === true,
+    );
+    expect(isFav).toBe(true);
+
+    // Liga o filtro → 1 linha (a favorita), botão ativo (sel + aria-pressed)
+    await favFilter.click();
+    await expect(rows).toHaveCount(1);
+    await expect(favFilter).toHaveClass(/sel/);
+    await expect(favFilter).toHaveAttribute('aria-pressed', 'true');
+
+    // Desliga → restaura todas as caixas
+    await favFilter.click();
+    await expect(rows).toHaveCount(1);
+    await expect(favFilter).toHaveAttribute('aria-pressed', 'false');
+
+    // Desmarca → estrela volta ☆
+    await favBtn.click();
+    await expect(favBtn).toHaveText('☆');
+  });
+});
+
+test.describe('PR4.16 — logout real (só a tela de login fica)', () => {
+  test('sair do sistema sobe o muro: nada da cena fica visível nem clicável', async ({ page }) => {
+    await page.route('**/api/session', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true, email: 'teste@bumptop.dev' }),
+      }),
+    );
+    await page.route('**/api/logout', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    // Sessão confirmada → cena carrega (espera a semeadura assíncrona)
+    await page.waitForFunction(() => window.__bumptop!.world.objectCount() > 0, { timeout: 20000 });
+    expect(await page.evaluate(() => window.__bumptop!.world.objectCount())).toBeGreaterThan(0);
+
+    // Abre o perfil (conta)
+    await page.locator('.auth-btn').click();
+    await expect(page.locator('.user-profile-modal')).toBeVisible();
+    await expect(page.locator('.user-profile-btn-danger')).toBeVisible();
+
+    // Sair do Sistema
+    await page.locator('.user-profile-btn-danger').click();
+
+    // O muro sobe imediatamente (forceWall), mesmo com /api/session ainda
+    // devolvendo authenticated:true
+    await expect(page.locator('.auth-wall')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/auth-walled/);
+    await expect(page.locator('#scene-root')).toHaveCSS('visibility', 'hidden');
+    expect(await page.evaluate(() => window.__bumptop!.world.objectCount())).toBe(0);
+    await expect(page.locator('.bv-floors')).toBeHidden();
+
+    // O modal de perfil é recriado pelo raiseLoginWall (não prende a pessoa)
+    await expect(page.locator('.user-profile-modal')).toBeVisible();
+
+    // Fechar o modal mantém o muro de pé
+    await page.locator('.user-profile-close').click();
+    await expect(page.locator('.auth-wall')).toBeVisible();
+    await expect(page.locator('.user-profile-modal')).toBeHidden();
+
+    // Clicar no véu reabre o login (authwallreopen). Dispara o evento diretamente
+    // p/ evitar corrida com o openUserProfileModal assíncrono do raiseLoginWall.
+    await page.evaluate(() => {
+      document
+        .getElementById('overlay-root')!
+        .dispatchEvent(new CustomEvent('authwallreopen', { bubbles: true }));
+    });
+    await expect(page.locator('.user-profile-modal')).toBeVisible();
+  });
+});
+
+test.describe('PR4.17 — Enter no editor de notas', () => {
+  test('Enter cria uma nova linha (quebra de linha) no modelo', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() =>
+      window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'linha um'),
+    );
+    await page.waitForTimeout(400);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
+    // Notas abrem no duplo-clique
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    const editor = page.locator('.note-rich-content');
+    await editor.click();
+    await page.keyboard.type(' duas');
+
+    // Enter: dispara beforeinput insertParagraph → novo bloco abaixo da linha atual
+    await page.evaluate(() => {
+      const ed = document.querySelector('.note-rich-content');
+      if (!ed) return;
+      ed.focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      ed.dispatchEvent(
+        new InputEvent('beforeinput', {
+          inputType: 'insertParagraph',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    await page.keyboard.type('linha dois');
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+
+    const salvo = await page.evaluate(
+      (oid) => (window.__bumptop!.world.getObject(oid)!.meta.noteText as string) ?? '',
+      notaId,
+    );
+    // Duas linhas (quebra ao Enter)
+    expect(salvo.split('\n').length).toBeGreaterThanOrEqual(2);
+    expect(salvo).toContain('linha dois');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+});
+
+test.describe('PR4.17 — anti-perda de anotações', () => {
+  test('nota existente: clicar fora do modal (backdrop) preserva o conteúdo', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'backdrop com área fora do modal só existe no desktop');
+
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() =>
+      window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'conteúdo original da nota'),
+    );
+    await page.waitForTimeout(400);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    // Passa do guard de 350 ms do duplo-clique no backdrop
+    await page.waitForTimeout(400);
+
+    // Clica no backdrop no canto superior-direito, fora do card centralizado
+    // e fora do HUD (os controles de topo ficam só no lado esquerdo).
+    const bb = await page.locator('.note-rich-backdrop').boundingBox();
+    expect(bb).toBeTruthy();
+    await page.mouse.click(bb!.x + bb!.width - 20, bb!.y + 20);
+    await expect(modal).toHaveCount(0);
+
+    const salvo = await page.evaluate(
+      (oid) => (window.__bumptop!.world.getObject(oid)!.meta.noteText as string) ?? '',
+      notaId,
+    );
+    expect(salvo).toBe('conteúdo original da nota');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+
+  test('nota existente esvaziada no editor não é removida ao fechar (done)', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() =>
+      window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'texto que será apagado'),
+    );
+    await page.waitForTimeout(400);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    // Esvazia o editor (usuário apagou todo o texto)
+    await page.evaluate(() => {
+      const ed = document.querySelector('.note-rich-content');
+      if (ed) ed.innerHTML = '';
+    });
+
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+
+    // O objeto continua no mundo: anti-perda PR4.17 não remove nota existente
+    const obj = await page.evaluate((oid) => window.__bumptop!.world.getObject(oid), notaId);
+    expect(obj).toBeTruthy();
+    expect((obj as { meta?: { noteText?: string } }).meta?.noteText).toBe('');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+});

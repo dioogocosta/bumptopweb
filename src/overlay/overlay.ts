@@ -205,6 +205,12 @@ export class DomOverlay implements IOverlay {
 
   /** PR4.13 — ícones que abrem/fecham os painéis Andares e Resumo. */
   private floorsBtn: HTMLButtonElement | null = null;
+  /** PR4.16 — botão ⭐ do HUD: filtra o painel de andares p/ favoritos. */
+  private favFilterBtn: HTMLButtonElement | null = null;
+  private favFilterOn = false;
+  /** PR4.16 — botão 🏠/🏢 do HUD: alterna a visão pessoal × trabalho. */
+  private viewSwitchBtn: HTMLButtonElement | null = null;
+  private viewMode: 'personal' | 'work' = 'personal';
   private statsBtn: HTMLButtonElement | null = null;
 
   /** Menu de seleção de temas. */
@@ -453,6 +459,39 @@ export class DomOverlay implements IOverlay {
     });
     zoomWrap.appendChild(this.statsBtn);
 
+    // PR4.16 — botão ⭐ "Só favoritos": filtra o painel de andares para
+    // mostrar apenas os projetos marcados com estrela. Aceso = filtrando.
+    this.favFilterBtn = document.createElement('button');
+    this.favFilterBtn.type = 'button';
+    this.favFilterBtn.className = 'fav-filter-btn';
+    this.favFilterBtn.title = t('ui.favoritesFilter');
+    this.favFilterBtn.setAttribute('aria-label', t('ui.favoritesFilter'));
+    this.favFilterBtn.setAttribute('aria-pressed', 'false');
+    this.favFilterBtn.innerHTML = `<span aria-hidden="true" style="font-size:16px;line-height:1">★</span>`;
+    this.favFilterBtn.addEventListener('click', () => {
+      const on = !this.favFilterOn;
+      this.setFavoriteFilterActive(on);
+      this.root.dispatchEvent(new CustomEvent('favoritefilter', { detail: { on }, bubbles: true }));
+    });
+    zoomWrap.appendChild(this.favFilterBtn);
+
+    // PR4.16 — botão de VISÃO: alterna Prédio 1 (dados pessoais) × Prédio 2
+    // (projetos do Taiga). Só aparece quando o Taiga está conectado.
+    this.viewSwitchBtn = document.createElement('button');
+    this.viewSwitchBtn.type = 'button';
+    this.viewSwitchBtn.className = 'view-switch-btn';
+    this.viewSwitchBtn.title = t('ui.viewSwitch');
+    this.viewSwitchBtn.setAttribute('aria-label', t('ui.viewSwitch'));
+    this.viewSwitchBtn.setAttribute('aria-pressed', 'false');
+    this.viewSwitchBtn.style.display = 'none';
+    this.viewSwitchBtn.innerHTML = `<span aria-hidden="true" style="font-size:15px;line-height:1">🏠</span>`;
+    this.viewSwitchBtn.addEventListener('click', () => {
+      const next = this.viewMode === 'personal' ? 'work' : 'personal';
+      this.setViewMode(next);
+      this.root.dispatchEvent(new CustomEvent('viewswitch', { detail: { mode: next }, bubbles: true }));
+    });
+    zoomWrap.appendChild(this.viewSwitchBtn);
+
     this.root.appendChild(zoomWrap);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
@@ -554,6 +593,44 @@ export class DomOverlay implements IOverlay {
   /** PR4.13 — estado visual dos ícones de painel (aceso = painel aberto). */
   setPanelActive(which: 'floors' | 'summary', on: boolean): void {
     (which === 'floors' ? this.floorsBtn : this.statsBtn)?.classList.toggle('sel', on);
+  }
+
+  /** PR4.16 — estado do filtro ⭐ (aceso = só favoritos). */
+  setFavoriteFilterActive(on: boolean): void {
+    this.favFilterOn = on;
+    this.favFilterBtn?.classList.toggle('sel', on);
+    this.favFilterBtn?.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
+  /** PR4.16 — lê o estado atual do filtro ⭐. */
+  isFavoriteFilterActive(): boolean {
+    return this.favFilterOn;
+  }
+
+  /**
+   * PR4.16 — visão ativa (prédio 1 = pessoal / prédio 2 = trabalho Taiga).
+   * Troca o ícone 🏠 ↔ 🏢 para o usuário saber onde está.
+   */
+  setViewMode(mode: 'personal' | 'work'): void {
+    this.viewMode = mode;
+    if (!this.viewSwitchBtn) return;
+    this.viewSwitchBtn.innerHTML =
+      `<span aria-hidden="true" style="font-size:15px;line-height:1">${mode === 'work' ? '🏢' : '🏠'}</span>`;
+    this.viewSwitchBtn.title =
+      mode === 'work' ? t('ui.viewSwitchToPersonal') : t('ui.viewSwitchToWork');
+    this.viewSwitchBtn.setAttribute('aria-label', this.viewSwitchBtn.title);
+    this.viewSwitchBtn.classList.toggle('sel', mode === 'work');
+    this.viewSwitchBtn.setAttribute('aria-pressed', mode === 'work' ? 'true' : 'false');
+  }
+
+  getViewMode(): 'personal' | 'work' {
+    return this.viewMode;
+  }
+
+  /** Mostra/esconde o seletor de visão (só existe com Taiga conectado). */
+  setViewSwitchVisible(on: boolean): void {
+    if (this.viewSwitchBtn) this.viewSwitchBtn.style.display = on ? '' : 'none';
+    if (!on) this.setViewMode('personal');
   }
 
   // -------------------------------------------------------------------------
@@ -1238,6 +1315,41 @@ export class DomOverlay implements IOverlay {
   }
 
   /** Estado do botão na barra: logado → dica com o e-mail + pontinho. */
+
+  // ── PR4.16 — muro de login (logout real: só a tela de login sobra) ────
+  private authWallEl: HTMLElement | null = null;
+
+  /**
+   * Sobe/desce o muro: um véu cobre cena + HUD (z 10000; só o modal de
+   * perfil, z 10001, fica por cima). Depois de sair do sistema nada do
+   * prédio/caixas fica visível nem clicável. Clicar no véu reabre o login —
+   * fechar o modal não pode deixar a pessoa presa num tela preta.
+   */
+  setAuthWall(on: boolean): void {
+    if (on) {
+      if (!this.authWallEl) {
+        const w = document.createElement('div');
+        w.className = 'auth-wall';
+        w.setAttribute('aria-hidden', 'true');
+        w.addEventListener('click', () => {
+          this.root.dispatchEvent(new CustomEvent('authwallreopen', { bubbles: true }));
+        });
+        this.root.appendChild(w);
+        this.authWallEl = w;
+      }
+      this.authWallEl.style.display = 'block';
+      document.body.classList.add('auth-walled');
+    } else {
+      if (this.authWallEl) this.authWallEl.style.display = 'none';
+      document.body.classList.remove('auth-walled');
+    }
+  }
+
+  /** O muro está de pé? */
+  isAuthWallUp(): boolean {
+    return !!this.authWallEl && this.authWallEl.style.display !== 'none';
+  }
+
   setAuthState(session: { email: string } | null): void {
     if (!this.authBtn) return;
     this.authBtn.classList.toggle('logged', !!session);
@@ -2886,7 +2998,115 @@ export class DomOverlay implements IOverlay {
         walk(line, { b: false, i: false, u: false, s: false });
         return { md: out, map };
       };
+      /**
+       * PR4.17 — posiciona o cursor numa contagem de caracteres do texto do
+       * editor. Usado para restaurar a seleção depois de reconstruir o DOM.
+       */
+      const placeCaretAtTextOffset = (off: number): void => {
+        const sel = window.getSelection();
+        if (!sel) return;
+        const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+        let acc = 0;
+        let node = walker.nextNode() as Text | null;
+        let last: Text | null = null;
+        while (node) {
+          const len = node.data.length;
+          if (acc + len >= off) {
+            const r = document.createRange();
+            r.setStart(node, Math.max(0, off - acc));
+            r.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(r);
+            return;
+          }
+          acc += len;
+          last = node;
+          node = walker.nextNode() as Text | null;
+        }
+        if (last) {
+          const r = document.createRange();
+          r.setStart(last, last.data.length);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      };
+
+      /**
+       * PR4.17 — ANTI-PERDA: garante que TODO conteúdo do editor esteja dentro
+       * de um bloco `.nl-line` antes de serializar.
+       *
+       * O contentEditable do navegador solta conteúdo fora dos blocos (Ctrl+A
+       * e digitar por cima, clique no vazio abaixo do texto, Enter sem linha
+       * atual…) e o `serializeRich` lê SÓ `.nl-line`. O texto continuava
+       * VISÍVEL na tela, mas o modelo ficava vazio — ao fechar o modal o
+       * editor devolvia nota vazia e o chamador apagava a anotação inteira
+       * (bug de notas sumindo ao clicar fora/fechar). Todo nó órfão vira
+       * bloco pelo mesmo conversor do colar, com o cursor restaurado; com a
+       * estrutura íntegra é um no-op (não mexe em nada no caso comum).
+       */
+      const normalizeEditor = (): void => {
+        const isLine = (n: Node): boolean =>
+          n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).classList.contains('nl-line');
+        // Inócios p/ o modelo: `<br>` e espaço que o navegador deixa na raiz
+        // (helper de cursor). Ignorados na hora de decidir se há órfão.
+        const isHarmless = (n: Node): boolean =>
+          (n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).tagName === 'BR') ||
+          (n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim() === '');
+        const kids = Array.from(editor.childNodes);
+        const hasOrphan = kids.some((n) => !isLine(n) && !isHarmless(n));
+        if (!hasOrphan) return; // estrutura íntegra — não mexe em nada (caso comum)
+
+        // Posição do cursor em caracteres (restaurada depois do rebuild)
+        const sel0 = window.getSelection();
+        let caret = -1;
+        if (sel0 && sel0.rangeCount > 0 && editor.contains(sel0.anchorNode)) {
+          const pre = document.createRange();
+          pre.selectNodeContents(editor);
+          try {
+            pre.setEnd(sel0.anchorNode!, sel0.anchorOffset);
+            caret = pre.toString().length;
+          } catch {
+            caret = -1;
+          }
+        }
+
+        const frag = document.createDocumentFragment();
+        let buf = '';
+        const flush = (): void => {
+          if (buf === '') return;
+          const md = htmlToNoteMd(buf);
+          buf = '';
+          if (md === '') return;
+          const tpl = document.createElement('template');
+          tpl.innerHTML = noteTextToHtml(md);
+          frag.append(...Array.from(tpl.content.childNodes));
+        };
+        for (const n of kids) {
+          if (isLine(n)) {
+            flush();
+            frag.appendChild(n);
+          } else if (n.nodeType === Node.TEXT_NODE) {
+            buf += n.textContent ?? '';
+          } else if (n.nodeType === Node.ELEMENT_NODE) {
+            buf += (n as HTMLElement).outerHTML;
+          }
+        }
+        flush();
+
+        editor.innerHTML = '';
+        if (frag.childNodes.length > 0) editor.appendChild(frag);
+        // Sem nenhum bloco (tudo apagado): mantém o bloco raiz vazio p/ o
+        // placeholder e para a próxima digitação nascer dentro de um bloco.
+        if (editor.querySelectorAll('.nl-line').length === 0) {
+          editor.innerHTML = noteTextToHtml('');
+        }
+        editor.classList.toggle('empty', (editor.textContent ?? '').trim() === '');
+        if (caret >= 0) placeCaretAtTextOffset(caret);
+      };
+
       const serializeRich = (): string => {
+        normalizeEditor(); // nunca serializar com conteúdo fora dos blocos
         const lines: string[] = [];
         editor.querySelectorAll<HTMLElement>('.nl-line').forEach((line) => {
           const { md } = serializeMapped(line);
@@ -2999,14 +3219,45 @@ export class DomOverlay implements IOverlay {
           doRedo();
         }
       });
-      // PR13 — Enter interceptado: cria um bloco NOVO (item→item pendente;
-      // h1/h2→texto normal). O Enter nativo clonaria o bloco (checkbox duplo).
+      /**
+       * PR13/PR4.17 — Enter interceptado: cria um bloco NOVO (item→item
+       * pendente; h1/h2→texto normal). O Enter nativo clonaria o bloco
+       * (checkbox duplo).
+       *
+       * PR4.17 — cobre TAMBÉM `insertLineBreak` (Shift+Enter) e o caso de
+       * cursor FORA dos blocos (clique na área vazia do editor, logo abaixo
+       * do texto). Sem isto o Enter nativo injeta `<br>`/texto na RAIZ do
+       * editor; o modelo lê só `.nl-line`, ignorava a quebra e ao salvar
+       * "tudo grudava numa linha só" (a anotação voltava ao estado antigo,
+       * com a formatação perdida). Shift+Enter também não podia virar `<br>`
+       * dentro da linha: `serializeMapped` descarta `<br>` de propósito —
+       * a quebra simplesmente sumia do modelo.
+       */
       editor.addEventListener('beforeinput', (e) => {
-        if (e.inputType !== 'insertParagraph') return;
-        const line = currentLine();
-        if (!line) return;
+        if (e.inputType !== 'insertParagraph' && e.inputType !== 'insertLineBreak') return;
         e.preventDefault();
         pushUndo();
+        const line = currentLine();
+        if (!line) {
+          // Cursor na raiz do editor: nasce um bloco vazio no ponto do cursor
+          const tpl = document.createElement('template');
+          tpl.innerHTML = noteTextToHtml('');
+          const nl = tpl.content.firstElementChild as HTMLElement;
+          const sel = window.getSelection();
+          let placed = false;
+          if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+            try {
+              sel.getRangeAt(0).insertNode(nl);
+              placed = true;
+            } catch {
+              placed = false;
+            }
+          }
+          if (!placed) editor.appendChild(nl);
+          placeCaretAtStart(nl);
+          syncModel();
+          return;
+        }
         const { md, map } = serializeMapped(line);
         const domIdx = caretIndexInLine(line);
         const mdIdx = domIdx >= 0 && domIdx < map.length ? map[domIdx] : md.length;
@@ -3514,6 +3765,15 @@ export class DomOverlay implements IOverlay {
         vp?.removeEventListener('resize', fitKb);
         vp?.removeEventListener('scroll', fitKb);
         modal.style.height = '';
+        // PR4.17 — serializa AGORA: o último `input` pode ainda não ter sido
+        // processado (composição de IME, colar programático) e o draft ficaria
+        // defasado. E nunca devolve nota "vazia" enquanto o editor ainda
+        // mostra texto na tela — aí guardamos o texto cru em vez de descartar.
+        draft.text = serializeRich();
+        if (draft.text.trim() === '' && draft.title.trim() === '' && draft.drawing === null) {
+          const raw = htmlToNoteMd(editor.innerHTML).trim();
+          if (raw !== '') draft.text = raw;
+        }
         backdrop.remove();
         document.removeEventListener('keydown', onKey);
         resolve({ ...draft });

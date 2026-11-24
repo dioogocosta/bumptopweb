@@ -288,6 +288,20 @@ export class World {
     return this.boxes.get(id) ?? null;
   }
 
+  /**
+   * PR4.16 — marca/desmarca uma caixa (andar/projeto) como favorita.
+   * O flag fica em `BoxEntityData.isFavorite`, é serializado pelo
+   * `toSnapshot()` e restaurado no `loadSnapshot()` — sobrevive a reload.
+   */
+  setBoxFavorite(id: string, isFavorite: boolean): boolean {
+    const box = this.boxes.get(id);
+    if (!box) return false;
+    if (isFavorite) box.isFavorite = true;
+    else delete box.isFavorite;
+    this.dirty = true;
+    return true;
+  }
+
   getCurrentBoxId(): string {
     return this.currentBoxId;
   }
@@ -3488,6 +3502,8 @@ export class World {
         if (typeof b.taigaSprintId === 'number') nova.taigaSprintId = b.taigaSprintId;
         if (typeof b.taigaSprintName === 'string' && b.taigaSprintName) nova.taigaSprintName = b.taigaSprintName;
         if (Array.isArray(b.kanbanLanes) && b.kanbanLanes.length) nova.kanbanLanes = b.kanbanLanes;
+        // PR4.16 — favorito do usuário (filtro do painel de andares)
+        if (b.isFavorite === true) nova.isFavorite = true;
         this.boxes.set(b.id, nova);
       }
     }

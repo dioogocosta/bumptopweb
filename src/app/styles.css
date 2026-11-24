@@ -43,6 +43,22 @@ body {
   touch-action: none;
 }
 
+/* PR4.16 — muro de login: depois de sair do sistema só a tela de login
+   existe. O véu cobre cena + HUD (z 10000, abaixo do modal de perfil em
+   10001) e o canvas some de vista — sem prédio, sem caixas, sem nada. */
+.auth-wall {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(2, 6, 23, 0.97);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+body.auth-walled #scene-root {
+  visibility: hidden;
+}
+
 /* Laço livre e elíptico (P1 — BumpTop Freehand & Curved Dotted Lasso) */
 .lasso-rect {
   position: absolute;
@@ -229,14 +245,24 @@ body {
 }
 
 /* PR15 — botão "Modo laço" / PR18 — busca / PR27 — conta / PR4a — engrenagem
-   / PR4.13 — ícones de painel (Andares/Resumo): aceso = painel aberto */
+   / PR4.13 — ícones de painel (Andares/Resumo) / PR4.16 — ⭐ filtro de
+   favoritos e 🏠/🏢 seletor de visão: aceso = ativo */
 .zoom-controls .lasso-btn.sel,
 .zoom-controls .search-btn.sel,
 .zoom-controls .settings-btn.sel,
 .zoom-controls .floors-btn.sel,
-.zoom-controls .stats-btn.sel {
+.zoom-controls .stats-btn.sel,
+.zoom-controls .fav-filter-btn.sel,
+.zoom-controls .view-switch-btn.sel {
   background: #2f6fed;
   box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.45), 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+/* PR4.16 — ⭐ de favoritos: aceso = mostrando só favoritos (dourado p/ o
+   usuário associar à estrela do painel de andares) */
+.zoom-controls .fav-filter-btn.sel {
+  background: #b45309;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.5), 0 2px 8px rgba(0, 0, 0, 0.5);
+  color: #fbbf24;
 }
 /* PR18 — barra de busca (campo + navegação), logo abaixo dos zooms */
 .search-bar {
