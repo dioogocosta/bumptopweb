@@ -1636,10 +1636,11 @@ test.describe('PR4.17 — Enter no editor de notas', () => {
 
     // Enter: dispara beforeinput insertParagraph → novo bloco abaixo da linha atual
     await page.evaluate(() => {
-      const ed = document.querySelector('.note-rich-content');
+      const ed = document.querySelector<HTMLElement>('.note-rich-content');
       if (!ed) return;
       ed.focus();
       const sel = window.getSelection();
+      if (!sel) return;
       const range = document.createRange();
       range.selectNodeContents(ed);
       range.collapse(false);
