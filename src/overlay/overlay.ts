@@ -2987,9 +2987,14 @@ export class DomOverlay implements IOverlay {
     this.root.appendChild(m);
   }
 
-  /** TRON — Game Grid (4 quadrantes) + seleção da Moto de Luz + Nickname & Ranking (só logados). */
+  /** TRON — Game Grid (4 quadrantes) + seleção da Moto de Luz + 2P Local (Desktop) + Nickname & Ranking. */
   showTronGameGridModal(
-    onStart: (color: 'blue' | 'red', nickname?: string) => void,
+    onStart: (
+      color: 'blue' | 'red',
+      nickname?: string,
+      mode?: 'solo' | 'local2p',
+      splitOrientation?: 'vertical' | 'horizontal',
+    ) => void,
     opts?: {
       isLoggedIn: boolean;
       initialNickname?: string;
@@ -3000,7 +3005,13 @@ export class DomOverlay implements IOverlay {
     if (existing) existing.remove();
 
     let selectedColor: 'blue' | 'red' = 'blue';
+    let selectedMode: 'solo' | 'local2p' = 'solo';
+    let selectedSplit: 'vertical' | 'horizontal' = 'vertical';
     let nickInput: HTMLInputElement | null = null;
+    const isDesktop =
+      typeof window !== 'undefined' &&
+      !window.matchMedia('(pointer: coarse)').matches &&
+      window.innerWidth > 768;
 
     const m = document.createElement('div');
     m.className = 'tron-grid-modal';
@@ -3106,14 +3117,86 @@ export class DomOverlay implements IOverlay {
     bikesRow.append(blueBtn, redBtn);
     card.appendChild(bikesRow);
 
-    // Objetivo
+    // Seletor 1P vs 2P Local + Divisão de tela (apenas Desktop)
+    let splitWrap: HTMLDivElement | null = null;
+    let soloExtrasWrap: HTMLDivElement | null = null;
     const obj = document.createElement('p');
     obj.className = 'tron-grid-objective';
     obj.textContent = t('ui.tron.objective');
+
+    if (isDesktop) {
+      const modeRow = document.createElement('div');
+      modeRow.className = 'tron-mode-row';
+      const soloBtn = document.createElement('button');
+      soloBtn.type = 'button';
+      soloBtn.className = 'tron-mode-btn sel';
+      soloBtn.textContent = `👤 ${t('ui.tron.modeSolo')}`;
+
+      const twoPBtn = document.createElement('button');
+      twoPBtn.type = 'button';
+      twoPBtn.className = 'tron-mode-btn';
+      twoPBtn.textContent = `👥 ${t('ui.tron.mode2p')}`;
+
+      splitWrap = document.createElement('div');
+      splitWrap.className = 'tron-split-wrap';
+      splitWrap.style.display = 'none';
+      const splitLbl = document.createElement('div');
+      splitLbl.className = 'tron-pick-label';
+      splitLbl.textContent = t('ui.tron.splitLabel');
+
+      const splitRow = document.createElement('div');
+      splitRow.className = 'tron-mode-row';
+      const vBtn = document.createElement('button');
+      vBtn.type = 'button';
+      vBtn.className = 'tron-mode-btn sel';
+      vBtn.textContent = `◫ ${t('ui.tron.splitVertical')}`;
+      const hBtn = document.createElement('button');
+      hBtn.type = 'button';
+      hBtn.className = 'tron-mode-btn';
+      hBtn.textContent = `⬒ ${t('ui.tron.splitHorizontal')}`;
+
+      vBtn.addEventListener('click', () => {
+        selectedSplit = 'vertical';
+        vBtn.classList.add('sel');
+        hBtn.classList.remove('sel');
+      });
+      hBtn.addEventListener('click', () => {
+        selectedSplit = 'horizontal';
+        hBtn.classList.add('sel');
+        vBtn.classList.remove('sel');
+      });
+      splitRow.append(vBtn, hBtn);
+      splitWrap.append(splitLbl, splitRow);
+
+      const syncModeUi = () => {
+        soloBtn.classList.toggle('sel', selectedMode === 'solo');
+        twoPBtn.classList.toggle('sel', selectedMode === 'local2p');
+        if (splitWrap) splitWrap.style.display = selectedMode === 'local2p' ? 'block' : 'none';
+        if (soloExtrasWrap) soloExtrasWrap.style.display = selectedMode === 'solo' ? 'block' : 'none';
+        obj.textContent =
+          selectedMode === 'local2p' ? t('ui.tron.controls2pHint') : t('ui.tron.objective');
+      };
+
+      soloBtn.addEventListener('click', () => {
+        selectedMode = 'solo';
+        syncModeUi();
+      });
+      twoPBtn.addEventListener('click', () => {
+        selectedMode = 'local2p';
+        syncModeUi();
+      });
+
+      modeRow.append(soloBtn, twoPBtn);
+      card.appendChild(modeRow);
+      card.appendChild(splitWrap);
+    }
+
+    // Objetivo
     card.appendChild(obj);
 
-    // Nickname + Ranking (apenas para usuários logados)
+    // Nickname + Ranking (apenas para usuários logados no modo 1P)
     if (opts?.isLoggedIn) {
+      soloExtrasWrap = document.createElement('div');
       const nickWrap = document.createElement('div');
       nickWrap.className = 'tron-nick-wrap';
       const nickLbl = document.createElement('label');
@@ -3126,11 +3209,12 @@ export class DomOverlay implements IOverlay {
       nickInput.placeholder = t('ui.tron.nicknamePh');
       nickInput.value = opts.initialNickname ?? '';
       nickWrap.append(nickLbl, nickInput);
-      card.appendChild(nickWrap);
+      soloExtrasWrap.appendChild(nickWrap);
 
       const rankingBox = document.createElement('div');
       rankingBox.className = 'tron-ranking-box';
-      card.appendChild(rankingBox);
+      soloExtrasWrap.appendChild(rankingBox);
+      card.appendChild(soloExtrasWrap);
       if (opts.loadRanking) {
         void opts.loadRanking().then((data) => {
           if (data?.me?.nickname && nickInput && !nickInput.value.trim()) {
@@ -3151,8 +3235,10 @@ export class DomOverlay implements IOverlay {
     startBtn.addEventListener('click', () => {
       const chosen = selectedColor;
       const nick = nickInput?.value.trim() || undefined;
+      const mode = selectedMode;
+      const split = selectedSplit;
       cleanup();
-      onStart(chosen, nick);
+      onStart(chosen, nick, mode, split);
     });
     footer.appendChild(startBtn);
     card.appendChild(footer);

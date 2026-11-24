@@ -5,7 +5,9 @@ import {
   type BikeColor,
   type CycleState,
   type PlayerBikeColor,
+  type SplitOrientation,
   type TrailSegment,
+  type TronGameMode,
 } from './tronEngine';
 import type { ThreeRenderer } from '@render/three/threeRenderer';
 import type { World } from '@core/world';
@@ -46,6 +48,8 @@ export interface TronGameHost {
   renderer: ThreeRenderer;
   world: World;
   playerColor: PlayerBikeColor;
+  mode?: TronGameMode;
+  splitOrientation?: SplitOrientation;
   boxId: string;
   onExit: () => void;
   rankingOpts?: {
@@ -83,6 +87,11 @@ export class TronGameView {
 
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  private cam2Pos = new THREE.Vector3();
+  private cam2Look = new THREE.Vector3();
+  private splitOrientation: SplitOrientation;
+  private p1BadgeEl?: HTMLElement;
+  private p2BadgeEl?: HTMLElement;
   private raf = 0;
   private lastTs = 0;
   private frameCount = 0;
@@ -96,6 +105,7 @@ export class TronGameView {
     this.boxId = host.boxId;
     this.onExitCb = host.onExit;
     this.rankingOpts = host.rankingOpts;
+    this.splitOrientation = host.splitOrientation ?? 'vertical';
 
     // Salva o snapshot pré-jogo para restaurar os papéis/itens ao sair
     this.preGameSnapshot = this.world.toSnapshot();
@@ -109,6 +119,7 @@ export class TronGameView {
       halfSize,
       originX,
       originZ,
+      mode: host.mode ?? 'solo',
       playerColor: host.playerColor,
       level: 1,
     });
@@ -279,8 +290,25 @@ export class TronGameView {
     this.scoreEl.textContent = 'SCORE : 0';
     this.container.appendChild(this.scoreEl);
 
+    if (this.engine.mode === 'local2p') {
+      const divider = document.createElement('div');
+      divider.className = `tron-split-divider ${this.splitOrientation}`;
+      this.container.appendChild(divider);
+
+      this.p1BadgeEl = document.createElement('div');
+      this.p1BadgeEl.className = `tron-p-badge p1 ${this.splitOrientation}`;
+      this.container.appendChild(this.p1BadgeEl);
+
+      this.p2BadgeEl = document.createElement('div');
+      this.p2BadgeEl.className = `tron-p-badge p2 ${this.splitOrientation}`;
+      this.container.appendChild(this.p2BadgeEl);
+    }
+
     const touchWrap = document.createElement('div');
     touchWrap.className = 'tron-touch-controls';
+    if (this.engine.mode === 'local2p') {
+      touchWrap.style.display = 'none';
+    }
     const leftBtn = document.createElement('button');
     leftBtn.type = 'button';
     leftBtn.className = 'tron-touch-btn';
@@ -343,11 +371,12 @@ export class TronGameView {
     this.updateHud();
   }
 
-  private turn(side: 'left' | 'right'): void {
-    if (this.engine.turnPlayer(side)) {
-      this.playSynthTone(620, 0.05, 'square');
-      const player = this.engine.getPlayer();
-      const vis = player ? this.cycleVisuals.get(player.id) : undefined;
+  private turn(side: 'left' | 'right', target: 'p1' | 'p2' = 'p1'): void {
+    const ok = target === 'p2' ? this.engine.turnPlayer2(side) : this.engine.turnPlayer(side);
+    if (ok) {
+      this.playSynthTone(target === 'p2' ? 540 : 620, 0.05, 'square');
+      const cycle = target === 'p2' ? this.engine.getPlayer2() : this.engine.getPlayer();
+      const vis = cycle ? this.cycleVisuals.get(cycle.id) : undefined;
       if (vis) {
         vis.bank = side === 'left' ? 0.36 : -0.36;
       }
@@ -355,12 +384,14 @@ export class TronGameView {
   }
 
   private advanceOrRetry(): void {
-    if (this.engine.status === 'won') {
-      this.engine.level += 1;
-      this.maxLevelReached = Math.max(this.maxLevelReached, this.engine.level);
-    } else {
-      this.engine.level = 1;
-      this.engine.score = 0;
+    if (this.engine.mode === 'solo') {
+      if (this.engine.status === 'won') {
+        this.engine.level += 1;
+        this.maxLevelReached = Math.max(this.maxLevelReached, this.engine.level);
+      } else {
+        this.engine.level = 1;
+        this.engine.score = 0;
+      }
     }
     this.clearArenaVisuals();
     this.engine.resetRound();
@@ -464,40 +495,85 @@ export class TronGameView {
       }
       return;
     }
+    if (this.engine.mode === 'local2p') {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this.turn('left', 'p1');
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        this.turn('right', 'p1');
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        this.turn('left', 'p2');
+      } else if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        this.turn('right', 'p2');
+      }
+      return;
+    }
     if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
       e.preventDefault();
-      this.turn('left');
+      this.turn('left', 'p1');
     } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
       e.preventDefault();
-      this.turn('right');
+      this.turn('right', 'p1');
     }
   }
 
   private snapCameraToPlayer(): void {
     const p = this.engine.getPlayer();
-    if (!p) return;
-    const v = DIR_VEC[p.dir];
-    this.camPos.set(p.x - v.dx * 21, 9.5, p.z - v.dz * 21);
-    this.camLook.set(p.x + v.dx * 16, 1.4, p.z + v.dz * 16);
+    if (p) {
+      const v = DIR_VEC[p.dir];
+      this.camPos.set(p.x - v.dx * 21, 9.5, p.z - v.dz * 21);
+      this.camLook.set(p.x + v.dx * 16, 1.4, p.z + v.dz * 16);
+    }
+    if (this.engine.mode === 'local2p') {
+      const p2 = this.engine.getPlayer2();
+      if (p2) {
+        const v2 = DIR_VEC[p2.dir];
+        this.cam2Pos.set(p2.x - v2.dx * 21, 9.5, p2.z - v2.dz * 21);
+        this.cam2Look.set(p2.x + v2.dx * 16, 1.4, p2.z + v2.dz * 16);
+      }
+      this.renderer.renderSplitScreen(
+        { pos: this.camPos, lookAt: this.camLook },
+        { pos: this.cam2Pos, lookAt: this.cam2Look },
+        this.splitOrientation,
+      );
+      return;
+    }
     this.renderer.setCameraOverride(this.camPos, this.camLook);
   }
 
   private updateCamera(dt: number): void {
-    const p = this.engine.getPlayer();
-    if (!p) return;
-    const v = DIR_VEC[p.dir];
-    const desiredPos = p.alive
-      ? new THREE.Vector3(p.x - v.dx * 21, 9.5, p.z - v.dz * 21)
-      : new THREE.Vector3(p.x - v.dx * 30, 17, p.z - v.dz * 30);
-    const desiredLook = new THREE.Vector3(p.x + v.dx * 16, 1.4, p.z + v.dz * 16);
-
     const alpha = 1 - Math.exp(-8 * dt);
-    this.camPos.lerp(desiredPos, alpha);
-    this.camLook.lerp(desiredLook, alpha);
+    const stepCam = (c: CycleState | undefined, pos: THREE.Vector3, look: THREE.Vector3) => {
+      if (!c) return;
+      const v = DIR_VEC[c.dir];
+      const desiredPos = c.alive
+        ? new THREE.Vector3(c.x - v.dx * 21, 9.5, c.z - v.dz * 21)
+        : new THREE.Vector3(c.x - v.dx * 30, 17, c.z - v.dz * 30);
+      const desiredLook = new THREE.Vector3(c.x + v.dx * 16, 1.4, c.z + v.dz * 16);
+      pos.lerp(desiredPos, alpha);
+      look.lerp(desiredLook, alpha);
+    };
+
+    stepCam(this.engine.getPlayer(), this.camPos, this.camLook);
+    if (this.engine.mode === 'local2p') {
+      stepCam(this.engine.getPlayer2(), this.cam2Pos, this.cam2Look);
+      return;
+    }
     this.renderer.setCameraOverride(this.camPos, this.camLook);
   }
 
   private updateHud(): void {
+    if (this.engine.mode === 'local2p') {
+      this.levelEl.textContent = `LIGHT CYCLES · ${t('ui.tron.mode2pBadge')}`;
+      this.botsEl.textContent = `P1 ${this.engine.p1Wins} × ${this.engine.p2Wins} P2`;
+      this.scoreEl.textContent = `P1 ${this.engine.p1Wins} : ${this.engine.p2Wins} P2`;
+      if (this.p1BadgeEl) this.p1BadgeEl.textContent = `PLAYER 1 · ← / →`;
+      if (this.p2BadgeEl) this.p2BadgeEl.textContent = `PLAYER 2 · A / D`;
+      return;
+    }
     const aliveBots = this.engine.cycles.filter((c) => !c.isPlayer && c.alive).length;
     this.levelEl.textContent = `LIGHT CYCLES · ${t('ui.tron.level')} ${this.engine.level}`;
     this.botsEl.textContent = `${t('ui.tron.opponents')}: ${aliveBots}`;
@@ -609,13 +685,41 @@ export class TronGameView {
 
     this.updateCamera(dt);
     // Garante render a 60 FPS mesmo quando os itens do BumpTop estão em repouso (sleep optimization)
-    this.renderer.render();
+    if (this.engine.mode === 'local2p') {
+      this.renderer.renderSplitScreen(
+        { pos: this.camPos, lookAt: this.camLook },
+        { pos: this.cam2Pos, lookAt: this.cam2Look },
+        this.splitOrientation,
+      );
+    } else {
+      this.renderer.render();
+    }
     if (this.frameCount % 3 === 0) {
       this.drawMinimap();
     }
   };
 
   private showEndOverlay(): void {
+    if (this.engine.mode === 'local2p') {
+      const w = this.engine.winner;
+      if (w === 'p1') {
+        this.statusTitleEl.textContent = t('ui.tron.p1Wins');
+        this.statusTitleEl.style.color = '#00d2ff';
+      } else if (w === 'p2') {
+        this.statusTitleEl.textContent = t('ui.tron.p2Wins');
+        this.statusTitleEl.style.color = '#ff2a55';
+      } else {
+        this.statusTitleEl.textContent = t('ui.tron.drawTitle');
+        this.statusTitleEl.style.color = '#facc15';
+      }
+      this.statusSubEl.textContent = `Player 1 (${this.engine.p1Wins}) × (${this.engine.p2Wins}) Player 2`;
+      this.nextBtn.textContent = t('ui.tron.nextRound');
+      this.statusRankingEl.style.display = 'none';
+      this.statusOverlay.style.display = 'flex';
+      this.updateHud();
+      return;
+    }
+
     const won = this.engine.status === 'won';
     this.maxLevelReached = Math.max(this.maxLevelReached, this.engine.level);
     this.statusTitleEl.textContent = won ? t('ui.tron.wonTitle') : t('ui.tron.lostTitle');

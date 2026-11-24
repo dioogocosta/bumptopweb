@@ -77,4 +77,27 @@ describe('TronEngine (Light Cycles)', () => {
     }
     expect(bot.alive).toBe(true);
   });
+
+  it('modo local2p cria 2 jogadores sem bots, vira ambos e contabiliza vitória', () => {
+    const engine = new TronEngine({ halfSize: 60, mode: 'local2p', playerColor: 'blue' });
+    expect(engine.cycles).toHaveLength(2);
+    expect(engine.getPlayer()?.color).toBe('blue');
+    expect(engine.getPlayer2()?.color).toBe('red');
+
+    engine.step(0.05);
+    engine.step(0.05);
+    expect(engine.turnPlayer('right')).toBe(true);
+    expect(engine.turnPlayer2('left')).toBe(true);
+    expect(engine.getPlayer()?.dir).toBe(1);
+    expect(engine.getPlayer2()?.dir).toBe(1);
+
+    // P2 está mais perto da parede leste e bate antes -> P1 vence!
+    for (let i = 0; i < 150; i++) {
+      engine.step(0.05);
+      if (engine.status !== 'playing') break;
+    }
+    expect(engine.status).toBe('won');
+    expect(engine.winner).toBe('p1');
+    expect(engine.p1Wins).toBe(1);
+  });
 });

@@ -3520,3 +3520,89 @@ body.auth-walled #scene-root {
   color: #facc15;
   font-weight: 700;
 }
+
+/* Seletor 1P vs 2P Local & Split-Screen (Desktop) */
+.tron-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tron-mode-btn {
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tron-mode-btn.sel,
+.tron-mode-btn:hover {
+  border-color: #00d2ff;
+  background: rgba(0, 210, 255, 0.16);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(0, 210, 255, 0.25);
+}
+.tron-split-wrap {
+  margin-bottom: 4px;
+}
+.tron-split-divider {
+  position: absolute;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(0, 210, 255, 0.9), rgba(168, 85, 247, 0.9));
+  box-shadow: 0 0 14px rgba(0, 210, 255, 0.8);
+}
+.tron-split-divider.vertical {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+}
+.tron-split-divider.horizontal {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, rgba(0, 210, 255, 0.9), rgba(168, 85, 247, 0.9));
+}
+.tron-p-badge {
+  position: absolute;
+  pointer-events: none;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  background: rgba(7, 13, 31, 0.84);
+}
+.tron-p-badge.p1 {
+  border: 1px solid rgba(0, 210, 255, 0.6);
+  color: #00d2ff;
+}
+.tron-p-badge.p2 {
+  border: 1px solid rgba(255, 42, 85, 0.6);
+  color: #ff2a55;
+}
+.tron-p-badge.p1.vertical {
+  bottom: 62px;
+  left: 20px;
+}
+.tron-p-badge.p2.vertical {
+  bottom: 62px;
+  left: calc(50% + 16px);
+}
+.tron-p-badge.p1.horizontal {
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tron-p-badge.p2.horizontal {
+  top: calc(50% + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+}

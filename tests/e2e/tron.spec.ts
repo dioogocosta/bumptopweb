@@ -61,4 +61,34 @@ test.describe('TRON Light Cycles (Modo Game)', () => {
     await expect(page.locator('#overlay-root')).toBeVisible();
     expect(pageErrors).toEqual([]);
   });
+
+  test('2 jogadores local (desktop) divide a tela e aceita Setas (P1) e A/D (P2)', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'Modo 2 jogadores local é exclusivo de desktop');
+
+    await page.goto('/');
+    await page.waitForFunction(() => Boolean((window as any).__bumptop?.world));
+    await page.locator('.game-mode-btn').click();
+
+    const modal = page.locator('.tron-grid-modal');
+    await expect(modal).toBeVisible();
+    // Seleciona 2 Jogadores e divisão horizontal
+    await modal.locator('.tron-mode-btn').nth(1).click();
+    await modal.locator('.tron-split-wrap .tron-mode-btn').nth(1).click();
+    await modal.locator('.tron-start-btn').click();
+
+    const tronHud = page.locator('.tron-game-container');
+    await expect(tronHud).toBeVisible({ timeout: 5000 });
+    await expect(tronHud.locator('.tron-split-divider.horizontal')).toBeVisible();
+    await expect(tronHud.locator('.tron-p-badge.p1')).toContainText('PLAYER 1');
+    await expect(tronHud.locator('.tron-p-badge.p2')).toContainText('PLAYER 2');
+
+    // P1 usa Setas e P2 usa A/D sem conflito e sem desintegrar na curva
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('a');
+    await page.waitForTimeout(350);
+    await expect(page.locator('.tron-status-overlay')).toBeHidden();
+
+    await page.locator('.tron-exit-btn').click();
+    await expect(tronHud).toBeHidden();
+  });
 });

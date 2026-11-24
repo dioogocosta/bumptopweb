@@ -1700,7 +1700,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         '';
 
       overlay.showTronGameGridModal(
-        (playerColor, nickname) => {
+        (playerColor, nickname, mode, splitOrientation) => {
           const wasInBuilding = buildingView.isVisible();
           const boxId = world.getCurrentBoxId();
           const prevShowNames = world.isShowNames();
@@ -1715,6 +1715,8 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
                 renderer,
                 world,
                 playerColor,
+                mode: mode ?? 'solo',
+                splitOrientation: splitOrientation ?? 'vertical',
                 boxId,
                 rankingOpts: {
                   isLoggedIn,
