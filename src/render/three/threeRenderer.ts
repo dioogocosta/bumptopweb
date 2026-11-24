@@ -918,6 +918,30 @@ export class ThreeRenderer implements IRenderer {
     return this.renderer.domElement;
   }
 
+  /** Cena Three.js principal (usada por overlays 3D imersivos como o Modo Game TRON). */
+  getScene(): THREE.Scene {
+    return this.scene;
+  }
+
+  private cameraOverride: {
+    pos: { x: number; y: number; z: number };
+    lookAt: { x: number; y: number; z: number };
+  } | null = null;
+
+  /** Sobrepõe temporariamente a câmera orbital (ex.: câmera em 3ª pessoa no TRON). */
+  setCameraOverride(
+    pos: { x: number; y: number; z: number } | null,
+    lookAt?: { x: number; y: number; z: number },
+  ): void {
+    if (!pos || !lookAt) {
+      this.cameraOverride = null;
+      this.applyCamera();
+      return;
+    }
+    this.cameraOverride = { pos: { ...pos }, lookAt: { ...lookAt } };
+    this.applyCamera();
+  }
+
   setTheme(theme: Theme): void {
     this.activeTheme = theme;
     this.scene.background = new THREE.Color(theme.background);
@@ -973,6 +997,14 @@ export class ThreeRenderer implements IRenderer {
   }
 
   private applyCamera(): void {
+    if (this.cameraOverride) {
+      const { pos, lookAt } = this.cameraOverride;
+      this.camera.position.set(pos.x, pos.y, pos.z);
+      this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z);
+      this.camera.fov = 65;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
     const { target, distance, azimuth, elevation, fov } = this.camState;
     const cosEl = Math.cos(elevation);
     this.camera.position.set(

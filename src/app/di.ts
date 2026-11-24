@@ -1682,17 +1682,25 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     void openSprintSelector(id);
   });
 
-  // TRON Light Cycles — Modo Game (Game Grid + seleção de moto azul/vermelha)
+  // TRON Light Cycles — Modo Game (imersivo no ambiente 3D do BumpTop)
   let activeTronGame: { dispose: () => void } | null = null;
   overlayRoot.addEventListener('gamemode', () => {
     if (activeTronGame) return;
     overlay.showTronGameGridModal((playerColor) => {
       const wasInBuilding = buildingView.isVisible();
       if (wasInBuilding) buildingView.hide();
+      const boxId = world.getCurrentBoxId();
       void import('../game/TronGameView').then(({ TronGameView }) => {
-        activeTronGame = new TronGameView(document.body || sceneRoot, playerColor, () => {
-          activeTronGame = null;
-          if (wasInBuilding) buildingView.show();
+        activeTronGame = new TronGameView({
+          parent: document.body || sceneRoot,
+          renderer,
+          world,
+          playerColor,
+          boxId,
+          onExit: () => {
+            activeTronGame = null;
+            if (wasInBuilding) buildingView.show();
+          },
         });
       });
     });

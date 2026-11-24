@@ -33,6 +33,27 @@ describe('TronEngine (Light Cycles)', () => {
     expect(engine.segments.length).toBeGreaterThanOrEqual(3);
   });
 
+  it('não causa autocolisão quando o bot vira antes do jogador virar', () => {
+    const engine = new TronEngine({ halfSize: 80, playerColor: 'blue', level: 1 });
+    // Avança tempo suficiente para o bot virar primeiro
+    for (let i = 0; i < 45; i++) {
+      engine.step(0.05);
+    }
+    expect(engine.status).toBe('playing');
+    expect(engine.turnPlayer('left')).toBe(true);
+    engine.step(0.05);
+    expect(engine.getPlayer()?.alive).toBe(true);
+    expect(engine.status).toBe('playing');
+
+    for (let i = 0; i < 15; i++) {
+      engine.step(0.05);
+    }
+    expect(engine.turnPlayer('right')).toBe(true);
+    engine.step(0.05);
+    expect(engine.getPlayer()?.alive).toBe(true);
+    expect(engine.status).toBe('playing');
+  });
+
   it('desintegra jogador ao bater na parede da arena', () => {
     const engine = new TronEngine({ halfSize: 40, playerColor: 'blue', level: 1 });
     // Avança em linha reta até bater na parede norte

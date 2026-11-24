@@ -391,6 +391,45 @@ export class World {
   }
 
   /**
+   * Modo Game (TRON) — arremessa papéis, notas e documentos próximos à moto
+   * para o ar e para os lados usando a física real do BumpTop.
+   */
+  scatterObjectsNear(
+    worldX: number,
+    worldZ: number,
+    radius: number,
+    dirX: number,
+    dirZ: number,
+    boxId?: string,
+  ): number {
+    const r2 = radius * radius;
+    let hit = 0;
+    for (const e of this.entries.values()) {
+      if (e.data.meta?.pinned) continue;
+      if (boxId && (e.data.meta?.boxId ?? 'box-default') !== boxId) continue;
+      const pose = this.deps.physics.getPose(e.body);
+      if (pose.position.y > 10) continue; // já está voando alto
+      const dx = pose.position.x - worldX;
+      const dz = pose.position.z - worldZ;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2) continue;
+
+      const dist = Math.max(0.5, Math.sqrt(d2));
+      // Empurra para fora da linha da moto + para cima
+      const nx = dx / dist;
+      const nz = dz / dist;
+      this.deps.physics.setFrozen(e.body, false);
+      this.deps.physics.setVelocity(e.body, {
+        x: nx * 42 + dirX * 26,
+        y: 26 + (hit % 3) * 6,
+        z: nz * 42 + dirZ * 26,
+      });
+      hit++;
+    }
+    return hit;
+  }
+
+  /**
    * PR4.5 — sincroniza uma caixa BACKLOG com as user stories do Taiga:
    * remove os itens antigos vindos do Taiga (refetch não duplica) e cria
    * um objeto por story (cor do status, rótulo "#ref assunto"), em grade

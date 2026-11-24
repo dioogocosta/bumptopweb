@@ -28,6 +28,8 @@ export interface CycleState {
   alive: boolean;
   speed: number;
   activeSegId: number;
+  /** Segmento imediatamente anterior (evita autocolisão na quina da curva). */
+  prevSegId: number | null;
   /** Distância percorrida no segmento atual (evita autocolisão na quina da curva). */
   segDist: number;
   /** Cooldown mínimo entre curvas do bot. */
@@ -61,6 +63,8 @@ export function turnRight(dir: Direction): Direction {
 
 export class TronEngine {
   readonly halfSize: number;
+  readonly originX: number;
+  readonly originZ: number;
   readonly playerColor: PlayerBikeColor;
   level: number;
   score: number;
@@ -72,11 +76,15 @@ export class TronEngine {
 
   constructor(opts: {
     halfSize?: number;
+    originX?: number;
+    originZ?: number;
     playerColor: PlayerBikeColor;
     level?: number;
     score?: number;
   }) {
     this.halfSize = opts.halfSize ?? 85;
+    this.originX = opts.originX ?? 0;
+    this.originZ = opts.originZ ?? 0;
     this.playerColor = opts.playerColor;
     this.level = opts.level ?? 1;
     this.score = opts.score ?? 0;
@@ -90,18 +98,18 @@ export class TronEngine {
     this.status = 'playing';
     this.botTurnTimer = 0;
 
-    const speed = Math.min(48, 28 + (this.level - 1) * 3.5);
+    const speed = Math.min(54, 34 + (this.level - 1) * 4);
     const spawnOffset = Math.round(this.halfSize * 0.52);
 
-    // Jogador nasce ao Sul olhando para o Norte (-Z)
-    this.spawnCycle('player', true, this.playerColor, 0, spawnOffset, 0, speed);
+    // Jogador nasce ao Sul (levemente à esquerda) olhando para o Norte (-Z)
+    this.spawnCycle('player', true, this.playerColor, this.originX - 18, this.originZ + spawnOffset, 0, speed);
 
     // Oponentes amarelos (nível 1: 1 bot; nível 2+: até 3 bots)
     const botCount = Math.min(3, this.level);
     const botSpawns: Array<{ x: number; z: number; dir: Direction; color: BikeColor }> = [
-      { x: 0, z: -spawnOffset, dir: 2, color: 'yellow' },
-      { x: -spawnOffset, z: 0, dir: 1, color: 'yellow' },
-      { x: spawnOffset, z: 0, dir: 3, color: 'orange' },
+      { x: this.originX + 18, z: this.originZ - spawnOffset, dir: 2, color: 'yellow' },
+      { x: this.originX - spawnOffset, z: this.originZ, dir: 1, color: 'yellow' },
+      { x: this.originX + spawnOffset, z: this.originZ, dir: 3, color: 'orange' },
     ];
 
     for (let i = 0; i < botCount; i++) {
@@ -139,6 +147,7 @@ export class TronEngine {
       alive: true,
       speed,
       activeSegId: segId,
+      prevSegId: null,
       segDist: 0,
       botCooldown: 0.25,
     });
@@ -175,6 +184,7 @@ export class TronEngine {
       x2: cycle.x,
       z2: cycle.z,
     });
+    cycle.prevSegId = cycle.activeSegId;
     cycle.activeSegId = newSegId;
     cycle.segDist = 0;
   }
@@ -244,7 +254,9 @@ export class TronEngine {
 
   private checkCollision(c: CycleState, radius: number): boolean {
     const limit = this.halfSize - radius;
-    if (c.x <= -limit || c.x >= limit || c.z <= -limit || c.z >= limit) {
+    const lx = c.x - this.originX;
+    const lz = c.z - this.originZ;
+    if (lx <= -limit || lx >= limit || lz <= -limit || lz >= limit) {
       return true;
     }
 
@@ -252,7 +264,7 @@ export class TronEngine {
     for (const seg of this.segments) {
       if (seg.id === c.activeSegId) continue;
       // Ignora o segmento imediatamente anterior nos primeiros metros após a curva
-      if (seg.ownerId === c.id && seg.id === c.activeSegId - 1 && c.segDist < 3.0) {
+      if (c.prevSegId !== null && seg.id === c.prevSegId && c.segDist < 3.5) {
         continue;
       }
       if (pointNearAxisSegment(c.x, c.z, seg, radius)) {
@@ -276,13 +288,17 @@ export class TronEngine {
   /** Mede a distância livre numa direção até a parede ou trilha mais próxima. */
   castRay(x: number, z: number, dir: Direction, ignoreOwnerSegId?: number): number {
     const v = DIR_VEC[dir];
-    let minDist = this.halfSize;
+    let minDist = this.halfSize * 2;
 
-    // Distância até a parede da arena
-    if (v.dx > 0) minDist = Math.min(minDist, this.halfSize - x);
-    else if (v.dx < 0) minDist = Math.min(minDist, x + this.halfSize);
-    else if (v.dz > 0) minDist = Math.min(minDist, this.halfSize - z);
-    else if (v.dz < 0) minDist = Math.min(minDist, z + this.halfSize);
+    // Distância até a parede da arena (relativa à origem da caixa)
+    const maxXWall = this.originX + this.halfSize;
+    const minXWall = this.originX - this.halfSize;
+    const maxZWall = this.originZ + this.halfSize;
+    const minZWall = this.originZ - this.halfSize;
+    if (v.dx > 0) minDist = Math.min(minDist, maxXWall - x);
+    else if (v.dx < 0) minDist = Math.min(minDist, x - minXWall);
+    else if (v.dz > 0) minDist = Math.min(minDist, maxZWall - z);
+    else if (v.dz < 0) minDist = Math.min(minDist, z - minZWall);
 
     const PAD = 1.25;
     for (const seg of this.segments) {
