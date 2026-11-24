@@ -348,6 +348,7 @@ const ptBR: Dict = {
   'ui.undo': 'Desfazer',
   'ui.redo': 'Refazer',
   'toast.reminderDue': '⏰ Lembrete: {title}',
+  'ui.alarmDismiss': 'Dispensar',
 
   // --- Toast de atualização da PWA (index.html) ---
   'pwa.update': 'Atualização disponível.',
@@ -689,6 +690,7 @@ const en: Dict = {
   'ui.undo': 'Undo',
   'ui.redo': 'Redo',
   'toast.reminderDue': '⏰ Reminder: {title}',
+  'ui.alarmDismiss': 'Dismiss',
 
   // --- PWA update toast (index.html) ---
   'pwa.update': 'Update available.',

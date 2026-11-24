@@ -2082,28 +2082,119 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     });
   }, WATCH_MS);
 
-  // PR12 — agendador de lembretes das notas: a cada 15 s procura notas com
-  // lembrete vencido e não disparado → som + toast + push (Notification)
-  const beep = () => {
+  // PR12 → alarme REAL do lembrete. O beep antigo era perdido: um AudioContext
+  // novo nascia "suspended" fora de gesture (autoplay policy) e o toast sumia em
+  // 2,6 s. Agora: bipes por ~12 s (param no 1º clique/tecla), banner fixo até
+  // dispensar e Notification do sistema (clássica ou via service worker da PWA).
+  let alarmCtx: AudioContext | null = null;
+  let alarmTimer: number | null = null;
+
+  const getAlarmCtx = (): AudioContext | null => {
     try {
-      const Ctx = window.AudioContext;
-      if (!Ctx) return;
-      const ac = new Ctx();
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.18, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.9);
-      osc.connect(gain);
-      gain.connect(ac.destination);
-      osc.start();
-      osc.stop(ac.currentTime + 0.9);
-      osc.onended = () => void ac.close();
+      if (!alarmCtx) {
+        const Ctx =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return null;
+        alarmCtx = new Ctx();
+      }
+      if (alarmCtx.state === 'suspended') void alarmCtx.resume().catch(() => {});
+      return alarmCtx;
     } catch {
-      // sem áudio (ex.: headless) — o toast e o push ainda avisam
+      return null;
     }
   };
+
+  // autoplay policy: áudio só toca após interação do usuário — destravamos o
+  // contexto em QUALQUER clique/tecla para o próximo bipe valer.
+  const unlockAudio = () => {
+    if (alarmCtx?.state === 'suspended') void alarmCtx.resume().catch(() => {});
+  };
+  window.addEventListener('pointerdown', unlockAudio);
+  window.addEventListener('keydown', unlockAudio);
+
+  const stopAlarm = () => {
+    if (alarmTimer !== null) {
+      window.clearInterval(alarmTimer);
+      alarmTimer = null;
+    }
+  };
+
+  const startAlarm = () => {
+    stopAlarm();
+    const ac = getAlarmCtx();
+    let left = 15; // 15 bipes × 800 ms ≈ 12 s de alarme
+    const chirp = () => {
+      if (!ac) return;
+      try {
+        const t0 = ac.currentTime;
+        for (const [freq, off] of [
+          [880, 0],
+          [1175, 0.18],
+        ] as const) {
+          const osc = ac.createOscillator();
+          const gain = ac.createGain();
+          osc.type = 'triangle';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.0001, t0 + off);
+          gain.gain.exponentialRampToValueAtTime(0.25, t0 + off + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.16);
+          osc.connect(gain);
+          gain.connect(ac.destination);
+          osc.start(t0 + off);
+          osc.stop(t0 + off + 0.18);
+        }
+      } catch {
+        // sem áudio (ex.: headless) — o banner e a notificação ainda avisam
+      }
+    };
+    chirp();
+    alarmTimer = window.setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        stopAlarm();
+        return;
+      }
+      unlockAudio();
+      chirp();
+    }, 800);
+    // o usuário viu o aviso? o 1º clique/tecla encerra o alarme
+    const halt = () => {
+      stopAlarm();
+      window.removeEventListener('pointerdown', halt);
+      window.removeEventListener('keydown', halt);
+    };
+    window.addEventListener('pointerdown', halt);
+    window.addEventListener('keydown', halt);
+  };
+
+  /** Notificação do sistema: desktop usa a clássica; Android exige SW da PWA. */
+  const notifySystem = (title: string, body: string) => {
+    try {
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'default') {
+        // nunca pediu → tenta agora (o banner cobre caso o usuário negue)
+        void Notification.requestPermission()
+          .then((p) => {
+            if (p === 'granted') notifySystem(title, body);
+          })
+          .catch(() => {});
+        return;
+      }
+      if (Notification.permission !== 'granted') return;
+      try {
+        new Notification(title, { body });
+      } catch {
+        // Android lança aqui → mostra via service worker da PWA
+        void navigator.serviceWorker?.ready
+          .then((reg) => reg.showNotification(title, { body, tag: 'bumptop-reminder' }))
+          .catch(() => {});
+      }
+    } catch {
+      // sem Notification (contexto inseguro) — banner + som avisam
+    }
+  };
+
   const checkReminders = () => {
     const now = Date.now();
     for (const o of world.listObjects()) {
@@ -2113,27 +2204,17 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       if ((o.meta.noteReminder as number) > now) continue;
       world.markNoteReminderFired(o.id);
       persistObject(o.id);
-      beep();
       const nome =
         (o.meta.noteTitle as string) ||
         (o.meta.noteText as string)?.slice(0, 40) ||
         t('ui.noteTitle');
-      overlay.toast(t('toast.reminderDue', { title: nome }));
-      // PR13 — dispara MESMO com a aba em segundo plano: a Notification do
-      // Windows não exige foco (sem guard document.hidden)
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification((o.meta.noteTitle as string) || t('ui.noteTitle'), {
-            body: ((o.meta.noteText as string) ?? '').slice(0, 120),
-          });
-        } catch {
-          // alguns navegadores exigem service worker p/ Notification
-        }
-      }
+      startAlarm();
+      overlay.alarm(t('toast.reminderDue', { title: nome }));
+      notifySystem(nome, ((o.meta.noteText as string) ?? '').slice(0, 120));
     }
   };
   checkReminders(); // checagem imediata no bootstrap (vencidos ao carregar)
-  const REMIND_MS = 10000;
+  const REMIND_MS = 5000; // era 10 s — 5 s de latência máxima no alarme
   const remitter = window.setInterval(checkReminders, REMIND_MS);
 
   return {

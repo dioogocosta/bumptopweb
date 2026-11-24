@@ -1419,6 +1419,50 @@ test.describe('PR13', () => {
 
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
+
+  test('lembrete vencido dispara ALARME: banner fixo até dispensar + disparo único', async ({
+    page,
+  }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    const notaId = await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.noteText || '').includes('lembrete alarme p13')) w.removeObject(o.id);
+      }
+      const id = w.addStickyNote({ x: -30, y: 1.2, z: -30 }, 'lembrete alarme p13');
+      // vencido há 1 s — setNoteMeta rearma noteReminderFired=false
+      w.setNoteMeta(id, { noteReminder: Date.now() - 1000 });
+      return id;
+    });
+
+    // o agendador (a cada 5 s) dispara → banner de alarme visível
+    const banner = page.locator('.alarm-banner');
+    await expect(banner).toBeVisible({ timeout: 8000 });
+    await expect(banner).toContainText('lembrete alarme p13');
+
+    // NÃO é o toast de 2,6 s: continua na tela mesmo passados 4 s
+    await page.waitForTimeout(4000);
+    await expect(banner).toBeVisible();
+
+    // disparo único: marcado como disparado (não re-dispara)
+    const fired = await page.evaluate(
+      (oid) => window.__bumptop!.world.getObject(oid)!.meta.noteReminderFired,
+      notaId,
+    );
+    expect(fired).toBe(true);
+
+    // dispensar fecha o banner
+    await banner.locator('.alarm-dismiss').click();
+    await expect(banner).toHaveCount(0);
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
 });
 
 test.describe('PR16 — colar com formatação + ícones de zoom', () => {

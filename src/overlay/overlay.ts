@@ -1786,6 +1786,31 @@ export class DomOverlay implements IOverlay {
   }
 
   /**
+   * Aviso de LEMBRETE vencido — banner fixo que fica ATÉ o usuário dispensar.
+   * Diferente do `toast` (2,6 s, some se a aba estiver em segundo plano),
+   * o alarme precisa garantir que o aviso foi visto.
+   */
+  alarm(message: string): void {
+    this.root.querySelector('.alarm-banner')?.remove();
+    const el = document.createElement('div');
+    el.className = 'alarm-banner';
+    el.setAttribute('role', 'alert');
+    // o #overlay-root inteiro é pointer-events:none (HUD) — filhos clicáveis
+    // precisam reativar senão o clique cai no canvas da cena
+    el.style.pointerEvents = 'auto';
+    const msg = document.createElement('span');
+    msg.className = 'alarm-msg';
+    msg.textContent = message;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'alarm-dismiss';
+    btn.textContent = t('ui.alarmDismiss');
+    btn.addEventListener('click', () => el.remove());
+    el.append(msg, btn);
+    this.root.appendChild(el);
+  }
+
+  /**
    * Laço de seleção sobre a cena (retângulo com traço livre pontilhado e caneta azul — P1).
    * null esconde — chamado pelo World durante a seleção por laço.
    */
