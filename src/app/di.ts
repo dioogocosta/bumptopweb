@@ -2166,7 +2166,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.setSearchMarkers(null);
       }
     },
-    onFlush: flushNow,
+    onFlush: () => {
+      if (activeTronGame) return;
+      flushNow();
+    },
   });
   loop.start();
 

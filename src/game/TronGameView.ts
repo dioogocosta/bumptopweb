@@ -206,6 +206,11 @@ export class TronGameView {
     rightSide.position.set(0.6, 0.9, 0);
     group.add(leftSide, rightSide);
 
+    // Luz neon dinâmica sob a moto
+    const glow = new THREE.PointLight(hex, 2.2, 28);
+    glow.position.set(0, 2.4, 0);
+    group.add(glow);
+
     return group;
   }
 
@@ -588,6 +593,8 @@ export class TronGameView {
     }
 
     this.updateCamera(dt);
+    // Garante render a 60 FPS mesmo quando os itens do BumpTop estão em repouso (sleep optimization)
+    this.renderer.render();
     if (this.frameCount % 3 === 0) {
       this.drawMinimap();
     }
