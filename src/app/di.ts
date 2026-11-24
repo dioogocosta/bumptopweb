@@ -1682,6 +1682,22 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     void openSprintSelector(id);
   });
 
+  // TRON Light Cycles — Modo Game (Game Grid + seleção de moto azul/vermelha)
+  let activeTronGame: { dispose: () => void } | null = null;
+  overlayRoot.addEventListener('gamemode', () => {
+    if (activeTronGame) return;
+    overlay.showTronGameGridModal((playerColor) => {
+      const wasInBuilding = buildingView.isVisible();
+      if (wasInBuilding) buildingView.hide();
+      void import('../game/TronGameView').then(({ TronGameView }) => {
+        activeTronGame = new TronGameView(document.body || sceneRoot, playerColor, () => {
+          activeTronGame = null;
+          if (wasInBuilding) buildingView.show();
+        });
+      });
+    });
+  });
+
   // =========================================================================
   // PR27 / PR4.12 — Conta (login/cadastro) + Perfil unificado
   // =========================================================================

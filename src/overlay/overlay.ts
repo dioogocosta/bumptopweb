@@ -514,6 +514,24 @@ export class DomOverlay implements IOverlay {
     });
     zoomWrap.appendChild(this.viewSwitchBtn);
 
+    // TRON Light Cycles — botão "Modo Game" no HUD (visível no ambiente dos prédios e caixas)
+    const gameModeBtn = document.createElement('button');
+    gameModeBtn.type = 'button';
+    gameModeBtn.className = 'game-mode-btn';
+    gameModeBtn.title = t('ui.gameMode');
+    gameModeBtn.setAttribute('aria-label', t('ui.gameMode'));
+    gameModeBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+      `<rect x="2" y="6" width="20" height="12" rx="4"/>` +
+      `<path d="M6 12h4M8 10v4"/>` +
+      `<circle cx="15.5" cy="11" r="1" fill="currentColor"/>` +
+      `<circle cx="18" cy="13" r="1" fill="currentColor"/>` +
+      `</svg>`;
+    gameModeBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('gamemode', { bubbles: true }));
+    });
+    zoomWrap.appendChild(gameModeBtn);
+
     this.root.appendChild(zoomWrap);
 
     // PR18 — barra de busca (campo + ‹ n/m › + ✕), logo abaixo dos zooms
@@ -2962,6 +2980,142 @@ export class DomOverlay implements IOverlay {
       cleanup();
     });
     footer.appendChild(closeBtn2);
+    card.appendChild(footer);
+
+    m.appendChild(card);
+    this.root.appendChild(m);
+  }
+
+  /** TRON — Game Grid (4 quadrantes) + seleção da Moto de Luz (Azul ou Vermelha). */
+  showTronGameGridModal(onStart: (color: 'blue' | 'red') => void): void {
+    const existing = this.root.querySelector('.tron-grid-modal');
+    if (existing) existing.remove();
+
+    let selectedColor: 'blue' | 'red' = 'blue';
+
+    const m = document.createElement('div');
+    m.className = 'tron-grid-modal';
+    m.style.pointerEvents = 'auto';
+
+    const card = document.createElement('div');
+    card.className = 'tron-grid-card';
+    card.style.pointerEvents = 'auto';
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    card.addEventListener('click', (e) => e.stopPropagation());
+
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey);
+      m.remove();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cleanup();
+    };
+    window.addEventListener('keydown', onKey);
+    m.addEventListener('click', (e) => {
+      if (e.target === m) cleanup();
+    });
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'tron-grid-header';
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('h2');
+    title.className = 'tron-grid-title';
+    title.textContent = t('ui.tron.gridTitle');
+    const sub = document.createElement('p');
+    sub.className = 'tron-grid-sub';
+    sub.textContent = t('ui.tron.gridSub');
+    titleWrap.append(title, sub);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'boxes-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = t('ui.close');
+    closeBtn.addEventListener('click', cleanup);
+    header.append(titleWrap, closeBtn);
+    card.appendChild(header);
+
+    // 4 Quadrantes do Game Grid
+    const grid = document.createElement('div');
+    grid.className = 'tron-quadrants';
+    const quads = [
+      { id: 'q1', title: t('ui.tron.q1Title'), desc: t('ui.tron.q1Desc'), active: true },
+      { id: 'q2', title: t('ui.tron.q2Title'), desc: t('ui.tron.comingSoon'), active: false },
+      { id: 'q3', title: t('ui.tron.q3Title'), desc: t('ui.tron.comingSoon'), active: false },
+      { id: 'q4', title: t('ui.tron.q4Title'), desc: t('ui.tron.comingSoon'), active: false },
+    ];
+    for (const q of quads) {
+      const qEl = document.createElement('div');
+      qEl.className = q.active ? 'tron-quadrant active' : 'tron-quadrant locked';
+      const qTitle = document.createElement('div');
+      qTitle.className = 'tron-quadrant-title';
+      qTitle.textContent = q.title;
+      const qDesc = document.createElement('div');
+      qDesc.className = 'tron-quadrant-desc';
+      qDesc.textContent = q.desc;
+      qEl.append(qTitle, qDesc);
+      grid.appendChild(qEl);
+    }
+    card.appendChild(grid);
+
+    // Seleção de Moto (Azul ou Vermelha)
+    const pickLabel = document.createElement('div');
+    pickLabel.className = 'tron-pick-label';
+    pickLabel.textContent = t('ui.tron.pickBike');
+    card.appendChild(pickLabel);
+
+    const bikeSvg = (hex: string) =>
+      `<svg viewBox="0 0 120 48" width="112" height="44" fill="none" aria-hidden="true">` +
+      `<circle cx="24" cy="30" r="12" stroke="${hex}" stroke-width="4" fill="#090d1a"/>` +
+      `<circle cx="96" cy="30" r="12" stroke="${hex}" stroke-width="4" fill="#090d1a"/>` +
+      `<path d="M24 30 L42 14 L78 14 L96 30 Z" fill="#0f172a" stroke="${hex}" stroke-width="2.5"/>` +
+      `<path d="M46 14 L64 8 L76 14" stroke="${hex}" stroke-width="3" stroke-linecap="round"/>` +
+      `<line x1="2" y1="36" x2="18" y2="36" stroke="${hex}" stroke-width="3" stroke-linecap="round"/>` +
+      `</svg>`;
+
+    const bikesRow = document.createElement('div');
+    bikesRow.className = 'tron-bike-cards';
+
+    const makeBikeBtn = (color: 'blue' | 'red', labelText: string, hex: string) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `tron-bike-card ${color}` + (selectedColor === color ? ' sel' : '');
+      btn.innerHTML = `${bikeSvg(hex)}<span class="tron-bike-name">${labelText}</span>`;
+      btn.addEventListener('click', () => {
+        selectedColor = color;
+        for (const el of Array.from(bikesRow.children)) {
+          el.classList.remove('sel');
+        }
+        btn.classList.add('sel');
+      });
+      return btn;
+    };
+
+    const blueBtn = makeBikeBtn('blue', t('ui.tron.bikeBlue'), '#00d2ff');
+    const redBtn = makeBikeBtn('red', t('ui.tron.bikeRed'), '#ff2a55');
+    bikesRow.append(blueBtn, redBtn);
+    card.appendChild(bikesRow);
+
+    // Objetivo
+    const obj = document.createElement('p');
+    obj.className = 'tron-grid-objective';
+    obj.textContent = t('ui.tron.objective');
+    card.appendChild(obj);
+
+    // Footer com botão Iniciar
+    const footer = document.createElement('div');
+    footer.className = 'tron-grid-footer';
+    const startBtn = document.createElement('button');
+    startBtn.type = 'button';
+    startBtn.className = 'tron-start-btn';
+    startBtn.textContent = `▶ ${t('ui.tron.start')}`;
+    startBtn.addEventListener('click', () => {
+      const chosen = selectedColor;
+      cleanup();
+      onStart(chosen);
+    });
+    footer.appendChild(startBtn);
     card.appendChild(footer);
 
     m.appendChild(card);
