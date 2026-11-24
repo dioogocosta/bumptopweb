@@ -37,6 +37,9 @@ export interface CycleState {
 }
 
 export type GameStatus = 'playing' | 'won' | 'lost';
+export type TronGameMode = 'solo' | 'local2p';
+export type SplitOrientation = 'vertical' | 'horizontal';
+export type TronWinner = 'p1' | 'p2' | 'draw' | null;
 
 export interface TronEvent {
   type: 'crash' | 'turn';
@@ -65,9 +68,14 @@ export class TronEngine {
   readonly halfSize: number;
   readonly originX: number;
   readonly originZ: number;
+  readonly mode: TronGameMode;
   readonly playerColor: PlayerBikeColor;
+  readonly p2Color: PlayerBikeColor;
   level: number;
   score: number;
+  p1Wins = 0;
+  p2Wins = 0;
+  winner: TronWinner = null;
   status: GameStatus = 'playing';
   cycles: CycleState[] = [];
   segments: TrailSegment[] = [];
@@ -78,14 +86,18 @@ export class TronEngine {
     halfSize?: number;
     originX?: number;
     originZ?: number;
+    mode?: TronGameMode;
     playerColor: PlayerBikeColor;
+    p2Color?: PlayerBikeColor;
     level?: number;
     score?: number;
   }) {
     this.halfSize = opts.halfSize ?? 85;
     this.originX = opts.originX ?? 0;
     this.originZ = opts.originZ ?? 0;
+    this.mode = opts.mode ?? 'solo';
     this.playerColor = opts.playerColor;
+    this.p2Color = opts.p2Color ?? (opts.playerColor === 'blue' ? 'red' : 'blue');
     this.level = opts.level ?? 1;
     this.score = opts.score ?? 0;
     this.resetRound();
@@ -96,13 +108,20 @@ export class TronEngine {
     this.segments = [];
     this.nextSegId = 1;
     this.status = 'playing';
+    this.winner = null;
     this.botTurnTimer = 0;
 
     const speed = Math.min(54, 34 + (this.level - 1) * 4);
     const spawnOffset = Math.round(this.halfSize * 0.52);
 
-    // Jogador nasce ao Sul (levemente à esquerda) olhando para o Norte (-Z)
+    // Jogador 1 nasce ao Sul (levemente à esquerda) olhando para o Norte (-Z)
     this.spawnCycle('player', true, this.playerColor, this.originX - 18, this.originZ + spawnOffset, 0, speed);
+
+    if (this.mode === 'local2p') {
+      // Jogador 2 nasce ao Norte (levemente à direita) olhando para o Sul (+Z)
+      this.spawnCycle('player2', true, this.p2Color, this.originX + 18, this.originZ - spawnOffset, 2, speed);
+      return;
+    }
 
     // Oponentes amarelos (nível 1: 1 bot; nível 2+: até 3 bots)
     const botCount = Math.min(3, this.level);
@@ -154,17 +173,29 @@ export class TronEngine {
   }
 
   getPlayer(): CycleState | undefined {
-    return this.cycles.find((c) => c.isPlayer);
+    return this.cycles.find((c) => c.id === 'player');
   }
 
-  /** Vira a moto do jogador relativa à direção atual ('left' | 'right'). */
+  getPlayer2(): CycleState | undefined {
+    return this.cycles.find((c) => c.id === 'player2');
+  }
+
+  /** Vira a moto do jogador 1 relativa à direção atual ('left' | 'right'). */
   turnPlayer(side: 'left' | 'right'): boolean {
-    const player = this.getPlayer();
-    if (!player || !player.alive || this.status !== 'playing') return false;
+    return this.turnCycle(this.getPlayer(), side);
+  }
+
+  /** Vira a moto do jogador 2 relativa à direção atual ('left' | 'right'). */
+  turnPlayer2(side: 'left' | 'right'): boolean {
+    return this.turnCycle(this.getPlayer2(), side);
+  }
+
+  private turnCycle(cycle: CycleState | undefined, side: 'left' | 'right'): boolean {
+    if (!cycle || !cycle.alive || this.status !== 'playing') return false;
     // Evita curva dupla no exato mesmo milímetro
-    if (player.segDist < 1.2) return false;
-    const nextDir = side === 'left' ? turnLeft(player.dir) : turnRight(player.dir);
-    this.applyTurn(player, nextDir);
+    if (cycle.segDist < 1.2) return false;
+    const nextDir = side === 'left' ? turnLeft(cycle.dir) : turnRight(cycle.dir);
+    this.applyTurn(cycle, nextDir);
     return true;
   }
 
@@ -241,6 +272,25 @@ export class TronEngine {
 
     // 4) Atualiza status da partida
     const player = this.getPlayer();
+    if (this.mode === 'local2p') {
+      const p2 = this.getPlayer2();
+      const p1Alive = !!player?.alive;
+      const p2Alive = !!p2?.alive;
+      if (!p1Alive && !p2Alive) {
+        this.status = 'lost';
+        this.winner = 'draw';
+      } else if (!p2Alive) {
+        this.status = 'won';
+        this.winner = 'p1';
+        this.p1Wins += 1;
+      } else if (!p1Alive) {
+        this.status = 'won';
+        this.winner = 'p2';
+        this.p2Wins += 1;
+      }
+      return events;
+    }
+
     const aliveBots = this.cycles.filter((c) => !c.isPlayer && c.alive).length;
     if (!player || !player.alive) {
       this.status = 'lost';

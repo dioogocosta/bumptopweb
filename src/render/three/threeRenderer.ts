@@ -935,11 +935,57 @@ export class ThreeRenderer implements IRenderer {
   ): void {
     if (!pos || !lookAt) {
       this.cameraOverride = null;
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, this.width, this.height);
+      this.camera.aspect = this.width / Math.max(1, this.height);
       this.applyCamera();
       return;
     }
     this.cameraOverride = { pos: { ...pos }, lookAt: { ...lookAt } };
     this.applyCamera();
+  }
+
+  /** Renderiza a cena dividida ao meio (vertical ou horizontal) para 2 jogadores locais. */
+  renderSplitScreen(
+    view1: { pos: { x: number; y: number; z: number }; lookAt: { x: number; y: number; z: number } },
+    view2: { pos: { x: number; y: number; z: number }; lookAt: { x: number; y: number; z: number } },
+    orientation: 'vertical' | 'horizontal',
+  ): void {
+    const w = this.width || window.innerWidth;
+    const h = Math.max(1, this.height || window.innerHeight);
+
+    this.renderer.setScissorTest(true);
+
+    const drawPane = (
+      x: number,
+      y: number,
+      pw: number,
+      ph: number,
+      v: { pos: { x: number; y: number; z: number }; lookAt: { x: number; y: number; z: number } },
+    ) => {
+      this.camera.aspect = pw / Math.max(1, ph);
+      this.camera.fov = 65;
+      this.camera.position.set(v.pos.x, v.pos.y, v.pos.z);
+      this.camera.lookAt(v.lookAt.x, v.lookAt.y, v.lookAt.z);
+      this.camera.updateProjectionMatrix();
+      this.renderer.setViewport(x, y, pw, ph);
+      this.renderer.setScissor(x, y, pw, ph);
+      this.renderer.render(this.scene, this.camera);
+    };
+
+    if (orientation === 'vertical') {
+      const hw = Math.floor(w / 2);
+      drawPane(0, 0, hw, h, view1);
+      drawPane(hw, 0, w - hw, h, view2);
+    } else {
+      const hh = Math.floor(h / 2);
+      drawPane(0, hh, w, h - hh, view1);
+      drawPane(0, 0, w, hh, view2);
+    }
+
+    this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, w, h);
+    this.camera.aspect = w / h;
   }
 
   setTheme(theme: Theme): void {
