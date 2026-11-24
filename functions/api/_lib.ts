@@ -23,6 +23,7 @@ export interface D1LikeResult {
 export interface D1LikeStatement {
   bind(...values: unknown[]): D1LikeStatement;
   first<T = Record<string, unknown>>(): Promise<T | null>;
+  all<T = Record<string, unknown>>(): Promise<{ results?: T[]; success?: boolean }>;
   run(): Promise<D1LikeResult>;
 }
 export interface D1Like {
@@ -92,6 +93,15 @@ export async function ensureSchema(db: D1Like): Promise<void> {
   await db.prepare(
     `CREATE TABLE IF NOT EXISTS scenes (
       user_id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL)`,
+  ).run();
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS tron_scores (
+      user_id TEXT PRIMARY KEY,
+      nickname TEXT NOT NULL,
+      best_score INTEGER NOT NULL DEFAULT 0,
+      max_level INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL
+    )`,
   ).run();
   schemaReady = true;
 }

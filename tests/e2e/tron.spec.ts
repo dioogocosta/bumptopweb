@@ -19,6 +19,8 @@ test.describe('TRON Light Cycles (Modo Game)', () => {
     await expect(modal.locator('.tron-quadrant')).toHaveCount(4);
     await expect(modal.locator('.tron-bike-card.blue')).toBeVisible();
     await expect(modal.locator('.tron-bike-card.red')).toBeVisible();
+    // Visitante não logado NÃO vê o ranking
+    await expect(modal.locator('.tron-ranking-box')).toHaveCount(0);
 
     // Seleciona moto azul e inicia
     await modal.locator('.tron-bike-card.blue').click();

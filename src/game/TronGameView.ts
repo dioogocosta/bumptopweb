@@ -11,6 +11,7 @@ import type { ThreeRenderer } from '@render/three/threeRenderer';
 import type { World } from '@core/world';
 import type { SceneSnapshot } from '@core/model/types';
 import { t } from '@core/i18n/i18n';
+import { renderTronRankingBox, type TronRankingResponse } from './tronRanking';
 
 const COLOR_HEX: Record<BikeColor, number> = {
   blue: 0x00d2ff,
@@ -47,6 +48,10 @@ export interface TronGameHost {
   playerColor: PlayerBikeColor;
   boxId: string;
   onExit: () => void;
+  rankingOpts?: {
+    isLoggedIn: boolean;
+    onScoreSubmit?: (score: number, level: number) => Promise<TronRankingResponse | null>;
+  };
 }
 
 export class TronGameView {
@@ -70,8 +75,11 @@ export class TronGameView {
   private statusOverlay!: HTMLDivElement;
   private statusTitleEl!: HTMLElement;
   private statusSubEl!: HTMLElement;
+  private statusRankingEl!: HTMLDivElement;
   private nextBtn!: HTMLButtonElement;
   private minimapCanvas!: HTMLCanvasElement;
+  private rankingOpts?: TronGameHost['rankingOpts'];
+  private maxLevelReached = 1;
 
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
@@ -87,6 +95,7 @@ export class TronGameView {
     this.world = host.world;
     this.boxId = host.boxId;
     this.onExitCb = host.onExit;
+    this.rankingOpts = host.rankingOpts;
 
     // Salva o snapshot pré-jogo para restaurar os papéis/itens ao sair
     this.preGameSnapshot = this.world.toSnapshot();
@@ -308,6 +317,10 @@ export class TronGameView {
     this.statusSubEl = document.createElement('p');
     this.statusSubEl.className = 'tron-status-sub';
 
+    this.statusRankingEl = document.createElement('div');
+    this.statusRankingEl.className = 'tron-ranking-box';
+    this.statusRankingEl.style.display = 'none';
+
     const btnRow = document.createElement('div');
     btnRow.className = 'tron-status-actions';
 
@@ -323,7 +336,7 @@ export class TronGameView {
     backBtn.addEventListener('click', () => this.exit());
 
     btnRow.append(this.nextBtn, backBtn);
-    card.append(this.statusTitleEl, this.statusSubEl, btnRow);
+    card.append(this.statusTitleEl, this.statusSubEl, this.statusRankingEl, btnRow);
     this.statusOverlay.appendChild(card);
     this.container.appendChild(this.statusOverlay);
 
@@ -344,6 +357,7 @@ export class TronGameView {
   private advanceOrRetry(): void {
     if (this.engine.status === 'won') {
       this.engine.level += 1;
+      this.maxLevelReached = Math.max(this.maxLevelReached, this.engine.level);
     } else {
       this.engine.level = 1;
       this.engine.score = 0;
@@ -352,6 +366,7 @@ export class TronGameView {
     this.engine.resetRound();
     this.syncVisualsFromEngine();
     this.snapCameraToPlayer();
+    this.statusRankingEl.style.display = 'none';
     this.statusOverlay.style.display = 'none';
     this.updateHud();
     this.playSynthTone(520, 0.1, 'sawtooth');
@@ -602,12 +617,32 @@ export class TronGameView {
 
   private showEndOverlay(): void {
     const won = this.engine.status === 'won';
+    this.maxLevelReached = Math.max(this.maxLevelReached, this.engine.level);
     this.statusTitleEl.textContent = won ? t('ui.tron.wonTitle') : t('ui.tron.lostTitle');
     this.statusTitleEl.style.color = won ? '#4ade80' : '#ff2a55';
     this.statusSubEl.textContent = won
       ? t('ui.tron.wonSub', { score: this.engine.score, level: this.engine.level + 1 })
       : t('ui.tron.lostSub', { score: this.engine.score });
     this.nextBtn.textContent = won ? t('ui.tron.nextLevel') : t('ui.tron.retry');
+
+    if (this.rankingOpts?.isLoggedIn && this.rankingOpts.onScoreSubmit) {
+      if (!won) {
+        this.statusRankingEl.style.display = 'block';
+        this.statusRankingEl.textContent = '...';
+      } else {
+        this.statusRankingEl.style.display = 'none';
+      }
+      void this.rankingOpts
+        .onScoreSubmit(this.engine.score, this.maxLevelReached)
+        .then((data) => {
+          if (!won && this.statusOverlay.style.display !== 'none') {
+            renderTronRankingBox(this.statusRankingEl, data);
+          }
+        });
+    } else {
+      this.statusRankingEl.style.display = 'none';
+    }
+
     this.statusOverlay.style.display = 'flex';
   }
 

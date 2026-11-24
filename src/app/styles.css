@@ -3428,3 +3428,95 @@ body.auth-walled #scene-root {
   cursor: pointer;
   font-size: 14px;
 }
+
+/* Nickname & Ranking TRON (apenas para logados) */
+.tron-nick-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.tron-nick-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(0, 210, 255, 0.4);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #f8fafc;
+  font-size: 13.5px;
+  outline: none;
+}
+.tron-nick-input:focus {
+  border-color: #00d2ff;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.3);
+}
+.tron-ranking-box {
+  background: rgba(7, 13, 31, 0.78);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  text-align: left;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.tron-ranking-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #facc15;
+  margin-bottom: 6px;
+}
+.tron-ranking-me-best {
+  font-size: 12px;
+  font-weight: 600;
+  color: #38bdf8;
+  margin-bottom: 8px;
+}
+.tron-ranking-empty {
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 6px 0;
+}
+.tron-ranking-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tron-ranking-row {
+  display: grid;
+  grid-template-columns: 34px 1fr 56px 68px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.03);
+}
+.tron-ranking-row.head {
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding-bottom: 2px;
+}
+.tron-ranking-row.me {
+  background: rgba(0, 210, 255, 0.16);
+  border: 1px solid rgba(0, 210, 255, 0.45);
+  color: #fff;
+  font-weight: 700;
+}
+.tron-ranking-nick {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tron-ranking-score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #facc15;
+  font-weight: 700;
+}
