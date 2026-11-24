@@ -795,6 +795,9 @@ export class BuildingView {
       }
     }
 
+    // Se totalmente oculto e sem fade ativo, não desperdiça WebGL renderizando em segundo plano
+    if (!this.visible && this.fadeAlpha <= 0 && this.fadeDir === 0) return;
+
     // Câmera
     const c = this.cam;
     this.camera.position.set(

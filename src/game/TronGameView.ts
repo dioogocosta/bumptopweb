@@ -77,6 +77,7 @@ export class TronGameView {
   private camLook = new THREE.Vector3();
   private raf = 0;
   private lastTs = 0;
+  private frameCount = 0;
   private disposed = false;
   private onExitCb: (() => void) | null = null;
   private onKeyDownBound: (e: KeyboardEvent) => void;
@@ -526,6 +527,7 @@ export class TronGameView {
 
     const dt = Math.min((now - this.lastTs) / 1000, 0.05);
     this.lastTs = now;
+    this.frameCount++;
 
     if (this.engine.status === 'playing') {
       const events = this.engine.step(dt);
@@ -536,11 +538,13 @@ export class TronGameView {
         }
       }
 
-      // Faz papéis, notas e documentos da sala voarem quando qualquer moto passa perto!
-      for (const c of this.engine.cycles) {
-        if (!c.alive) continue;
-        const v = DIR_VEC[c.dir];
-        this.world.scatterObjectsNear(c.x, c.z, 10.5, v.dx, v.dz, this.boxId);
+      // Faz papéis, notas e documentos da sala voarem quando qualquer moto passa perto (a cada 3 frames)
+      if (this.frameCount % 3 === 0) {
+        for (const c of this.engine.cycles) {
+          if (!c.alive) continue;
+          const v = DIR_VEC[c.dir];
+          this.world.scatterObjectsNear(c.x, c.z, 9.5, v.dx, v.dz, this.boxId);
+        }
       }
 
       if (this.engine.status !== 'playing') {
@@ -584,7 +588,9 @@ export class TronGameView {
     }
 
     this.updateCamera(dt);
-    this.drawMinimap();
+    if (this.frameCount % 3 === 0) {
+      this.drawMinimap();
+    }
   };
 
   private showEndOverlay(): void {
