@@ -279,9 +279,25 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     window.location.search.includes('nobuilding=1');
 
   // ── Dashboard: stats, busca global e dots de match ───────────────────────
+  // PR4.16 — persistência TRAVADA enquanto o muro de login está de pé: sem
+  // isso o flush de 2 s (e o PUT da nuvem) gravaria o mundo ZERADO por cima
+  // da cena do usuário — logout nunca pode apagar dado salvo.
+  let persistLocked = false;
+  /** Timer do PUT pendente na nuvem (declarado cedo p/ o muro cancelá-lo). */
+  let cloudSyncTimer = 0;
+
+  // PR4.16 — duas visões do mesmo app: prédio 1 = PESSOAL (caixas locais,
+  // dados gravados na conta) e prédio 2 = TRABALHO (projetos do Taiga).
+  // O snapshot guarda as DUAS; a visão ativa decide o que a UI mostra.
+  let viewMode: 'personal' | 'work' = 'personal';
+  /** Slugs dos projetos do Taiga dos quais sou membro (null = sem Taiga). */
+  let mySlugs: Set<string> | null = null;
+  /** Caixas da visão ativa — o que lista, pilha 3D, busca e resumo mostram. */
+  let viewBoxes: BoxEntityData[] = [];
+
   const updateBuildingStats = () => {
     const rawStats = world.getBoxStats();
-    const boxes = world.listBoxes().map((box) => {
+    const boxes = (viewBoxes.length > 0 ? viewBoxes : world.listBoxes()).map((box) => {
       const s = rawStats.find((r) => r.boxId === box.id);
       return {
         boxId:     box.id,
@@ -293,6 +309,36 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       };
     });
     buildingView.setStats({ boxes });
+  };
+
+  /**
+   * PR4.16 — recalcula as caixas visíveis (isolamento Taiga × visão ativa)
+   * e sincroniza lista, pilha 3D, resumo e botão 🏠/🏢 do HUD.
+   */
+  const refreshBoxes = (): void => {
+    const base = world
+      .listBoxes()
+      .filter((b) => mySlugs === null || !b.taigaProject || mySlugs.has(b.taigaProject));
+    let vis =
+      viewMode === 'work'
+        ? base.filter((b) => !!b.taigaProject)
+        : base.filter((b) => !b.taigaProject);
+    // Prédio 2 sem nenhuma caixa (Taiga desconectado/sem projetos) → volta
+    // pro prédio 1 em vez de mostrar uma visão vazia sem explicação.
+    if (viewMode === 'work' && vis.length === 0) {
+      viewMode = 'personal';
+      vis = base.filter((b) => !b.taigaProject);
+    }
+    viewBoxes = vis;
+    // Caixa ativa fora da visão atual? Pula para a primeira da visão —
+    // senão a pessoa ficaria "dentro" de um prédio que não está na lista.
+    if (vis.length > 0 && !vis.some((b) => b.id === world.getCurrentBoxId())) {
+      world.setCurrentBox(vis[0]!.id);
+    }
+    buildingView.setBoxes(vis);
+    buildingView.selectFloor(world.getCurrentBoxId());
+    updateBuildingStats();
+    overlay.setViewMode(viewMode);
   };
   updateBuildingStats();
 
@@ -330,10 +376,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         }
       },
       onSignOut: () => {
-        setTaigaToken(null);
-        void auth.signOut();
-        void initUserBuilding(); // Re-inicializa prédio (ficará vazio sem auth)
-        overlay.toast(t('ui.taiga.tokenRemoved'));
+        signOutReal();
       },
       onConnectTaiga: async (user, pass, tok) => {
         try {
@@ -346,6 +389,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           const newMe = await fetchTaigaMe();
           if (newMe) {
             overlay.toast(`${t('ui.taiga.authSuccess')} (${newMe.fullName})`);
+            forceWall = false; // conexão Taiga = sessão → muro pode descer
             void initUserBuilding();
             return { ok: true };
           } else {
@@ -364,6 +408,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           const res = await auth.signIn(email, password);
           if (res.ok) {
             overlay.toast(t('toast.authWelcome', { email: auth.current()!.email }));
+            forceWall = false; // login explícito → muro pode descer
             void initUserBuilding();
             return { ok: true };
           }
@@ -380,6 +425,67 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // PR4.14 — Muro de login: sem sessão confirmada NADA é carregado (nem cena,
   // nem caixas, nem o demo) — e o modal de login/cadastro abre na cara.
   let loginWalled = false;
+  /**
+   * PR4.16 — muro FORÇADO: alguém saiu do sistema e o backend não deu para
+   * confirmar a sessão (API fora / cookie ainda valendo). Sem este flag o
+   * fail-open do PR4.14 religaria a cena — e o pedido é claro: depois de
+   * sair, só pode sobrar a tela de login.
+   */
+  let forceWall = false;
+
+  /**
+   * PR4.16 — muro de login REAL: nada do prédio/caixas fica visível nem
+   * clicável (véu cobre cena e HUD, só o modal de login fica por cima) e o
+   * mundo em memória é zerado. O que está SALVO não é tocado: a persistência
+   * fica travada até o próximo login, para o flush de 2 s nunca gravar o
+   * mundo limpo por cima da cena do usuário.
+   */
+  const raiseLoginWall = (): void => {
+    loginWalled = true;
+    persistLocked = true;
+    if (cloudSyncTimer) {
+      window.clearTimeout(cloudSyncTimer);
+      cloudSyncTimer = 0;
+    }
+
+    // Mundo em memória zerado: nenhuma caixa nem objeto para ver/clicar
+    for (const o of world.listObjects()) world.removeObject(o.id);
+    for (const b of world.listBoxes()) {
+      if (b.id === 'box-default') continue; // sala raiz não é removível
+      world.removeBoxEntity(b.id);
+    }
+
+    // Prédio, painéis da cena e demais flutuantes fechados
+    buildingView.hide();
+    buildingView.closePanels();
+    buildingView.hideLoading();
+    overlay.hideBoxesPanel();
+    overlay.hideContextMenu();
+    overlay.hideThemeMenu();
+    overlay.hideBuildingBack();
+    overlay.hideAuthModal();
+    overlay.setFavoriteFilterActive(false);
+    buildingView.setFavoriteFilter(false);
+    overlay.setViewSwitchVisible(false);
+    overlay.setAuthState(null);
+
+    // Véu + tela de login na cara (abas Conta do BumpTop × Taiga FNDE)
+    overlay.setAuthWall(true);
+    void openUserProfileModal();
+  };
+
+  /** PR4.16 — sair do sistema: muro na hora e só depois confirma com o backend. */
+  const signOutReal = (): void => {
+    setTaigaToken(null);
+    forceWall = true;
+    raiseLoginWall();
+    overlay.toast(t('ui.taiga.tokenRemoved'));
+    void auth
+      .signOut()
+      .catch(() => {})
+      .then(() => initUserBuilding()); // sessão confirmada ou não, o muro fica
+  };
+
   async function initUserBuilding(): Promise<void> {
     // Com ?nobuilding=1 o prédio fica invisível (container opacity 0), mas o
     // loadingOverlay é filho dele com pointer-events:auto → bloqueava a cena
@@ -402,14 +508,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     // Visitante CONFIRMADO = sem Taiga, sem conta e o backend de auth respondeu
     // dizendo "não autenticado". Sem backend (dev/preview sem /api, rede fora)
     // a sessão fica indeterminada → fail-open, segue o modo demo normal.
-    if (!me && !appSession && auth.isSessionKnown()) {
-      loginWalled = true;
-      buildingView.hide();
-      buildingView.hideLoading();
-      overlay.setAuthState(null);
-      // Perfil completo na cara: abas Conta do BumpTop × Taiga FNDE + cadastro
-      // e "Esqueci a senha" — o visitante escolhe por onde entrar.
-      void openUserProfileModal();
+    // `forceWall` cobre o caso de saída do sistema com a API fora: aí o muro
+    // não depende da confirmação do backend.
+    if (forceWall || (!me && !appSession && auth.isSessionKnown())) {
+      raiseLoginWall();
       return; // sem snapshot, sem seedDemoScene, sem caixas: visitante vê zero
     }
 
@@ -424,13 +526,15 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     } catch {
       seedDemoScene(world);
     }
+    // Muro abaixo e persistência religada: a partir daqui a cena pode ser salva
+    persistLocked = false;
 
     // 3) Avatar customizado salvo
     const customAvatar = await repo.getSetting<string | null>('userAvatar', null);
 
     // 4) Projetos do Taiga (isolamento: só os de MEMBRO — o /projects também
     //    devolve os públicos do servidor, que não são "do usuário")
-    let mySlugs: Set<string> | null = null;
+    mySlugs = null;
     if (me) {
       const photo = customAvatar || me.photo || null;
       buildingView.setUserProfile({
@@ -508,22 +612,22 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       });
     }
 
-    // 5) Caixas exibidas: com Taiga, locais + só MEUS projetos; sem Taiga, a
-    //    cena local inteira (não há dados de terceiros nela).
-    const boxesToShow: BoxEntityData[] =
-      mySlugs !== null
-        ? world
-            .listBoxes()
-            .filter((b) => !b.taigaProject || mySlugs!.has(b.taigaProject))
-        : world.listBoxes();
+    // 5) Caixas exibidas: isolamento Taiga (só MEUS projetos) × visão ativa
+    //    (prédio 1 pessoal × prédio 2 trabalho). Sem Taiga, só o pessoal.
+    if (me) {
+      const savedView = await repo.getSetting<string>('viewMode', 'personal').catch(() => 'personal');
+      viewMode = savedView === 'work' ? 'work' : 'personal';
+    } else {
+      viewMode = 'personal';
+    }
+    overlay.setViewSwitchVisible(!!me);
+    refreshBoxes();
 
-    buildingView.setBoxes(boxesToShow);
-    updateBuildingStats();
-    buildingView.selectFloor(world.getCurrentBoxId());
-
-    // PR4.14 — saiu do muro (login/cadastro): reabre o dashboard do prédio
+    // PR4.14/4.16 — saiu do muro (login/cadastro): reabre o dashboard e
+    // abaixas o véu que cobria cena e HUD.
     if (loginWalled) {
       loginWalled = false;
+      overlay.setAuthWall(false);
       if (!skipBuilding) buildingView.show();
     }
 
@@ -545,7 +649,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       return;
     }
     const rawStats = world.getBoxStats();
-    const boxes = world.listBoxes();
+    // PR4.16 — busca só na visão ativa (pessoal × trabalho): o número do
+    // andar precisa bater com a lista/pilha mostrada na tela.
+    const boxes = viewBoxes.length > 0 ? viewBoxes : world.listBoxes();
     const matches: import('../building/BuildingView').SearchMatch[] = [];
     for (let i = 0; i < boxes.length; i++) {
       const box = boxes[i]!;
@@ -605,6 +711,21 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         setTimeout(() => overlay.setZoomSliderValue(world.getCamera().distance), 600);
       }
     });
+  });
+
+  // PR4.16 — favorito do andar: grava no snapshot e re-renderiza a lista.
+  // Persistência imediata (não espera o SAVE_INTERVAL): o usuário espera
+  // que a estrela sobreviva a um F5 assim que ela acende/apaga.
+  buildingView.onFloorFavorite((boxId, isFavorite) => {
+    if (!world.setBoxFavorite(boxId, isFavorite)) return;
+    refreshBoxes();
+    if (!persistLocked) repo.saveScene(world.toSnapshot()).catch(() => {});
+    const box = world.getBox(boxId);
+    overlay.toast(
+      isFavorite
+        ? t('toast.favoriteAdded', { name: box?.name ?? '' })
+        : t('toast.favoriteRemoved', { name: box?.name ?? '' })
+    );
   });
 
   // Input semântico: injeta o resolvedor de piso (sem three no adapter)
@@ -672,14 +793,21 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         reminder: typeof o.meta.noteReminder === 'number' ? (o.meta.noteReminder as number) : null,
       })
       .then((draft) => {
-        // Nota vazia (sem texto, título e desenho) = apagar (comportamento Keep)
+        // Nota NOVA vazia (sem texto, título e desenho) = não criar (Keep).
+        // PR4.17 — nota EXISTENTE nunca é apagada pelo editor: mesmo que o
+        // rascunho venha vazio por qualquer motivo, a anotação fica (em
+        // branco) em vez de sumir do mundo e do banco. Perder nota é pior
+        // que nota em branco — apagar continua possível pelo menu.
         const empty =
           draft.text.trim() === '' && draft.title.trim() === '' && draft.drawing === null;
-        if (empty) {
+        if (empty && isNew) {
           world.removeObject(id);
           forgetObject(id);
           overlay.toast(t('toast.noteRemoved'));
           return;
+        }
+        if (empty && !isNew) {
+          console.warn('editor devolveu nota vazia — mantendo a anotação (anti-perda PR4.17)');
         }
         world.setNoteText(id, draft.text);
         world.setNoteMeta(id, {
@@ -1398,9 +1526,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       return;
     }
     const cur = world.getCurrentBoxId();
-    const boxes = world
-      .listBoxes()
-      .map((b) => ({ id: b.id, label: b.name, current: b.id === cur }));
+    const boxes = (viewBoxes.length > 0 ? viewBoxes : world.listBoxes()).map((b) => ({
+      id: b.id,
+      label: b.name,
+      current: b.id === cur,
+    }));
     overlay.showBoxesPanel(boxes);
   });
   overlayRoot.addEventListener('boxgoto', (e) => {
@@ -1415,12 +1545,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // PR4.2 — CRUD de caixas: criar (nome automático "Caixa n"), renomear,
   // excluir (itens voltam p/ a Caixa Comum) — o painel re-renderiza em cima
   const reopenBoxesPanel = () => {
-    buildingView.setBoxes(world.listBoxes());
-    updateBuildingStats();
+    refreshBoxes();
     if (!overlay.isBoxesPanelVisible()) return;
     const cur = world.getCurrentBoxId();
     overlay.showBoxesPanel(
-      world.listBoxes().map((b) => ({ id: b.id, label: b.name, current: b.id === cur, type: b.type })),
+      (viewBoxes.length > 0 ? viewBoxes : world.listBoxes()).map((b) => ({
+        id: b.id,
+        label: b.name,
+        current: b.id === cur,
+        type: b.type,
+      })),
     );
   };
   overlayRoot.addEventListener('boxcreate', (e) => {
@@ -1455,6 +1589,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (sprintName) {
       box.taigaSprintName = sprintName;
     }
+    // PR4.16 — caixa nova fora da visão atual (pessoal × trabalho)? A visão
+    // acompanha para a pessoa ver o que acabou de criar.
+    if ((viewMode === 'work') !== !!project) {
+      viewMode = project ? 'work' : 'personal';
+      overlay.setViewMode(viewMode);
+      repo.setSetting('viewMode', viewMode).catch(() => {});
+    }
     overlay.toast(t('toast.boxCreated', { name: box.name }));
     reopenBoxesPanel();
     void syncBacklog(box.id); // PR4.5 — backlog: puxa as stories na criação
@@ -1481,10 +1622,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         overlay.setSprintBadge(curBox.taigaSprintName || 'Sprint', true);
       }
     } else {
+      // #58 (mobile): ao abrir o prédio o badge de sprint não faz sentido;
+      // PR4.16: refreshBoxes sincroniza lista/resumo/🏠🏢 da visão ativa.
       overlay.hideSprintBadge();
-      buildingView.setBoxes(world.listBoxes());
-      updateBuildingStats();
-      buildingView.selectFloor(world.getCurrentBoxId());
+      refreshBoxes();
       buildingView.show();
     }
   });
@@ -1497,12 +1638,35 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   overlayRoot.addEventListener('statspanel', () => {
     if (buildingView.togglePanel('summary')) updateBuildingStats();
   });
+
+  // PR4.16 — ⭐ do HUD: filtra andares/projetos (lista E pilha 3D) pelos
+  // favoritos. Se ainda não há nenhum, a lista explica em vez de ficar vazia.
+  overlayRoot.addEventListener('favoritefilter', (e) => {
+    const on = (e as CustomEvent<{ on: boolean }>).detail.on;
+    buildingView.setFavoriteFilter(on);
+    overlay.toast(t(on ? 'toast.filterFavOn' : 'toast.filterFavOff'));
+  });
+
+  // PR4.16 — 🏠/🏢 do HUD: alterna prédio 1 (pessoal) × prédio 2 (trabalho).
+  // O snapshot guarda as duas visões; só muda o que a UI mostra.
+  overlayRoot.addEventListener('viewswitch', (e) => {
+    viewMode = (e as CustomEvent<{ mode: 'personal' | 'work' }>).detail.mode;
+    refreshBoxes();
+    repo.setSetting('viewMode', viewMode).catch(() => {});
+    overlay.toast(t(viewMode === 'work' ? 'toast.viewWork' : 'toast.viewPersonal'));
+  });
+
+  // PR4.16 — clicar no véu do muro reabre o login (fechar o modal não pode
+  // deixar a pessoa presa numa tela sem saída).
+  overlayRoot.addEventListener('authwallreopen', () => {
+    if (loginWalled) void openUserProfileModal();
+  });
   overlayRoot.addEventListener('buildingback', () => {
     overlay.hideBuildingBack();
+    // #58 (mobile): esconde o badge de sprint; PR4.16: refreshBoxes recalcula
+    // a visão ativa (setBoxes + selectFloor + stats + 🏠/🏢).
     overlay.hideSprintBadge();
-    buildingView.setBoxes(world.listBoxes());
-    updateBuildingStats();
-    buildingView.selectFloor(world.getCurrentBoxId());
+    refreshBoxes();
     buildingView.show(() => {
       overlay.toast(t('toast.buildingBack'));
     });
@@ -1564,19 +1728,16 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       overlay.hideAuthModal();
       overlay.setAuthState(auth.current());
       overlay.toast(t('toast.authWelcome', { email: auth.current()!.email }));
-      // PR4.14 — saiu do muro: (re)monta o prédio e a cena da conta
+      // PR4.14/4.16 — saiu do muro: (re)monta o prédio e a cena da conta
+      forceWall = false;
       void initUserBuilding();
     })();
   });
   overlayRoot.addEventListener('authsignout', () => {
-    void (async () => {
-      await auth.signOut();
-      overlay.hideAuthModal();
-      overlay.setAuthState(null);
-      overlay.toast(t('toast.authBye'));
-      // PR4.14 — deslogou: prédio escondido e muro de volta
-      void initUserBuilding();
-    })();
+    // PR4.16 — mesmo caminho do "Sair do Sistema" do perfil: muro real
+    signOutReal();
+    overlay.hideAuthModal();
+    overlay.toast(t('toast.authBye'));
   });
   // authclose: o modal já se esconde sozinho no overlay; nada a fazer aqui.
 
@@ -1587,7 +1748,11 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
    */
   const onLogin = () => {
     void (async () => {
+      // PR4.16 — muro de pé (logout): o mundo em memória está zerado; nada
+      // sobe nem desce da nuvem senão o PUT apagaria a cena da conta.
+      if (persistLocked) return;
       const remote = await auth.getRemoteScene();
+      if (persistLocked) return; // saiu do sistema no meio do fetch
       if (remote && Array.isArray(remote.objects) && remote.objects.length > 0) {
         world.loadSnapshot(remote);
         await repo.saveScene(world.toSnapshot()).catch(() => {});
@@ -1614,12 +1779,14 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // senão o timer nunca expiraria (2s < 3s) e a nuvem nunca receberia nada.
   // O primeiro flush após uma mudança agenda o PUT para +3 s; flushs
   // subsequentes são absorvidos (o snapshot é lido no momento do PUT).
-  let cloudSyncTimer = 0;
+  // (cloudSyncTimer é declarado lá em cima: o muro de logout precisa cancelá-lo)
   const queueCloudSync = () => {
     if (!auth.current()) return;
+    if (persistLocked) return; // muro de pé: não subir snapshot zerado
     if (cloudSyncTimer) return; // já há um PUT agendado — não resetar
     cloudSyncTimer = window.setTimeout(() => {
       cloudSyncTimer = 0;
+      if (persistLocked) return; // logout entre agendar e disparar
       void auth
         .putRemoteScene(world.toSnapshot())
         .then((ok) => {
@@ -1764,6 +1931,9 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
   // só descobria a perda quando o F5 zerava a cena (bug do fallback idb-sqlite).
   let saveFailToastShown = false;
   const flushNow = () => {
+    // PR4.16 — muro de pé: NUNCA gravar o mundo zerado do logout por cima
+    // da cena salva do usuário (o dado continua no repo/nuvem, intacto).
+    if (persistLocked) return;
     repo
       .saveScene(world.toSnapshot())
       .then(() => queueCloudSync())
@@ -1977,28 +2147,119 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     });
   }, WATCH_MS);
 
-  // PR12 — agendador de lembretes das notas: a cada 15 s procura notas com
-  // lembrete vencido e não disparado → som + toast + push (Notification)
-  const beep = () => {
+  // PR12 → alarme REAL do lembrete. O beep antigo era perdido: um AudioContext
+  // novo nascia "suspended" fora de gesture (autoplay policy) e o toast sumia em
+  // 2,6 s. Agora: bipes por ~12 s (param no 1º clique/tecla), banner fixo até
+  // dispensar e Notification do sistema (clássica ou via service worker da PWA).
+  let alarmCtx: AudioContext | null = null;
+  let alarmTimer: number | null = null;
+
+  const getAlarmCtx = (): AudioContext | null => {
     try {
-      const Ctx = window.AudioContext;
-      if (!Ctx) return;
-      const ac = new Ctx();
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.18, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.9);
-      osc.connect(gain);
-      gain.connect(ac.destination);
-      osc.start();
-      osc.stop(ac.currentTime + 0.9);
-      osc.onended = () => void ac.close();
+      if (!alarmCtx) {
+        const Ctx =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Ctx) return null;
+        alarmCtx = new Ctx();
+      }
+      if (alarmCtx.state === 'suspended') void alarmCtx.resume().catch(() => {});
+      return alarmCtx;
     } catch {
-      // sem áudio (ex.: headless) — o toast e o push ainda avisam
+      return null;
     }
   };
+
+  // autoplay policy: áudio só toca após interação do usuário — destravamos o
+  // contexto em QUALQUER clique/tecla para o próximo bipe valer.
+  const unlockAudio = () => {
+    if (alarmCtx?.state === 'suspended') void alarmCtx.resume().catch(() => {});
+  };
+  window.addEventListener('pointerdown', unlockAudio);
+  window.addEventListener('keydown', unlockAudio);
+
+  const stopAlarm = () => {
+    if (alarmTimer !== null) {
+      window.clearInterval(alarmTimer);
+      alarmTimer = null;
+    }
+  };
+
+  const startAlarm = () => {
+    stopAlarm();
+    const ac = getAlarmCtx();
+    let left = 15; // 15 bipes × 800 ms ≈ 12 s de alarme
+    const chirp = () => {
+      if (!ac) return;
+      try {
+        const t0 = ac.currentTime;
+        for (const [freq, off] of [
+          [880, 0],
+          [1175, 0.18],
+        ] as const) {
+          const osc = ac.createOscillator();
+          const gain = ac.createGain();
+          osc.type = 'triangle';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.0001, t0 + off);
+          gain.gain.exponentialRampToValueAtTime(0.25, t0 + off + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.16);
+          osc.connect(gain);
+          gain.connect(ac.destination);
+          osc.start(t0 + off);
+          osc.stop(t0 + off + 0.18);
+        }
+      } catch {
+        // sem áudio (ex.: headless) — o banner e a notificação ainda avisam
+      }
+    };
+    chirp();
+    alarmTimer = window.setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        stopAlarm();
+        return;
+      }
+      unlockAudio();
+      chirp();
+    }, 800);
+    // o usuário viu o aviso? o 1º clique/tecla encerra o alarme
+    const halt = () => {
+      stopAlarm();
+      window.removeEventListener('pointerdown', halt);
+      window.removeEventListener('keydown', halt);
+    };
+    window.addEventListener('pointerdown', halt);
+    window.addEventListener('keydown', halt);
+  };
+
+  /** Notificação do sistema: desktop usa a clássica; Android exige SW da PWA. */
+  const notifySystem = (title: string, body: string) => {
+    try {
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'default') {
+        // nunca pediu → tenta agora (o banner cobre caso o usuário negue)
+        void Notification.requestPermission()
+          .then((p) => {
+            if (p === 'granted') notifySystem(title, body);
+          })
+          .catch(() => {});
+        return;
+      }
+      if (Notification.permission !== 'granted') return;
+      try {
+        new Notification(title, { body });
+      } catch {
+        // Android lança aqui → mostra via service worker da PWA
+        void navigator.serviceWorker?.ready
+          .then((reg) => reg.showNotification(title, { body, tag: 'bumptop-reminder' }))
+          .catch(() => {});
+      }
+    } catch {
+      // sem Notification (contexto inseguro) — banner + som avisam
+    }
+  };
+
   const checkReminders = () => {
     const now = Date.now();
     for (const o of world.listObjects()) {
@@ -2008,27 +2269,17 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
       if ((o.meta.noteReminder as number) > now) continue;
       world.markNoteReminderFired(o.id);
       persistObject(o.id);
-      beep();
       const nome =
         (o.meta.noteTitle as string) ||
         (o.meta.noteText as string)?.slice(0, 40) ||
         t('ui.noteTitle');
-      overlay.toast(t('toast.reminderDue', { title: nome }));
-      // PR13 — dispara MESMO com a aba em segundo plano: a Notification do
-      // Windows não exige foco (sem guard document.hidden)
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification((o.meta.noteTitle as string) || t('ui.noteTitle'), {
-            body: ((o.meta.noteText as string) ?? '').slice(0, 120),
-          });
-        } catch {
-          // alguns navegadores exigem service worker p/ Notification
-        }
-      }
+      startAlarm();
+      overlay.alarm(t('toast.reminderDue', { title: nome }));
+      notifySystem(nome, ((o.meta.noteText as string) ?? '').slice(0, 120));
     }
   };
   checkReminders(); // checagem imediata no bootstrap (vencidos ao carregar)
-  const REMIND_MS = 10000;
+  const REMIND_MS = 5000; // era 10 s — 5 s de latência máxima no alarme
   const remitter = window.setInterval(checkReminders, REMIND_MS);
 
   return {

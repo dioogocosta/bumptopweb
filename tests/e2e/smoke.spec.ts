@@ -1419,6 +1419,105 @@ test.describe('PR13', () => {
 
     await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
+
+  test('lembrete vencido dispara ALARME: banner fixo até dispensar + disparo único', async ({
+    page,
+  }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    const notaId = await page.evaluate(() => {
+      const w = window.__bumptop!.world;
+      for (const o of w.listObjects()) {
+        if ((o.meta.noteText || '').includes('lembrete alarme p13')) w.removeObject(o.id);
+      }
+      const id = w.addStickyNote({ x: -30, y: 1.2, z: -30 }, 'lembrete alarme p13');
+      // vencido há 1 s — setNoteMeta rearma noteReminderFired=false
+      w.setNoteMeta(id, { noteReminder: Date.now() - 1000 });
+      return id;
+    });
+
+    // o agendador (a cada 5 s) dispara → banner de alarme visível
+    const banner = page.locator('.alarm-banner');
+    await expect(banner).toBeVisible({ timeout: 8000 });
+    await expect(banner).toContainText('lembrete alarme p13');
+
+    // NÃO é o toast de 2,6 s: continua na tela mesmo passados 4 s
+    await page.waitForTimeout(4000);
+    await expect(banner).toBeVisible();
+
+    // disparo único: marcado como disparado (não re-dispara)
+    const fired = await page.evaluate(
+      (oid) => window.__bumptop!.world.getObject(oid)!.meta.noteReminderFired,
+      notaId,
+    );
+    expect(fired).toBe(true);
+
+    // dispensar fecha o banner
+    await banner.locator('.alarm-dismiss').click();
+    await expect(banner).toHaveCount(0);
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+});
+
+test.describe('PR4.19 — pan da câmera (mãozinha na caixa)', () => {
+  test('botão do meio e shift+esquerdo deslocam a vista; limite prende o pivot', async ({
+    page,
+  }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    const canvas = (await page.locator('#scene-root > canvas').boundingBox())!;
+    const cx = canvas.x + canvas.width / 2;
+    const cy = canvas.y + canvas.height / 2;
+    const step = Math.max(120, Math.round(canvas.width * 0.4));
+    const camX = () => page.evaluate(() => window.__bumptop!.renderer.getCamera().target.x);
+
+    // 1) botão do meio arrastado → a vista desloca (mãozinha)
+    const x0 = await camX();
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(cx + step, cy, { steps: 12 });
+    await page.mouse.up({ button: 'middle' });
+    const x1 = await camX();
+    expect(Math.abs(x1 - x0)).toBeGreaterThan(5);
+
+    // 2) shift + botão esquerdo arrastado → pan E sem abrir o laço de seleção
+    await page.keyboard.down('Shift');
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx - step, cy, { steps: 10 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    const x2 = await camX();
+    expect(Math.abs(x2 - x1)).toBeGreaterThan(5);
+    await expect(page.locator('.lasso-rect')).toHaveCount(0);
+
+    // 3) limites: drags enormes saturam (o pivot prende na caixa — não vaza
+    //    pro vazio); mais um drag absurdo não move mais nada
+    for (let i = 0; i < 5; i++) {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down({ button: 'middle' });
+      await page.mouse.move(cx + step, cy, { steps: 25 });
+      await page.mouse.up({ button: 'middle' });
+    }
+    const xSat = await camX();
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(cx + step, cy, { steps: 25 });
+    await page.mouse.up({ button: 'middle' });
+    const xEnd = await camX();
+    expect(Math.abs(xEnd - xSat)).toBeLessThan(1);
+  });
 });
 
 test.describe('PR16 — colar com formatação + ícones de zoom', () => {
@@ -1499,5 +1598,250 @@ test.describe('PR16 — colar com formatação + ícones de zoom', () => {
     expect(svgs).toBeGreaterThanOrEqual(8);
     // PR842ec9b — os botões +/− viraram barra deslizável de zoom
     await expect(page.locator('.zoom-slider')).toBeVisible();
+  });
+});
+
+test.describe('PR4.16 — favoritos de andares e filtro ⭐', () => {
+  test('filtro ⭐ mostra só favoritos; estrela marca/desmarca no painel', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const floorsBtn = page.locator('.floors-btn');
+    await floorsBtn.click();
+    const floors = page.locator('.bv-floors');
+    await expect(floors).toBeVisible();
+
+    // Cena demo (nobuilding) tem só a caixa raiz box-default → 1 linha
+    const rows = floors.locator('.bv-floor-row');
+    await expect(rows).toHaveCount(1);
+
+    // Liga o filtro ⭐ ANTES de favoritar → 0 linhas + texto vazio
+    const favFilter = page.locator('.fav-filter-btn');
+    await favFilter.click();
+    await expect(rows).toHaveCount(0);
+    await expect(floors).toContainText('Nenhum favorito ainda');
+
+    // Desliga → volta a 1 linha
+    await favFilter.click();
+    await expect(rows).toHaveCount(1);
+
+    // Marca a única caixa como favorita → estrela ★
+    const favBtn = rows.locator('.floor-fav-btn').first();
+    await favBtn.click();
+    await expect(favBtn).toHaveText('★');
+    const isFav = await page.evaluate(
+      () => window.__bumptop!.world.listBoxes()[0].isFavorite === true,
+    );
+    expect(isFav).toBe(true);
+
+    // Liga o filtro → 1 linha (a favorita), botão ativo (sel + aria-pressed)
+    await favFilter.click();
+    await expect(rows).toHaveCount(1);
+    await expect(favFilter).toHaveClass(/sel/);
+    await expect(favFilter).toHaveAttribute('aria-pressed', 'true');
+
+    // Desliga → restaura todas as caixas
+    await favFilter.click();
+    await expect(rows).toHaveCount(1);
+    await expect(favFilter).toHaveAttribute('aria-pressed', 'false');
+
+    // Desmarca → estrela volta ☆
+    await favBtn.click();
+    await expect(favBtn).toHaveText('☆');
+  });
+});
+
+test.describe('PR4.16 — logout real (só a tela de login fica)', () => {
+  test('sair do sistema sobe o muro: nada da cena fica visível nem clicável', async ({ page }) => {
+    await page.route('**/api/session', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ authenticated: true, email: 'teste@bumptop.dev' }),
+      }),
+    );
+    await page.route('**/api/logout', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    // Sessão confirmada → cena carrega (espera a semeadura assíncrona)
+    await page.waitForFunction(() => window.__bumptop!.world.objectCount() > 0, { timeout: 20000 });
+    expect(await page.evaluate(() => window.__bumptop!.world.objectCount())).toBeGreaterThan(0);
+
+    // Abre o perfil (conta)
+    await page.locator('.auth-btn').click();
+    await expect(page.locator('.user-profile-modal')).toBeVisible();
+    await expect(page.locator('.user-profile-btn-danger')).toBeVisible();
+
+    // Sair do Sistema
+    await page.locator('.user-profile-btn-danger').click();
+
+    // O muro sobe imediatamente (forceWall), mesmo com /api/session ainda
+    // devolvendo authenticated:true
+    await expect(page.locator('.auth-wall')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/auth-walled/);
+    await expect(page.locator('#scene-root')).toHaveCSS('visibility', 'hidden');
+    expect(await page.evaluate(() => window.__bumptop!.world.objectCount())).toBe(0);
+    await expect(page.locator('.bv-floors')).toBeHidden();
+
+    // O modal de perfil é recriado pelo raiseLoginWall (não prende a pessoa)
+    await expect(page.locator('.user-profile-modal')).toBeVisible();
+
+    // Fechar o modal mantém o muro de pé
+    await page.locator('.user-profile-close').click();
+    await expect(page.locator('.auth-wall')).toBeVisible();
+    await expect(page.locator('.user-profile-modal')).toBeHidden();
+
+    // Clicar no véu reabre o login (authwallreopen). Dispara o evento diretamente
+    // p/ evitar corrida com o openUserProfileModal assíncrono do raiseLoginWall.
+    await page.evaluate(() => {
+      document
+        .getElementById('overlay-root')!
+        .dispatchEvent(new CustomEvent('authwallreopen', { bubbles: true }));
+    });
+    await expect(page.locator('.user-profile-modal')).toBeVisible();
+  });
+});
+
+test.describe('PR4.17 — Enter no editor de notas', () => {
+  test('Enter cria uma nova linha (quebra de linha) no modelo', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() =>
+      window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'linha um'),
+    );
+    await page.waitForTimeout(400);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
+    // Notas abrem no duplo-clique
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    const editor = page.locator('.note-rich-content');
+    await editor.click();
+    await page.keyboard.type(' duas');
+
+    // Enter: dispara beforeinput insertParagraph → novo bloco abaixo da linha atual
+    await page.evaluate(() => {
+      const ed = document.querySelector<HTMLElement>('.note-rich-content');
+      if (!ed) return;
+      ed.focus();
+      const sel = window.getSelection();
+      if (!sel) return;
+      const range = document.createRange();
+      range.selectNodeContents(ed);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      ed.dispatchEvent(
+        new InputEvent('beforeinput', {
+          inputType: 'insertParagraph',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    await page.keyboard.type('linha dois');
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+
+    const salvo = await page.evaluate(
+      (oid) => (window.__bumptop!.world.getObject(oid)!.meta.noteText as string) ?? '',
+      notaId,
+    );
+    // Duas linhas (quebra ao Enter)
+    expect(salvo.split('\n').length).toBeGreaterThanOrEqual(2);
+    expect(salvo).toContain('linha dois');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+});
+
+test.describe('PR4.17 — anti-perda de anotações', () => {
+  test('nota existente: clicar fora do modal (backdrop) preserva o conteúdo', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'backdrop com área fora do modal só existe no desktop');
+
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() =>
+      window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'conteúdo original da nota'),
+    );
+    await page.waitForTimeout(400);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    // Passa do guard de 350 ms do duplo-clique no backdrop
+    await page.waitForTimeout(400);
+
+    // Clica no backdrop no canto superior-direito, fora do card centralizado
+    // e fora do HUD (os controles de topo ficam só no lado esquerdo).
+    const bb = await page.locator('.note-rich-backdrop').boundingBox();
+    expect(bb).toBeTruthy();
+    await page.mouse.click(bb!.x + bb!.width - 20, bb!.y + 20);
+    await expect(modal).toHaveCount(0);
+
+    const salvo = await page.evaluate(
+      (oid) => (window.__bumptop!.world.getObject(oid)!.meta.noteText as string) ?? '',
+      notaId,
+    );
+    expect(salvo).toBe('conteúdo original da nota');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
+  });
+
+  test('nota existente esvaziada no editor não é removida ao fechar (done)', async ({ page }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+
+    const notaId = await page.evaluate(() =>
+      window.__bumptop!.world.addStickyNote({ x: 30, y: 6, z: 30 }, 'texto que será apagado'),
+    );
+    await page.waitForTimeout(400);
+
+    const tela = await page.evaluate((oid) => {
+      const pos = window.__bumptop!.world.getObject(oid)!.pose.position;
+      return window.__bumptop!.renderer.projectToScreen(pos);
+    }, notaId);
+    const box = (await page.locator('#scene-root > canvas').boundingBox())!;
+    await page.mouse.dblclick(box.x + tela.x, box.y + tela.y);
+    const modal = page.locator('[data-testid="note-rich"]');
+    await expect(modal).toBeVisible({ timeout: 4000 });
+
+    // Esvazia o editor (usuário apagou todo o texto)
+    await page.evaluate(() => {
+      const ed = document.querySelector('.note-rich-content');
+      if (ed) ed.innerHTML = '';
+    });
+
+    await page.locator('.note-rich-done').click();
+    await expect(modal).toHaveCount(0);
+
+    // O objeto continua no mundo: anti-perda PR4.17 não remove nota existente
+    const obj = await page.evaluate((oid) => window.__bumptop!.world.getObject(oid), notaId);
+    expect(obj).toBeTruthy();
+    expect((obj as { meta?: { noteText?: string } }).meta?.noteText).toBe('');
+
+    await page.evaluate((oid) => window.__bumptop!.world.removeObject(oid), notaId);
   });
 });

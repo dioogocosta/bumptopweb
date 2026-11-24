@@ -288,6 +288,20 @@ export class World {
     return this.boxes.get(id) ?? null;
   }
 
+  /**
+   * PR4.16 — marca/desmarca uma caixa (andar/projeto) como favorita.
+   * O flag fica em `BoxEntityData.isFavorite`, é serializado pelo
+   * `toSnapshot()` e restaurado no `loadSnapshot()` — sobrevive a reload.
+   */
+  setBoxFavorite(id: string, isFavorite: boolean): boolean {
+    const box = this.boxes.get(id);
+    if (!box) return false;
+    if (isFavorite) box.isFavorite = true;
+    else delete box.isFavorite;
+    this.dirty = true;
+    return true;
+  }
+
   getCurrentBoxId(): string {
     return this.currentBoxId;
   }
@@ -896,10 +910,17 @@ export class World {
         this.camera.zoom(action.delta);
         this.dirty = true;
         break;
-      case 'pan':
-        this.camera.pan(action.dx, action.dy);
+      case 'pan': {
+        // Pan em PX (mãozinha: o CONTEÚDO segue o cursor → sinal negado),
+        // convertido p/ unidades do chão proporcional à distância da câmera.
+        // Os limites do OrbitCameraController (setPanBounds) prendem o pivot
+        // na caixa atual — não dá para se perder no vazio.
+        const k = this.camera.getState().distance * 0.0015;
+        this.camera.pan(-action.dx * k, -action.dy * k);
+        this.deps.renderer.setCamera(this.camera.getState());
         this.dirty = true;
         break;
+      }
       case 'orbit':
         this.camera.orbit(action.dAzimuth, action.dElevation);
         this.deps.renderer.setCamera(this.camera.getState());
@@ -3501,6 +3522,8 @@ export class World {
         if (typeof b.taigaSprintId === 'number') nova.taigaSprintId = b.taigaSprintId;
         if (typeof b.taigaSprintName === 'string' && b.taigaSprintName) nova.taigaSprintName = b.taigaSprintName;
         if (Array.isArray(b.kanbanLanes) && b.kanbanLanes.length) nova.kanbanLanes = b.kanbanLanes;
+        // PR4.16 — favorito do usuário (filtro do painel de andares)
+        if (b.isFavorite === true) nova.isFavorite = true;
         this.boxes.set(b.id, nova);
       }
     }

@@ -1,7 +1,7 @@
-/**
- * Tipos de domínio do BumpTop — PUROS (sem DOM/WebGL/SQL).
+﻿/**
+ * Tipos de domÃ­nio do BumpTop â€” PUROS (sem DOM/WebGL/SQL).
  * Espelham o bitmask de `ObjectType` do original (`BT_Actor.h`) e o modelo
- * `VisualPhysicsActor` do port Mac: um objeto tem pose (física) + representação
+ * `VisualPhysicsActor` do port Mac: um objeto tem pose (fÃ­sica) + representaÃ§Ã£o
  * (render), desacopladas.
  */
 
@@ -25,10 +25,10 @@ export interface Pose {
 }
 
 // ---------------------------------------------------------------------------
-// Bitmasks — replica a tipagem por bitmask do original
+// Bitmasks â€” replica a tipagem por bitmask do original
 // ---------------------------------------------------------------------------
 
-/** Tipo primário (mutuamente exclusivo no original via bits altos). */
+/** Tipo primÃ¡rio (mutuamente exclusivo no original via bits altos). */
 export const enum ObjectKind {
   None = 0,
   Actor = 1 << 0,
@@ -37,7 +37,7 @@ export const enum ObjectKind {
   Cluster = 1 << 3,
 }
 
-/** Atributos secundários (o original combina vários). */
+/** Atributos secundÃ¡rios (o original combina vÃ¡rios). */
 export const enum TypeFlags {
   None = 0,
   FileSystem = 1 << 0,
@@ -65,55 +65,55 @@ export const enum PileLayout {
 }
 
 /**
- * Dados serializáveis de um objeto. É o que vai para o repositório (SQLite).
- * O `meta` é extensível — espelha o `PbBumpObject` extensível do `.proto`.
+ * Dados serializÃ¡veis de um objeto. Ã‰ o que vai para o repositÃ³rio (SQLite).
+ * O `meta` Ã© extensÃ­vel â€” espelha o `PbBumpObject` extensÃ­vel do `.proto`.
  */
 export interface BumpObjectData {
   id: string;
   kind: ObjectKind;
   typeFlags: TypeFlags;
-  /** Posição dentro de uma pilha (null = item livre da cena). */
+  /** PosiÃ§Ã£o dentro de uma pilha (null = item livre da cena). */
   parentId: string | null;
   pose: Pose;
-  /** Velocidade linear (guardada p/ toss e integração). */
+  /** Velocidade linear (guardada p/ toss e integraÃ§Ã£o). */
   velocity: Vec3;
   scale: number;
-  /** Parede em que está pregado (0..3) ou null. Espelha PinWall. */
+  /** Parede em que estÃ¡ pregado (0..3) ou null. Espelha PinWall. */
   pinnedWall: number | null;
   frozen: boolean;
   label: string | null;
-  /** Extensível — dimensões da caixa em unidades de mundo. */
+  /** ExtensÃ­vel â€” dimensÃµes da caixa em unidades de mundo. */
   meta: {
-    /** Meia-extensão (half-extents) da caixa física/render. */
+    /** Meia-extensÃ£o (half-extents) da caixa fÃ­sica/render. */
     halfExtents?: Vec3;
-    /** Cor/hue p/ placeholder até termos thumbnails reais. */
+    /** Cor/hue p/ placeholder atÃ© termos thumbnails reais. */
     color?: string;
     [key: string]: unknown;
   };
 }
 
-/** Snapshot completo da cena — o que é persistido. */
+/** Snapshot completo da cena â€” o que Ã© persistido. */
 export interface SceneSnapshot {
   schemaVersion: number;
   objects: BumpObjectData[];
-  /** Estado da câmera (do `PbCamera`). */
+  /** Estado da cÃ¢mera (do `PbCamera`). */
   camera: CameraState;
-  /** Pose de cada pilha é derivada dos filhos; aqui guardamos layout. */
+  /** Pose de cada pilha Ã© derivada dos filhos; aqui guardamos layout. */
   piles: Record<string, { layout: PileLayout; page: number }>;
   /**
-   * PR4a (Control Manager) — as CAIXAS do mundo (espaço com chão + 4 paredes
+   * PR4a (Control Manager) â€” as CAIXAS do mundo (espaÃ§o com chÃ£o + 4 paredes
    * onde pastas/arquivos/notas acontecem). Opcional p/ compatibilidade:
-   * snapshot sem `boxes` = mundo antigo → vira 1 caixa padrão no centro.
+   * snapshot sem `boxes` = mundo antigo â†’ vira 1 caixa padrÃ£o no centro.
    */
   boxes?: BoxEntityData[];
-  /** PR4a — caixa ativa (onde novas pastas/notas nascem). Opcional (mundo antigo). */
+  /** PR4a â€” caixa ativa (onde novas pastas/notas nascem). Opcional (mundo antigo). */
   currentBoxId?: string;
 }
 
 export interface CameraState {
-  /** Posição alvo (pivot) da câmera. */
+  /** PosiÃ§Ã£o alvo (pivot) da cÃ¢mera. */
   target: Vec3;
-  /** Distância da câmera ao pivot. */
+  /** DistÃ¢ncia da cÃ¢mera ao pivot. */
   distance: number;
   /** Azimuth (yaw) em radianos. */
   azimuth: number;
@@ -122,23 +122,23 @@ export interface CameraState {
   fov: number;
 }
 
-/** Configuração de física do mundo — constantes *ground-truth* do original. */
+/** ConfiguraÃ§Ã£o de fÃ­sica do mundo â€” constantes *ground-truth* do original. */
 export interface PhysicsConfig {
-  /** Gravidade Y (original: 10 × -9.81 = -98.1). */
+  /** Gravidade Y (original: 10 Ã— -9.81 = -98.1). */
   gravityY: number;
   friction: number;
   restitution: number;
   /**
-   * Limiar de toss: se |v|² ≥ threshold, o item é arremessado.
+   * Limiar de toss: se |v|Â² â‰¥ threshold, o item Ã© arremessado.
    * Espelha `GlobalSettings::MinStartTossVelocitySq`.
    */
   minStartTossVelocitySq: number;
   /** Fim do toss. Original: `EndTossVelocitySq = 100` (BT_Settings.cpp:52). */
   endTossVelocitySq: number;
   /**
-   * Nível de física. 1 = interação visual (itens atravessam uns aos outros,
-   * só piso/paredes colidem — como o BumpTop comercial). 2 = física real
-   * (caixas colidem, empurram e empilham entre si — como o protótipo do vídeo).
+   * NÃ­vel de fÃ­sica. 1 = interaÃ§Ã£o visual (itens atravessam uns aos outros,
+   * sÃ³ piso/paredes colidem â€” como o BumpTop comercial). 2 = fÃ­sica real
+   * (caixas colidem, empurram e empilham entre si â€” como o protÃ³tipo do vÃ­deo).
    */
   level: PhysicsLevel;
 }
@@ -146,7 +146,7 @@ export interface PhysicsConfig {
 export type PhysicsLevel = 1 | 2;
 
 export const DEFAULT_PHYSICS: PhysicsConfig = {
-  gravityY: -98.1, // 10× -9.81 (mundo "rápido" do original)
+  gravityY: -98.1, // 10Ã— -9.81 (mundo "rÃ¡pido" do original)
   friction: 0.55, // "steel on steel" (BT_Util InitNovodex)
   restitution: 0.1,
   minStartTossVelocitySq: 10000, // MinStartTossVelocitySq (BT_Settings.cpp:53)
@@ -154,15 +154,15 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   level: 2,
 };
 
-/** Dimensões da sala — do `CreateWalls` (BT_Util.cpp). */
+/** DimensÃµes da sala â€” do `CreateWalls` (BT_Util.cpp). */
 export interface RoomConfig {
-  /** Meia-distância do piso (original: ±150). */
+  /** Meia-distÃ¢ncia do piso (original: Â±150). */
   halfSize: number;
   /** Altura das paredes. */
   wallHeight: number;
   wallThickness: number;
   /**
-   * PR4a — centro da caixa no mundo (vários boxes lado a lado no mesmo
+   * PR4a â€” centro da caixa no mundo (vÃ¡rios boxes lado a lado no mesmo
    * mundo 3D). Ausente = {0,0} (caixa original no centro).
    */
   origin?: { x: number; z: number };
@@ -174,47 +174,49 @@ export const DEFAULT_ROOM: RoomConfig = {
   wallThickness: 10,
 };
 
-/** PR4a — tipos de caixa. 'root'/'kanban' no PR 4.3; 'backlog' no PR 4.5; 'sprint' no PR 4.6. */
+/** PR4a â€” tipos de caixa. 'root'/'kanban' no PR 4.3; 'backlog' no PR 4.5; 'sprint' no PR 4.6. */
 export type BoxType = 'comum' | 'root' | 'kanban' | 'backlog' | 'sprint';
 
 /**
- * PR4.6 — configuração de uma raia Kanban (nome, cor, mapeamento de status do Taiga).
+ * PR4.6 â€” configuraÃ§Ã£o de uma raia Kanban (nome, cor, mapeamento de status do Taiga).
  */
 export interface KanbanLane {
   /** Label exibido no topo da raia. */
   label: string;
   /** Cor hex da raia (bordas + header). */
   color: string;
-  /** Status do Taiga que são mapeados para esta raia (nomes normalizados em lowercase). */
+  /** Status do Taiga que sÃ£o mapeados para esta raia (nomes normalizados em lowercase). */
   statusNames: string[];
 }
 
 /**
- * PR4a — uma CAIXA do Control Manager: o espaço (chão + 4 paredes) onde
+ * PR4a â€” uma CAIXA do Control Manager: o espaÃ§o (chÃ£o + 4 paredes) onde
  * tudo acontece. Pastas/arquivos/notas ficam DENTRO dela (`meta.boxId`).
  */
 export interface BoxEntityData {
   id: string;
   name: string;
   type: BoxType;
-  /** Centro da caixa no chão do mundo. */
+  /** Centro da caixa no chÃ£o do mundo. */
   pos: { x: number; z: number };
   halfSize: number;
   wallHeight: number;
   wallThickness: number;
-  /** PR4.5 — slug do projeto Taiga (só em caixas 'backlog'). */
+  /** PR4.5 â€” slug do projeto Taiga (sÃ³ em caixas 'backlog'). */
   taigaProject?: string;
-  /** PR4.5 — contagens por status do Taiga (preenchidas no sync, p/ o dashboard). */
+  /** PR4.5 â€” contagens por status do Taiga (preenchidas no sync, p/ o dashboard). */
   taigaStats?: Array<{ name: string; color: string; count: number }>;
-  /** PR4.6 — id da sprint do Taiga (só em caixas 'sprint'). */
+  /** PR4.6 â€” id da sprint do Taiga (sÃ³ em caixas 'sprint'). */
   taigaSprintId?: number;
-  /** PR4.6 — nome da sprint (preenchido no sync). */
+  /** PR4.6 â€” nome da sprint (preenchido no sync). */
   taigaSprintName?: string;
-  /** PR4.6 — raias Kanban configuradas para esta caixa (sprint ou kanban). */
+  /** PR4.6 â€” raias Kanban configuradas para esta caixa (sprint ou kanban). */
   kanbanLanes?: KanbanLane[];
+  /** PR4.15 - favorito do usuario (p/ filtro no painel de andares). */
+  isFavorite?: boolean;
 }
 
-/** PR4.5 — user story do Taiga (só leitura; chega do adapter `src/taiga/`). */
+/** PR4.5 â€” user story do Taiga (sÃ³ leitura; chega do adapter `src/taiga/`). */
 export interface TaigaStory {
   id: number;
   ref: number;
@@ -223,3 +225,4 @@ export interface TaigaStory {
   statusColor: string;
   isClosed: boolean;
 }
+

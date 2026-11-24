@@ -65,6 +65,21 @@ describe('OrbitCameraController', () => {
     expect(cam.getState().distance).toBeLessThanOrEqual(460);
   });
 
+  it('pan desloca o pivot e satura nos limites da caixa (não vaza pro vazio)', () => {
+    const cam = new OrbitCameraController({ target: { x: 0, y: 0, z: 0 } });
+    cam.setPanBounds({ x: 0, z: 0 }, 200);
+    cam.pan(50, -30);
+    expect(cam.getState().target.x).toBeCloseTo(50, 5);
+    expect(cam.getState().target.z).toBeCloseTo(-30, 5);
+    // muito além do limite → satura em +200 / −200
+    for (let i = 0; i < 50; i++) cam.pan(100, 100);
+    expect(cam.getState().target.x).toBeCloseTo(200, 5);
+    expect(cam.getState().target.z).toBeCloseTo(200, 5);
+    for (let i = 0; i < 100; i++) cam.pan(-100, -100);
+    expect(cam.getState().target.x).toBeCloseTo(-200, 5);
+    expect(cam.getState().target.z).toBeCloseTo(-200, 5);
+  });
+
   it('presets 1–4 mantêm distância/elevation dentro dos limites', () => {
     const cam = new OrbitCameraController();
     for (const n of [1, 2, 3, 4]) {
