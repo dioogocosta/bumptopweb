@@ -1465,6 +1465,61 @@ test.describe('PR13', () => {
   });
 });
 
+test.describe('PR4.19 — pan da câmera (mãozinha na caixa)', () => {
+  test('botão do meio e shift+esquerdo deslocam a vista; limite prende o pivot', async ({
+    page,
+  }) => {
+    await page.goto('/?nobuilding=1');
+    await page.waitForFunction(() => !!window.__bumptop, { timeout: 20000 });
+    await page.waitForFunction(() => {
+      const w = window.__bumptop?.world;
+      return !!w && w.listObjects().length >= 3;
+    }, { timeout: 15000 });
+
+    const canvas = (await page.locator('#scene-root > canvas').boundingBox())!;
+    const cx = canvas.x + canvas.width / 2;
+    const cy = canvas.y + canvas.height / 2;
+    const step = Math.max(120, Math.round(canvas.width * 0.4));
+    const camX = () => page.evaluate(() => window.__bumptop!.renderer.getCamera().target.x);
+
+    // 1) botão do meio arrastado → a vista desloca (mãozinha)
+    const x0 = await camX();
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(cx + step, cy, { steps: 12 });
+    await page.mouse.up({ button: 'middle' });
+    const x1 = await camX();
+    expect(Math.abs(x1 - x0)).toBeGreaterThan(5);
+
+    // 2) shift + botão esquerdo arrastado → pan E sem abrir o laço de seleção
+    await page.keyboard.down('Shift');
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx - step, cy, { steps: 10 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    const x2 = await camX();
+    expect(Math.abs(x2 - x1)).toBeGreaterThan(5);
+    await expect(page.locator('.lasso-rect')).toHaveCount(0);
+
+    // 3) limites: drags enormes saturam (o pivot prende na caixa — não vaza
+    //    pro vazio); mais um drag absurdo não move mais nada
+    for (let i = 0; i < 5; i++) {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down({ button: 'middle' });
+      await page.mouse.move(cx + step, cy, { steps: 25 });
+      await page.mouse.up({ button: 'middle' });
+    }
+    const xSat = await camX();
+    await page.mouse.move(cx, cy);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(cx + step, cy, { steps: 25 });
+    await page.mouse.up({ button: 'middle' });
+    const xEnd = await camX();
+    expect(Math.abs(xEnd - xSat)).toBeLessThan(1);
+  });
+});
+
 test.describe('PR16 — colar com formatação + ícones de zoom', () => {
   test('colar HTML (estilo Google Keep) preserva parágrafos e negrito/itálico', async ({ page }) => {
     await page.goto('/?nobuilding=1');

@@ -33,6 +33,13 @@ export class PointerInput implements IInput {
   private orbitPrev: { x: number; y: number } | null = null;
   /** O arraste de botão direito se moveu (≠ clique). */
   private orbitMoved = false;
+  /** Pan (mãozinha) da câmera ativo — botão do meio ou shift+esquerdo. */
+  private panning = false;
+  private panPrev: { x: number; y: number } | null = null;
+  private panStart: { x: number; y: number } | null = null;
+  private panMoved = false;
+  /** O pan começou com shift — clique sem movimento = seleção aditiva. */
+  private panFromShift = false;
   /** Próximo `contextmenu` foi pós-órbita → suprime. */
   private suppressContext = false;
   /** Timestamp do último pointerMove p/ calcular speed (px/s). */
@@ -63,6 +70,16 @@ export class PointerInput implements IInput {
   private local(e: PointerEvent): { x: number; y: number } {
     const r = this.target!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** Inicia o pan da câmera (mãozinha) — botão do meio ou shift+esquerdo. */
+  private beginPan(s: { x: number; y: number }, fromShift: boolean): void {
+    this.panning = true;
+    this.panPrev = s;
+    this.panStart = s;
+    this.panMoved = false;
+    this.panFromShift = fromShift;
+    if (this.target) this.target.style.cursor = 'grabbing';
   }
 
   private onDown = (e: PointerEvent): void => {
@@ -96,6 +113,15 @@ export class PointerInput implements IInput {
       return;
     }
 
+    // Shift + botão esquerdo → PAN (mãozinha). O pointerDown fica ADIADO para
+    // o pointerUp: com movimento vira pan (o mundo nunca vê o down → não
+    // inicia lasso nem mexe na seleção); sem movimento, down+up reproduzem o
+    // clique normal (shift+clique = seleção aditiva continua valendo).
+    if (e.button === 0 && e.shiftKey) {
+      this.beginPan(s, true);
+      return;
+    }
+
     if (e.button === 0) {
       this.isDragging = true;
       const world = this.resolve(s);
@@ -118,8 +144,11 @@ export class PointerInput implements IInput {
           }
         }, LONG_PRESS_MS);
       }
-    } else if (e.button === 1 || e.button === 2) {
-      // Botão meio/direito → órbita da câmera
+    } else if (e.button === 1) {
+      // Botão do meio (roda) → PAN (mãozinha) — padrão de softwares 3D
+      this.beginPan(s, false);
+    } else if (e.button === 2) {
+      // Botão direito → órbita da câmera
       this.orbiting = true;
       this.orbitPrev = s;
       this.orbitMoved = false;
@@ -132,7 +161,10 @@ export class PointerInput implements IInput {
     const s = this.local(e);
 
     // Hover quando nenhum botão/toque está ativo (mouse/caneta sem contato)
-    if (this.pointers.size === 0 && !this.isDragging && !this.orbiting && (e.buttons === 0 || e.buttons === undefined)) {
+    if (this.pointers.size === 0 && !this.isDragging && !this.orbiting && !this.panning && (e.buttons === 0 || e.buttons === undefined)) {
+      // Shift pressionado → a mãozinha aparece (pan pronto p/ arrastar)
+      if (e.shiftKey && this.target.style.cursor !== 'grab') this.target.style.cursor = 'grab';
+      else if (!e.shiftKey && this.target.style.cursor === 'grab') this.target.style.cursor = '';
       const world = this.resolve(s);
       this.emit({ type: 'hover', world, screen: s });
       return;
@@ -172,6 +204,24 @@ export class PointerInput implements IInput {
       this.orbitPrev = centroid;
       return;
     }
+
+    // PAN (mãozinha): botão do meio ou shift+esquerdo arrastando — o pivot
+    // anda com o cursor (dx/dy em px; o World converte para unidades do chão)
+    if (this.panning && this.panPrev && this.pointers.size === 1) {
+      const dx = s.x - this.panPrev.x;
+      const dy = s.y - this.panPrev.y;
+      this.panPrev = s;
+      if (
+        !this.panMoved &&
+        this.panStart &&
+        (Math.abs(s.x - this.panStart.x) > 3 || Math.abs(s.y - this.panStart.y) > 3)
+      ) {
+        this.panMoved = true;
+      }
+      if (this.panMoved && (dx !== 0 || dy !== 0)) this.emit({ type: 'pan', dx, dy });
+      return;
+    }
+
     if (this.pointers.size === 1 && !this.orbiting) this.orbitPrev = null;
 
     // Arraste com botão direito/meio → órbita contínua
@@ -210,6 +260,37 @@ export class PointerInput implements IInput {
 
     if (this.pointers.size < 2) this.pinchDist = 0;
 
+    // Fim do pan (mãozinha)
+    if (this.panning && this.pointers.size === 0) {
+      const wasShift = this.panFromShift;
+      const moved = this.panMoved;
+      this.panning = false;
+      this.panPrev = null;
+      this.panStart = null;
+      this.panMoved = false;
+      this.panFromShift = false;
+      if (this.target && this.target.style.cursor === 'grabbing') {
+        // volta ao normal (ou à mãozinha se o shift continua pressionado)
+        this.target.style.cursor = wasShift && e.shiftKey ? 'grab' : '';
+      }
+      // Shift+clique SEM arrasto → reproduz o clique normal (seleção aditiva
+      // em item / limpar seleção no vazio) — o down foi adiado para cá.
+      if (wasShift && !moved) {
+        const world = this.resolve(s);
+        this.emit({
+          type: 'pointerDown',
+          world,
+          screen: s,
+          button: 0,
+          pointerId: e.pointerId,
+          pointerType: (e.pointerType || 'mouse') as 'mouse' | 'touch' | 'pen',
+          shift: true,
+        });
+        this.emit({ type: 'pointerUp', world, screen: s, pointerId: e.pointerId });
+      }
+      return;
+    }
+
     if (this.orbiting && this.pointers.size === 0) {
       this.orbiting = false;
       // Arrastou = órbita, não um "clique com botão direito" (não abre menu)
@@ -243,6 +324,14 @@ export class PointerInput implements IInput {
     this.isDragging = false;
     this.orbiting = false;
     this.orbitPrev = null;
+    if (this.panning) {
+      this.panning = false;
+      this.panPrev = null;
+      this.panStart = null;
+      this.panMoved = false;
+      this.panFromShift = false;
+      if (this.target && this.target.style.cursor === 'grabbing') this.target.style.cursor = '';
+    }
     this.emit({ type: 'cancel', pointerId: e.pointerId });
   };
 
@@ -291,6 +380,7 @@ export class PointerInput implements IInput {
     this.target.removeEventListener('wheel', this.onWheel);
     this.target.removeEventListener('contextmenu', this.onContextMenu);
     this.clearLongPress();
+    this.target.style.cursor = '';
     this.target = null;
   }
 }

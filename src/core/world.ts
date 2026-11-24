@@ -910,10 +910,17 @@ export class World {
         this.camera.zoom(action.delta);
         this.dirty = true;
         break;
-      case 'pan':
-        this.camera.pan(action.dx, action.dy);
+      case 'pan': {
+        // Pan em PX (mãozinha: o CONTEÚDO segue o cursor → sinal negado),
+        // convertido p/ unidades do chão proporcional à distância da câmera.
+        // Os limites do OrbitCameraController (setPanBounds) prendem o pivot
+        // na caixa atual — não dá para se perder no vazio.
+        const k = this.camera.getState().distance * 0.0015;
+        this.camera.pan(-action.dx * k, -action.dy * k);
+        this.deps.renderer.setCamera(this.camera.getState());
         this.dirty = true;
         break;
+      }
       case 'orbit':
         this.camera.orbit(action.dAzimuth, action.dElevation);
         this.deps.renderer.setCamera(this.camera.getState());
