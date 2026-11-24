@@ -2837,3 +2837,188 @@ body {
     display: flex;
   }
 }
+
+/* ================================================================== */
+/* PR4.15 — Seletor e indicador de Sprint da caixa                    */
+/* ================================================================== */
+
+.zoom-controls .sprint-badge-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(139, 92, 246, 0.18);
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  color: #c4b5fd;
+  border-radius: 9999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.2s ease;
+  max-width: 220px;
+}
+.zoom-controls .sprint-badge-btn:hover {
+  background: rgba(139, 92, 246, 0.32);
+  border-color: rgba(139, 92, 246, 0.7);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+.zoom-controls .sprint-badge-btn .sprint-badge-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zoom-controls .sprint-badge-btn .sprint-badge-arrow {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.boxes-act-sprint {
+  font-size: 14px;
+}
+
+/* Modal do Seletor de Sprint */
+.sprint-picker-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  background: rgba(6, 10, 18, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.sprint-picker-card {
+  background: #0f172a;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.75), 0 0 24px rgba(139, 92, 246, 0.25);
+  border-radius: 16px;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  padding: 22px;
+  position: relative;
+  color: #f8fafc;
+}
+.sprint-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 12px;
+}
+.sprint-picker-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sprint-picker-sub {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+}
+.sprint-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: 55vh;
+  padding-right: 4px;
+}
+.sprint-picker-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+}
+.sprint-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  gap: 12px;
+}
+.sprint-picker-item:hover {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: rgba(139, 92, 246, 0.4);
+  transform: translateX(2px);
+}
+.sprint-picker-item.current {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.7);
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.25);
+}
+.sprint-picker-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.sprint-picker-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sprint-picker-item-dates {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.sprint-picker-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.sprint-status-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.sprint-status-active {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+.sprint-status-closed {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.sprint-current-badge {
+  background: rgba(139, 92, 246, 0.3);
+  color: #c4b5fd;
+  border: 1px solid rgba(139, 92, 246, 0.6);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.sprint-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}

@@ -647,6 +647,32 @@ describe('Fase 7: laço (lasso) e seleção múltipla', () => {
     expect(world.getObject(comum)!.meta.kanbanLane).toBeUndefined();
   });
 
+  it('PR4.15: setBoxSprint define e persiste sprintId/sprintName numa caixa sprint', async () => {
+    const { world } = await makeWorld(makeOverlayMock());
+    const b = world.addBoxEntity('Sprint 5', { x: 400, z: 0 }, 'sprint', 'marcos-prescricionais');
+    expect(world.getBox(b.id)!.taigaSprintId).toBeUndefined();
+
+    const ok = world.setBoxSprint(b.id, 42, 'Sprint 5 Final');
+    expect(ok).toBe(true);
+    expect(world.getBox(b.id)!.taigaSprintId).toBe(42);
+    expect(world.getBox(b.id)!.taigaSprintName).toBe('Sprint 5 Final');
+
+    // Recusa em caixa comum
+    const c = world.addBoxEntity('Comum', { x: 800, z: 0 }, 'comum');
+    expect(world.setBoxSprint(c.id, 42, 'Sprint 5')).toBe(false);
+
+    // Persiste no snapshot
+    const snap = world.toSnapshot();
+    const boxSnap = snap.boxes?.find((x) => x.id === b.id);
+    expect(boxSnap?.taigaSprintId).toBe(42);
+    expect(boxSnap?.taigaSprintName).toBe('Sprint 5 Final');
+
+    const { world: world2 } = await makeWorld(makeOverlayMock());
+    world2.loadSnapshot(snap);
+    expect(world2.getBox(b.id)?.taigaSprintId).toBe(42);
+    expect(world2.getBox(b.id)?.taigaSprintName).toBe('Sprint 5 Final');
+  });
+
   it('PR4.3: dashboard ROOT — setRoomDashboard chamado com stats após update()', async () => {
     const { world, renderer } = await makeWorld(makeOverlayMock());
     const b = world.addBoxEntity('Dash', { x: 400, z: 0 }, 'root');

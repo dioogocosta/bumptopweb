@@ -364,6 +364,19 @@ export class World {
   }
 
   /**
+   * PR4.15 — associa ou altera a sprint vinculada a uma caixa (tipo 'sprint' ou 'kanban').
+   * Retorna true se a caixa foi atualizada com sucesso.
+   */
+  setBoxSprint(id: string, sprintId: number, sprintName: string): boolean {
+    const box = this.boxes.get(id);
+    if (!box || (box.type !== 'sprint' && box.type !== 'kanban')) return false;
+    box.taigaSprintId = sprintId;
+    box.taigaSprintName = sprintName;
+    this.dirty = true;
+    return true;
+  }
+
+  /**
    * PR4.5 — sincroniza uma caixa BACKLOG com as user stories do Taiga:
    * remove os itens antigos vindos do Taiga (refetch não duplica) e cria
    * um objeto por story (cor do status, rótulo "#ref assunto"), em grade

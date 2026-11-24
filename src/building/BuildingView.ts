@@ -887,28 +887,29 @@ export class BuildingView {
 
   private _createLabelSprite(floor: number, name: string, _id: string, isSel: boolean): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 256; canvas.height = 48;
+    canvas.width = 512; canvas.height = 64;
     const ctx = canvas.getContext('2d')!;
 
-    ctx.fillStyle = isSel ? 'rgba(232,115,58,0.9)' : 'rgba(15,23,42,0.85)';
-    ctx.strokeStyle = isSel ? '#ffffff' : 'rgba(99,179,237,0.45)';
+    ctx.fillStyle = isSel ? 'rgba(232,115,58,0.95)' : 'rgba(15,23,42,0.88)';
+    ctx.strokeStyle = isSel ? '#ffffff' : 'rgba(99,179,237,0.55)';
     ctx.lineWidth = 2;
     const r = 8;
     ctx.beginPath();
-    ctx.roundRect(4, 4, 248, 40, r);
+    ctx.roundRect(4, 4, 504, 56, r);
     ctx.fill(); ctx.stroke();
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 18px sans-serif';
+    ctx.font = 'bold 20px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`F${floor} · ${(name || `Caixa ${floor}`).slice(0, 16)}`, 14, 24);
+    const text = `F${floor} · ${name || `Caixa ${floor}`}`;
+    ctx.fillText(text.length > 38 ? text.slice(0, 36) + '…' : text, 18, 32);
 
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
     const sprite = new THREE.Sprite(mat);
     sprite.renderOrder = 999;
-    sprite.scale.set(16, 3, 1);
+    sprite.scale.set(22, 2.75, 1);
     return sprite;
   }
 
