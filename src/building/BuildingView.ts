@@ -463,7 +463,8 @@ export class BuildingView {
     // ── Painel Direito (lista de andares) ─────────────────
     const rightPanel = el('div', {
       position: 'absolute', top: '74px', right: '16px',
-      width: '210px', maxHeight: 'calc(100vh - 160px)',
+      width: '240px', boxSizing: 'border-box',
+      maxHeight: 'calc(100vh - 160px)',
       overflowY: 'auto',
       background: 'rgba(10,15,22,0.82)',
       border: '1px solid rgba(56,189,248,0.18)',
@@ -1334,41 +1335,70 @@ export class BuildingView {
   }
 
   /**
-   * Alça de redimensionar na borda ESQUERDA do painel: arrastar p/ a
-   * direita alarga (texto deixa de ser cortado), p/ a esquerda estreita.
+   * Alça de redimensionar na borda ESQUERDA do painel: mantém a borda direita
+   * ancorada e arrastar p/ a esquerda alarga (texto deixa de ser cortado),
+   * arrastar de volta p/ a direita estreita.
    * No celular o CSS trava left/right/width com !important → no-op.
    */
   private _makeResizable(panel: HTMLElement): void {
     const grip = el('div', {
-      position: 'absolute', left: '-4px', top: '0', bottom: '0',
+      position: 'absolute', left: '0', top: '0', bottom: '0',
       width: '12px', cursor: 'ew-resize', touchAction: 'none',
       borderRadius: '14px 0 0 14px', zIndex: '3',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
     });
+    const gripBar = el('div', {
+      width: '3px', height: '36px', borderRadius: '3px',
+      background: 'rgba(56, 189, 248, 0.25)',
+      transition: 'background 0.15s, height 0.15s',
+      pointerEvents: 'none',
+    });
+    grip.appendChild(gripBar);
     grip.title = t('ui.floorsResizeHint');
     panel.appendChild(grip);
 
     let resizing = false;
     let startX = 0;
     let startW = 0;
+    let anchorRight = 16;
+
+    grip.addEventListener('pointerenter', () => {
+      gripBar.style.background = 'rgba(56, 189, 248, 0.75)';
+      gripBar.style.height = '48px';
+    });
+    grip.addEventListener('pointerleave', () => {
+      if (!resizing) {
+        gripBar.style.background = 'rgba(56, 189, 248, 0.25)';
+        gripBar.style.height = '36px';
+      }
+    });
 
     grip.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 && e.pointerType === 'mouse') return;
+      const rect = panel.getBoundingClientRect();
       resizing = true;
       startX = e.clientX;
-      startW = panel.getBoundingClientRect().width;
+      startW = rect.width;
+      anchorRight = Math.max(8, window.innerWidth - rect.right);
+      panel.style.right = `${anchorRight}px`;
+      panel.style.left = 'auto';
+      gripBar.style.background = '#38bdf8';
+      gripBar.style.height = '56px';
       grip.setPointerCapture(e.pointerId);
       e.preventDefault();
       e.stopPropagation();
     });
     grip.addEventListener('pointermove', (e) => {
       if (!resizing) return;
-      const next = Math.min(Math.max(startW - (e.clientX - startX), 180), 560);
+      const maxW = Math.min(680, Math.max(240, window.innerWidth - anchorRight - 12));
+      const next = Math.min(Math.max(startW + (startX - e.clientX), 200), maxW);
       panel.style.width = `${next}px`;
-      panel.style.right = 'auto';
     });
     const stop = (e: PointerEvent): void => {
       if (!resizing) return;
       resizing = false;
+      gripBar.style.background = 'rgba(56, 189, 248, 0.25)';
+      gripBar.style.height = '36px';
       try {
         grip.releasePointerCapture(e.pointerId);
       } catch {
