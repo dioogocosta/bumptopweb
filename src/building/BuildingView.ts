@@ -215,6 +215,10 @@ export class BuildingView {
     this.renderer.setSize(w, h);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.container.appendChild(this.renderer.domElement);
+    // PR mobile — sem isto o navegador interpreta o arrasto do dedo como
+    // rolagem/gestos da página e o pointermove é cancelado (pointercancel):
+    // a órbita da câmera não completava no celular.
+    this.renderer.domElement.style.touchAction = 'none';
 
     // Luzes
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -383,6 +387,9 @@ export class BuildingView {
       transition: 'border-color 0.15s, transform 0.15s, background 0.15s',
       color: '#f8fafc',
     });
+    // Classe p/ o CSS: no celular a pílula some (o 👤 do HUD abre o mesmo
+    // modal) — aqui ela nascia por baixo do HUD e dos painéis, intocável.
+    this.profileBtn.className = 'bv-profile-btn';
 
     this.profileAvatarEl = el('div', {
       width: '36px', height: '36px',
@@ -490,6 +497,8 @@ export class BuildingView {
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       minWidth: '320px', pointerEvents: 'auto',
     });
+    // Classe p/ o CSS: no celular o min-width de 320px estourava a tela
+    searchWrap.className = 'bv-search-bar';
 
     const searchIcon = el('span', { color: '#38bdf8', fontSize: '16px', flexShrink: '0' });
     searchIcon.textContent = '🔍';
@@ -622,30 +631,44 @@ export class BuildingView {
     const cvs = this.renderer.domElement;
     cvs.style.cursor = 'grab';
 
-    const getXY = (e: MouseEvent | TouchEvent) =>
-      'touches' in e && e.touches.length > 0
-        ? [e.touches[0].clientX, e.touches[0].clientY]
-        : [('clientX' in e ? e.clientX : 0), ('clientY' in e ? e.clientY : 0)];
-
     let downPos = { x: 0, y: 0 };
     let hasDragged = false;
+    // PR mobile — apontador ativo (mouse OU dedo). Só um por vez: o segundo
+    // dedo é ignorado (sem pinch na vista do prédio).
+    let activePointer: number | null = null;
 
-    cvs.addEventListener('mousedown', (e) => {
-      const [x, y] = getXY(e);
-      this.drag = { down: true, lx: x, ly: y };
-      downPos = { x, y };
+    // PR mobile — POINTER events em vez de mouse*: no toque o navegador não
+    // sintetiza mousemove durante o arrasto, então a órbita da câmera do
+    // prédio era inalcançável no celular ("não dá pra movimentar").
+    cvs.addEventListener('pointerdown', (e) => {
+      if (activePointer !== null) return;
+      activePointer = e.pointerId;
+      this.drag = { down: true, lx: e.clientX, ly: e.clientY };
+      downPos = { x: e.clientX, y: e.clientY };
       hasDragged = false;
       cvs.style.cursor = 'grabbing';
+      // Captura o apontador: o arrasto continua mesmo saindo do canvas
+      // (dedo acelerado/fora da tela) e o pointerup chega sempre aqui.
+      try {
+        cvs.setPointerCapture(e.pointerId);
+      } catch {
+        /* nem todo navegador permite — o window listener abaixo cobre */
+      }
     });
 
-    window.addEventListener('mouseup', () => {
+    const endDrag = (e: PointerEvent): void => {
+      if (activePointer !== e.pointerId) return;
+      activePointer = null;
       this.drag.down = false;
       cvs.style.cursor = this.hoveredId ? 'pointer' : 'grab';
-    });
+    };
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
 
-    cvs.addEventListener('mousemove', (e) => {
-      const [x, y] = getXY(e);
+    cvs.addEventListener('pointermove', (e) => {
       if (this.drag.down) {
+        if (e.pointerId !== activePointer) return;
+        const x = e.clientX, y = e.clientY;
         const dx = x - this.drag.lx;
         const dy = y - this.drag.ly;
         if (Math.hypot(x - downPos.x, y - downPos.y) > 4) {
@@ -655,8 +678,10 @@ export class BuildingView {
         this.drag.lx = x; this.drag.ly = y;
         this.cam.theta -= dx * 0.005;
         this.cam.phi = Math.max(0.15, Math.min(Math.PI - 0.15, this.cam.phi - dy * 0.005));
-      } else {
-        this._handleHover(x, y, cvs);
+      } else if (e.pointerType === 'mouse') {
+        // Hover/tooltip só para mouse: em toque não existe hover e o tooltip
+        // ficaria preso na tela durante o gesto.
+        this._handleHover(e.clientX, e.clientY, cvs);
       }
     });
 
@@ -667,7 +692,7 @@ export class BuildingView {
 
     cvs.addEventListener('click', (e) => {
       if (hasDragged) return;
-      const [x, y] = getXY(e);
+      const { clientX: x, clientY: y } = e;
       const rect = cvs.getBoundingClientRect();
       const mx = ((x - rect.left) / rect.width)  * 2 - 1;
       const my = ((y - rect.top)  / rect.height) * -2 + 1;
