@@ -253,6 +253,16 @@ const ptBR: Dict = {
   'ui.taiga.authSuccess': 'Autenticação realizada com sucesso!',
   'ui.taiga.invalidCredentials': 'Usuário, senha ou token incorretos.',
   'ui.taiga.missingCredentials': 'Informe usuário e senha ou o token JWT.',
+  // PR4.15 — Seletor e indicador de Sprint
+  'ui.sprintBadgeTitle': 'Sprint atual (clique para escolher outra sprint)',
+  'ui.sprintPickerTitle': 'Escolher Sprint',
+  'ui.sprintPickerSub': 'Selecione qual sprint exibir no quadro Kanban desta caixa',
+  'ui.sprintActive': 'Em andamento',
+  'ui.sprintClosed': 'Concluída',
+  'ui.sprintNoSprints': 'Nenhuma sprint encontrada para este projeto.',
+  'ui.sprintCurrent': 'Ativa nesta caixa',
+  'ui.sprintLoading': 'Carregando sprints do projeto…',
+  'toast.sprintChanged': 'Sprint alterada para "{name}".',
   // PR4.12 — Perfil de usuário e Loading do Prédio
   'ui.profile.title': 'Perfil do Usuário',
   'ui.profile.changePhoto': 'Trocar foto',
@@ -595,6 +605,16 @@ const en: Dict = {
   'ui.taiga.authSuccess': 'Authentication successful!',
   'ui.taiga.invalidCredentials': 'Invalid user, password or token.',
   'ui.taiga.missingCredentials': 'Please enter user and password or JWT token.',
+  // PR4.15 — Sprint selector and badge
+  'ui.sprintBadgeTitle': 'Current sprint (click to choose another sprint)',
+  'ui.sprintPickerTitle': 'Choose Sprint',
+  'ui.sprintPickerSub': 'Select which sprint to display in this box\'s Kanban board',
+  'ui.sprintActive': 'Active',
+  'ui.sprintClosed': 'Closed',
+  'ui.sprintNoSprints': 'No sprints found for this project.',
+  'ui.sprintCurrent': 'Active in this box',
+  'ui.sprintLoading': 'Loading project sprints…',
+  'toast.sprintChanged': 'Sprint switched to "{name}".',
   // PR4.12 — User Profile and Building Loading
   'ui.profile.title': 'User Profile',
   'ui.profile.changePhoto': 'Change photo',

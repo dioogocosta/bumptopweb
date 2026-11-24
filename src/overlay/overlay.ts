@@ -18,6 +18,7 @@ import {
   resolveProjectId,
   type TaigaStoryDetail,
   type TaigaProject,
+  type TaigaSprint,
 } from '@taiga/taiga';
 import type {
   ContextMenuItem,
@@ -212,6 +213,9 @@ export class DomOverlay implements IOverlay {
   private viewSwitchBtn: HTMLButtonElement | null = null;
   private viewMode: 'personal' | 'work' = 'personal';
   private statsBtn: HTMLButtonElement | null = null;
+
+  /** PR4.15 — indicador e seletor da Sprint vinculada à caixa atual. */
+  private sprintBadgeBtn: HTMLButtonElement | null = null;
 
   /** Menu de seleção de temas. */
   private themeBtn: HTMLButtonElement | null = null;
@@ -458,6 +462,24 @@ export class DomOverlay implements IOverlay {
       this.root.dispatchEvent(new CustomEvent('statspanel', { bubbles: true }));
     });
     zoomWrap.appendChild(this.statsBtn);
+
+    // PR4.15 — botão/badge de Sprint da caixa atual (visível nas caixas sprint/kanban)
+    this.sprintBadgeBtn = document.createElement('button');
+    this.sprintBadgeBtn.type = 'button';
+    this.sprintBadgeBtn.className = 'sprint-badge-btn';
+    this.sprintBadgeBtn.title = t('ui.sprintBadgeTitle');
+    this.sprintBadgeBtn.setAttribute('aria-label', t('ui.sprintBadgeTitle'));
+    this.sprintBadgeBtn.style.display = 'none';
+    this.sprintBadgeBtn.innerHTML =
+      `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">` +
+      `<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `</svg>` +
+      `<span class="sprint-badge-label">Sprint</span>` +
+      `<span class="sprint-badge-arrow">▾</span>`;
+    this.sprintBadgeBtn.addEventListener('click', () => {
+      this.root.dispatchEvent(new CustomEvent('sprintpick', { bubbles: true }));
+    });
+    zoomWrap.appendChild(this.sprintBadgeBtn);
 
     // PR4.16 — botão ⭐ "Só favoritos": filtra o painel de andares para
     // mostrar apenas os projetos marcados com estrela. Aceso = filtrando.
@@ -851,6 +873,21 @@ export class DomOverlay implements IOverlay {
         this.startBoxRename(item, b);
       });
       actions.appendChild(ren);
+      // PR4.15 — Se for uma caixa tipo sprint, adiciona botão rápido para escolher/trocar sprint
+      if (b.type === 'sprint') {
+        const spBtn = document.createElement('button');
+        spBtn.type = 'button';
+        spBtn.className = 'boxes-act boxes-act-sprint';
+        spBtn.textContent = '🏃';
+        spBtn.title = t('ui.sprintBadgeTitle');
+        spBtn.setAttribute('aria-label', t('ui.sprintBadgeTitle'));
+        spBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          this.hideBoxesPanel();
+          this.root.dispatchEvent(new CustomEvent('boxsprintpick', { detail: b.id, bubbles: true }));
+        });
+        actions.appendChild(spBtn);
+      }
       // PR4.2 — a caixa padrão NÃO exclui (a ativa pode: volta p/ a Comum)
       if (b.id !== 'box-default') {
         const del = document.createElement('button');
@@ -950,6 +987,26 @@ export class DomOverlay implements IOverlay {
 
   hideBuildingBack(): void {
     if (this.buildingBackBtn) this.buildingBackBtn.style.display = 'none';
+  }
+
+  /** PR4.15 — mostra e atualiza o badge de Sprint no HUD. */
+  setSprintBadge(sprintName: string, active = true): void {
+    if (!this.sprintBadgeBtn) return;
+    const label = this.sprintBadgeBtn.querySelector('.sprint-badge-label');
+    if (label) label.textContent = sprintName;
+    this.sprintBadgeBtn.style.display = 'inline-flex';
+    if (active) {
+      this.sprintBadgeBtn.classList.add('active');
+    } else {
+      this.sprintBadgeBtn.classList.remove('active');
+    }
+  }
+
+  /** PR4.15 — esconde o badge de Sprint no HUD. */
+  hideSprintBadge(): void {
+    if (this.sprintBadgeBtn) {
+      this.sprintBadgeBtn.style.display = 'none';
+    }
   }
 
   /** Define qual tema está visualmente marcado como ativo no menu. */
@@ -2757,6 +2814,154 @@ export class DomOverlay implements IOverlay {
       link.textContent = 'Abrir no Taiga ↗';
       footer.appendChild(link);
     }
+    card.appendChild(footer);
+
+    m.appendChild(card);
+    this.root.appendChild(m);
+  }
+
+  /** PR4.15 — Modal interativo de escolha de Sprint para a caixa. */
+  showSprintPickerModal(spec: {
+    boxName: string;
+    projectName?: string;
+    currentSprintId?: number;
+    sprints: TaigaSprint[];
+    onSelect: (sprint: TaigaSprint) => void | Promise<void>;
+  }): void {
+    const existing = this.root.querySelector('.sprint-picker-modal');
+    if (existing) existing.remove();
+
+    const m = document.createElement('div');
+    m.className = 'sprint-picker-modal';
+    m.style.pointerEvents = 'auto';
+
+    const card = document.createElement('div');
+    card.className = 'sprint-picker-card';
+    card.style.pointerEvents = 'auto';
+
+    card.addEventListener('pointerdown', (e) => e.stopPropagation());
+    card.addEventListener('click', (e) => e.stopPropagation());
+    m.addEventListener('pointerdown', (e) => {
+      if (e.target === m) e.stopPropagation();
+    });
+
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey);
+      m.remove();
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cleanup();
+    };
+    window.addEventListener('keydown', onKey);
+
+    m.addEventListener('click', (e) => {
+      if (e.target === m) cleanup();
+    });
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'sprint-picker-header';
+
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('h3');
+    title.className = 'sprint-picker-title';
+    title.innerHTML = `🏃 ${t('ui.sprintPickerTitle')}`;
+
+    const sub = document.createElement('p');
+    sub.className = 'sprint-picker-sub';
+    sub.textContent = `${spec.boxName}${spec.projectName ? ` • ${spec.projectName}` : ''}`;
+
+    titleWrap.appendChild(title);
+    titleWrap.appendChild(sub);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'boxes-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = t('ui.close');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cleanup();
+    });
+
+    header.appendChild(titleWrap);
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+
+    // List
+    const list = document.createElement('div');
+    list.className = 'sprint-picker-list';
+
+    if (spec.sprints.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'sprint-picker-empty';
+      empty.textContent = t('ui.sprintNoSprints');
+      list.appendChild(empty);
+    } else {
+      for (const s of spec.sprints) {
+        const item = document.createElement('div');
+        const isCur = s.id === spec.currentSprintId;
+        item.className = isCur ? 'sprint-picker-item current' : 'sprint-picker-item';
+
+        const info = document.createElement('div');
+        info.className = 'sprint-picker-item-info';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'sprint-picker-item-name';
+        nameEl.textContent = s.name;
+        info.appendChild(nameEl);
+
+        if (s.estimated_start || s.estimated_finish) {
+          const datesEl = document.createElement('div');
+          datesEl.className = 'sprint-picker-item-dates';
+          datesEl.textContent = `${s.estimated_start ?? '—'} até ${s.estimated_finish ?? '—'}`;
+          info.appendChild(datesEl);
+        }
+
+        const badges = document.createElement('div');
+        badges.className = 'sprint-picker-badges';
+
+        const statusBadge = document.createElement('span');
+        statusBadge.className = s.closed
+          ? 'sprint-status-badge sprint-status-closed'
+          : 'sprint-status-badge sprint-status-active';
+        statusBadge.textContent = s.closed ? t('ui.sprintClosed') : t('ui.sprintActive');
+        badges.appendChild(statusBadge);
+
+        if (isCur) {
+          const curBadge = document.createElement('span');
+          curBadge.className = 'sprint-current-badge';
+          curBadge.textContent = `✓ ${t('ui.sprintCurrent')}`;
+          badges.appendChild(curBadge);
+        }
+
+        item.appendChild(info);
+        item.appendChild(badges);
+
+        item.addEventListener('click', () => {
+          cleanup();
+          void spec.onSelect(s);
+        });
+
+        list.appendChild(item);
+      }
+    }
+
+    card.appendChild(list);
+
+    // Footer
+    const footer = document.createElement('div');
+    footer.className = 'sprint-picker-footer';
+    const closeBtn2 = document.createElement('button');
+    closeBtn2.type = 'button';
+    closeBtn2.className = 'boxes-taiga-btn';
+    closeBtn2.textContent = t('ui.close');
+    closeBtn2.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cleanup();
+    });
+    footer.appendChild(closeBtn2);
     card.appendChild(footer);
 
     m.appendChild(card);
