@@ -6,7 +6,17 @@
 
 export type Direction = 0 | 1 | 2 | 3; // 0: Norte (-Z), 1: Leste (+X), 2: Sul (+Z), 3: Oeste (-X)
 export type PlayerBikeColor = 'blue' | 'red';
-export type BikeColor = 'blue' | 'red' | 'yellow' | 'orange';
+export type BikeColor =
+  | 'blue'
+  | 'red'
+  | 'yellow'
+  | 'orange'
+  | 'green'
+  | 'purple'
+  | 'cyan'
+  | 'pink'
+  | 'lime'
+  | 'white';
 
 export interface TrailSegment {
   id: number;
@@ -37,9 +47,16 @@ export interface CycleState {
 }
 
 export type GameStatus = 'playing' | 'won' | 'lost';
-export type TronGameMode = 'solo' | 'local2p';
+export type TronGameMode = 'solo' | 'local2p' | 'online';
 export type SplitOrientation = 'vertical' | 'horizontal';
 export type TronWinner = 'p1' | 'p2' | 'draw' | null;
+
+export interface OnlineSlotSpec {
+  id: string;
+  color: BikeColor;
+  slot: number;
+  isLocal: boolean;
+}
 
 export interface TronEvent {
   type: 'crash' | 'turn';
@@ -71,6 +88,7 @@ export class TronEngine {
   readonly mode: TronGameMode;
   readonly playerColor: PlayerBikeColor;
   readonly p2Color: PlayerBikeColor;
+  readonly onlineRoster: OnlineSlotSpec[];
   level: number;
   score: number;
   p1Wins = 0;
@@ -89,6 +107,7 @@ export class TronEngine {
     mode?: TronGameMode;
     playerColor: PlayerBikeColor;
     p2Color?: PlayerBikeColor;
+    onlineRoster?: OnlineSlotSpec[];
     level?: number;
     score?: number;
   }) {
@@ -98,6 +117,7 @@ export class TronEngine {
     this.mode = opts.mode ?? 'solo';
     this.playerColor = opts.playerColor;
     this.p2Color = opts.p2Color ?? (opts.playerColor === 'blue' ? 'red' : 'blue');
+    this.onlineRoster = opts.onlineRoster ?? [];
     this.level = opts.level ?? 1;
     this.score = opts.score ?? 0;
     this.resetRound();
@@ -113,6 +133,25 @@ export class TronEngine {
 
     const speed = Math.min(54, 34 + (this.level - 1) * 4);
     const spawnOffset = Math.round(this.halfSize * 0.52);
+
+    if (this.mode === 'online' && this.onlineRoster.length > 0) {
+      const n = this.onlineRoster.length;
+      const r = Math.round(this.halfSize * 0.62);
+      for (const p of this.onlineRoster) {
+        const angle = (p.slot / Math.max(1, n)) * Math.PI * 2;
+        const sx = Math.round(this.originX + Math.sin(angle) * r);
+        const sz = Math.round(this.originZ + Math.cos(angle) * r);
+        // Aponta para o centro da arena
+        let dir: Direction = 0;
+        if (Math.abs(Math.sin(angle)) > Math.abs(Math.cos(angle))) {
+          dir = Math.sin(angle) > 0 ? 3 : 1;
+        } else {
+          dir = Math.cos(angle) > 0 ? 0 : 2;
+        }
+        this.spawnCycle(p.id, p.isLocal, p.color, sx, sz, dir, 32);
+      }
+      return;
+    }
 
     // Jogador 1 nasce ao Sul (levemente à esquerda) olhando para o Norte (-Z)
     this.spawnCycle('player', true, this.playerColor, this.originX - 18, this.originZ + spawnOffset, 0, speed);
@@ -173,7 +212,51 @@ export class TronEngine {
   }
 
   getPlayer(): CycleState | undefined {
+    if (this.mode === 'online') {
+      return this.cycles.find((c) => c.isPlayer);
+    }
     return this.cycles.find((c) => c.id === 'player');
+  }
+
+  /** Aplica o estado recebido da rede para um jogador remoto no modo online. */
+  applyRemotePlayerState(
+    id: string,
+    state: {
+      x: number;
+      z: number;
+      dir: Direction;
+      alive: boolean;
+      segments: Array<{ x1: number; z1: number; x2: number; z2: number }>;
+    },
+  ): void {
+    const c = this.cycles.find((x) => x.id === id);
+    if (!c || c.isPlayer) return;
+    c.x = state.x;
+    c.z = state.z;
+    c.dir = state.dir;
+    c.alive = state.alive;
+
+    // Substitui segmentos desse jogador remoto pelos mais recentes da rede
+    this.segments = this.segments.filter((s) => s.ownerId !== id);
+    for (const seg of state.segments) {
+      this.segments.push({
+        id: this.nextSegId++,
+        ownerId: id,
+        color: c.color,
+        x1: seg.x1,
+        z1: seg.z1,
+        x2: seg.x2,
+        z2: seg.z2,
+      });
+    }
+  }
+
+  getLocalPlayerSegments(): Array<{ x1: number; z1: number; x2: number; z2: number }> {
+    const p = this.getPlayer();
+    if (!p) return [];
+    return this.segments
+      .filter((s) => s.ownerId === p.id)
+      .map((s) => ({ x1: s.x1, z1: s.z1, x2: s.x2, z2: s.z2 }));
   }
 
   getPlayer2(): CycleState | undefined {
@@ -241,7 +324,7 @@ export class TronEngine {
       }
     }
 
-    // 2) Movimento + atualização do segmento ativo
+    // 2) Movimento + atualização do segmento ativo (no modo online, remotos vêm da rede + predição)
     for (const c of this.cycles) {
       if (!c.alive) continue;
       const v = DIR_VEC[c.dir];
@@ -249,6 +332,16 @@ export class TronEngine {
       c.x += v.dx * dist;
       c.z += v.dz * dist;
       c.segDist += dist;
+
+      if (this.mode === 'online' && !c.isPlayer) {
+        // Estende o último segmento remoto suavemente até a próxima sincronização
+        const last = [...this.segments].reverse().find((s) => s.ownerId === c.id);
+        if (last) {
+          last.x2 = c.x;
+          last.z2 = c.z;
+        }
+        continue;
+      }
 
       const activeSeg = this.segments.find((s) => s.id === c.activeSegId);
       if (activeSeg) {
@@ -261,6 +354,7 @@ export class TronEngine {
     const HIT_RADIUS = 1.05;
     for (const c of this.cycles) {
       if (!c.alive) continue;
+      if (this.mode === 'online' && !c.isPlayer) continue; // cada cliente avalia sua própria colisão
       if (this.checkCollision(c, HIT_RADIUS)) {
         c.alive = false;
         events.push({ type: 'crash', cycleId: c.id, color: c.color, x: c.x, z: c.z });
@@ -272,6 +366,14 @@ export class TronEngine {
 
     // 4) Atualiza status da partida
     const player = this.getPlayer();
+    if (this.mode === 'online') {
+      if (!player || !player.alive) {
+        this.status = 'lost';
+      } else {
+        this.score += Math.round(dt * 40);
+      }
+      return events;
+    }
     if (this.mode === 'local2p') {
       const p2 = this.getPlayer2();
       const p1Alive = !!player?.alive;

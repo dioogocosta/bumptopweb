@@ -14,12 +14,25 @@ import type { World } from '@core/world';
 import type { SceneSnapshot } from '@core/model/types';
 import { t } from '@core/i18n/i18n';
 import { renderTronRankingBox, type TronRankingResponse } from './tronRanking';
+import {
+  buildWhatsAppShareUrl,
+  syncTronRoom,
+  type TronAuthHeaders,
+  type TronOnlineRoom,
+  type TronStanding,
+} from './tronMultiplayer';
 
 const COLOR_HEX: Record<BikeColor, number> = {
   blue: 0x00d2ff,
   red: 0xff2a55,
   yellow: 0xfacc15,
   orange: 0xf97316,
+  green: 0x22c55e,
+  purple: 0xa855f7,
+  cyan: 0x06b6d4,
+  pink: 0xec4899,
+  lime: 0x84cc16,
+  white: 0xf8fafc,
 };
 
 const COLOR_CSS: Record<BikeColor, string> = {
@@ -27,6 +40,12 @@ const COLOR_CSS: Record<BikeColor, string> = {
   red: '#ff2a55',
   yellow: '#facc15',
   orange: '#f97316',
+  green: '#22c55e',
+  purple: '#a855f7',
+  cyan: '#06b6d4',
+  pink: '#ec4899',
+  lime: '#84cc16',
+  white: '#f8fafc',
 };
 
 interface Shard {
@@ -56,6 +75,10 @@ export interface TronGameHost {
     isLoggedIn: boolean;
     onScoreSubmit?: (score: number, level: number) => Promise<TronRankingResponse | null>;
   };
+  onlineOpts?: {
+    room: TronOnlineRoom;
+    auth?: TronAuthHeaders;
+  };
 }
 
 export class TronGameView {
@@ -83,6 +106,10 @@ export class TronGameView {
   private nextBtn!: HTMLButtonElement;
   private minimapCanvas!: HTMLCanvasElement;
   private rankingOpts?: TronGameHost['rankingOpts'];
+  private onlineOpts?: TronGameHost['onlineOpts'];
+  private onlineSyncTimer = 0;
+  private onlineSyncInFlight = false;
+  private onlineFinished = false;
   private maxLevelReached = 1;
 
   private camPos = new THREE.Vector3();
@@ -105,15 +132,48 @@ export class TronGameView {
     this.boxId = host.boxId;
     this.onExitCb = host.onExit;
     this.rankingOpts = host.rankingOpts;
+    this.onlineOpts = host.onlineOpts;
     this.splitOrientation = host.splitOrientation ?? 'vertical';
 
     // Salva o snapshot pré-jogo para restaurar os papéis/itens ao sair
     this.preGameSnapshot = this.world.toSnapshot();
 
+    // No modo multiplayer online sem caixa Taiga vinculada, limpa a cena para proteger itens pessoais
+    if (host.mode === 'online' && host.onlineOpts && !host.onlineOpts.room.taigaProject) {
+      this.world.loadSnapshot({
+        ...this.preGameSnapshot,
+        objects: [],
+        piles: {},
+        boxes: [
+          {
+            id: 'tron-clean',
+            name: 'Arena TRON',
+            type: 'comum',
+            pos: { x: 0, z: 0 },
+            halfSize: 130,
+            wallHeight: 55,
+            wallThickness: 10,
+          },
+        ],
+        currentBoxId: 'tron-clean',
+      });
+      this.boxId = 'tron-clean';
+    }
+
     const box = this.world.getBox(this.boxId);
     const originX = box?.pos.x ?? 0;
     const originZ = box?.pos.z ?? 0;
     const halfSize = Math.max(40, (box?.halfSize ?? 130) - 4);
+
+    const onlineRoster =
+      host.mode === 'online' && host.onlineOpts
+        ? host.onlineOpts.room.players.map((p) => ({
+            id: p.userId,
+            color: p.color,
+            slot: p.slot,
+            isLocal: p.userId === host.onlineOpts!.room.myUserId,
+          }))
+        : undefined;
 
     this.engine = new TronEngine({
       halfSize,
@@ -121,6 +181,7 @@ export class TronGameView {
       originZ,
       mode: host.mode ?? 'solo',
       playerColor: host.playerColor,
+      onlineRoster,
       level: 1,
     });
 
@@ -566,6 +627,14 @@ export class TronGameView {
   }
 
   private updateHud(): void {
+    if (this.engine.mode === 'online') {
+      const aliveCount = this.engine.cycles.filter((c) => c.alive).length;
+      const code = this.onlineOpts?.room.code ?? '';
+      this.levelEl.textContent = `ONLINE · SALA ${code}`;
+      this.botsEl.textContent = `${t('ui.tron.alivePlayers')}: ${aliveCount}/${this.engine.cycles.length}`;
+      this.scoreEl.textContent = `SCORE : ${this.engine.score}`;
+      return;
+    }
     if (this.engine.mode === 'local2p') {
       this.levelEl.textContent = `LIGHT CYCLES · ${t('ui.tron.mode2pBadge')}`;
       this.botsEl.textContent = `P1 ${this.engine.p1Wins} × ${this.engine.p2Wins} P2`;
@@ -643,8 +712,17 @@ export class TronGameView {
         }
       }
 
-      if (this.engine.status !== 'playing') {
+      if (this.engine.status !== 'playing' && this.engine.mode !== 'online') {
         this.showEndOverlay();
+      }
+    }
+
+    // Sincroniza estado multiplayer online (~130ms)
+    if (this.engine.mode === 'online' && this.onlineOpts && !this.onlineFinished) {
+      this.onlineSyncTimer += dt;
+      if (this.onlineSyncTimer >= 0.13 && !this.onlineSyncInFlight) {
+        this.onlineSyncTimer = 0;
+        void this.pollOnlineSync();
       }
     }
 
@@ -747,6 +825,100 @@ export class TronGameView {
       this.statusRankingEl.style.display = 'none';
     }
 
+    this.statusOverlay.style.display = 'flex';
+  }
+
+  private async pollOnlineSync(): Promise<void> {
+    if (!this.onlineOpts || this.onlineSyncInFlight || this.disposed) return;
+    const me = this.engine.getPlayer();
+    if (!me) return;
+    this.onlineSyncInFlight = true;
+    try {
+      const room = await syncTronRoom({
+        code: this.onlineOpts.room.code,
+        x: me.x,
+        z: me.z,
+        dir: me.dir,
+        alive: me.alive,
+        score: this.engine.score,
+        segments: this.engine.getLocalPlayerSegments(),
+        auth: this.onlineOpts.auth,
+      });
+      if (!room || this.disposed) return;
+      this.onlineOpts.room = room;
+      for (const p of room.players) {
+        if (p.userId !== room.myUserId) {
+          const prevAlive = this.engine.cycles.find((c) => c.id === p.userId)?.alive;
+          this.engine.applyRemotePlayerState(p.userId, {
+            x: p.x,
+            z: p.z,
+            dir: p.dir as 0 | 1 | 2 | 3,
+            alive: p.alive,
+            segments: p.segments,
+          });
+          if (prevAlive && !p.alive) {
+            this.spawnExplosion(p.x, p.z, p.color);
+          }
+        }
+      }
+      this.updateHud();
+      if (room.status === 'finished' && !this.onlineFinished) {
+        this.onlineFinished = true;
+        this.showOnlineEndOverlay(room.code, room.standings);
+      }
+    } finally {
+      this.onlineSyncInFlight = false;
+    }
+  }
+
+  private showOnlineEndOverlay(roomCode: string, standings: TronStanding[]): void {
+    const winner = standings.find((s) => s.isWinner) ?? standings[0];
+    // Efeitos de celebração 3D e fanfarra para o vencedor!
+    if (winner) {
+      const wCycle = this.engine.cycles.find((c) => c.id === winner.userId);
+      if (wCycle) {
+        this.spawnExplosion(wCycle.x, wCycle.z, wCycle.color);
+        this.spawnExplosion(wCycle.x + 4, wCycle.z - 4, 'yellow');
+      }
+      this.playSynthTone(523.25, 0.12, 'triangle');
+      setTimeout(() => this.playSynthTone(659.25, 0.14, 'triangle'), 110);
+      setTimeout(() => this.playSynthTone(783.99, 0.25, 'triangle'), 230);
+    }
+
+    this.statusTitleEl.textContent = winner
+      ? `🏆 ${t('ui.tron.winnerBanner', { name: winner.nickname })}`
+      : t('ui.tron.matchFinished');
+    this.statusTitleEl.style.color = '#facc15';
+    this.statusSubEl.textContent = `${t('ui.tron.roomCodeLabel')}: ${roomCode}`;
+
+    this.statusRankingEl.style.display = 'block';
+    this.statusRankingEl.textContent = '';
+
+    const list = document.createElement('div');
+    list.className = 'tron-ranking-table';
+    for (const s of standings) {
+      const row = document.createElement('div');
+      row.className = s.isWinner ? 'tron-ranking-row me' : 'tron-ranking-row';
+      const medal = s.placement <= 3 ? ['🥇', '🥈', '🥉'][s.placement - 1]! : `${s.placement}º`;
+      row.innerHTML =
+        `<span>${medal}</span>` +
+        `<span class="tron-ranking-nick">${s.nickname}</span>` +
+        `<span>${s.isWinner ? '🏆' : ''}</span>` +
+        `<span class="tron-ranking-score">${s.score} pts</span>`;
+      list.appendChild(row);
+    }
+    this.statusRankingEl.appendChild(list);
+
+    // Botão Compartilhar no WhatsApp
+    const waLink = document.createElement('a');
+    waLink.className = 'tron-whatsapp-btn';
+    waLink.href = buildWhatsAppShareUrl(roomCode, standings);
+    waLink.target = '_blank';
+    waLink.rel = 'noopener noreferrer';
+    waLink.textContent = `📲 ${t('ui.tron.shareWhatsApp')}`;
+    this.statusRankingEl.appendChild(waLink);
+
+    this.nextBtn.style.display = 'none';
     this.statusOverlay.style.display = 'flex';
   }
 

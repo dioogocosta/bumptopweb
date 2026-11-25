@@ -29,6 +29,7 @@ import type {
   ScrubStripData,
 } from '@core/ports/index';
 import { renderTronRankingBox, type TronRankingResponse } from '../game/tronRanking';
+import type { TronMatchHistoryResponse, TronOnlineRoom } from '../game/tronMultiplayer';
 
 // -------------------------------------------------------------------------
 // PR16 — colar com formatação: HTML da área de transferência → markdown-lite
@@ -2104,6 +2105,7 @@ export class DomOverlay implements IOverlay {
     onSignOut?: () => void;
     onConnectTaiga?: (user: string, pass: string, token?: string) => Promise<{ ok: boolean; error?: string }>;
     onAppAuth?: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+    loadTronHistory?: () => Promise<TronMatchHistoryResponse | null>;
   }): void {
     const existing = this.root.querySelector('.user-profile-modal');
     if (existing) existing.remove();
@@ -2548,6 +2550,56 @@ export class DomOverlay implements IOverlay {
       });
     }
 
+    if (spec.isAuth && spec.loadTronHistory) {
+      const histBox = document.createElement('div');
+      histBox.className = 'profile-tron-history';
+      const hTitle = document.createElement('div');
+      hTitle.className = 'tron-ranking-title';
+      hTitle.textContent = `🏆 ${t('ui.tron.historyTitle')}`;
+      const hBody = document.createElement('div');
+      hBody.className = 'tron-ranking-empty';
+      hBody.textContent = '...';
+      histBox.append(hTitle, hBody);
+      card.appendChild(histBox);
+
+      void spec.loadTronHistory().then((data) => {
+        hBody.textContent = '';
+        if (!data || data.history.length === 0) {
+          hBody.className = 'tron-ranking-empty';
+          hBody.textContent = t('ui.tron.historyEmpty');
+          return;
+        }
+        hBody.className = '';
+        const summary = document.createElement('div');
+        summary.className = 'tron-ranking-me-best';
+        summary.textContent = t('ui.tron.historySummary', {
+          wins: data.totalWins,
+          total: data.totalMatches,
+        });
+        hBody.appendChild(summary);
+
+        const list = document.createElement('div');
+        list.className = 'tron-ranking-table';
+        for (const h of data.history.slice(0, 10)) {
+          const row = document.createElement('div');
+          row.className = h.isWinner ? 'tron-ranking-row me' : 'tron-ranking-row';
+          const dtStr = new Date(h.playedAt).toLocaleString('pt-BR', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          row.innerHTML =
+            `<span>${h.placement}º/${h.totalPlayers}</span>` +
+            `<span class="tron-ranking-nick">${dtStr}</span>` +
+            `<span>${h.isWinner ? '🏆' : ''}</span>` +
+            `<span class="tron-ranking-score">${h.score} pts</span>`;
+          list.appendChild(row);
+        }
+        hBody.appendChild(list);
+      });
+    }
+
     m.appendChild(card);
     this.root.appendChild(m);
   }
@@ -2987,27 +3039,42 @@ export class DomOverlay implements IOverlay {
     this.root.appendChild(m);
   }
 
-  /** TRON — Game Grid (4 quadrantes) + seleção da Moto de Luz + 2P Local (Desktop) + Nickname & Ranking. */
+  /** TRON — Game Grid (4 quadrantes) + 1P / 2P Local / Multiplayer Online + Nickname & Ranking. */
   showTronGameGridModal(
     onStart: (
       color: 'blue' | 'red',
       nickname?: string,
-      mode?: 'solo' | 'local2p',
+      mode?: 'solo' | 'local2p' | 'online',
       splitOrientation?: 'vertical' | 'horizontal',
+      onlineRoom?: TronOnlineRoom,
     ) => void,
     opts?: {
       isLoggedIn: boolean;
       initialNickname?: string;
+      taigaBoxes?: Array<{ id: string; name: string; taigaProject: string }>;
       loadRanking?: () => Promise<TronRankingResponse | null>;
+      onCreateOnlineRoom?: (p: {
+        nickname: string;
+        maxPlayers: number;
+        taigaProject?: string | null;
+        taigaBoxName?: string | null;
+      }) => Promise<TronOnlineRoom | null>;
+      onJoinOnlineRoom?: (p: {
+        code: string;
+        nickname: string;
+      }) => Promise<{ room?: TronOnlineRoom; error?: string }>;
+      onPollOnlineRoom?: (code: string) => Promise<TronOnlineRoom | null>;
+      onStartOnlineRoom?: (code: string) => Promise<TronOnlineRoom | null>;
     },
   ): void {
     const existing = this.root.querySelector('.tron-grid-modal');
     if (existing) existing.remove();
 
     let selectedColor: 'blue' | 'red' = 'blue';
-    let selectedMode: 'solo' | 'local2p' = 'solo';
+    let selectedMode: 'solo' | 'local2p' | 'online' = 'solo';
     let selectedSplit: 'vertical' | 'horizontal' = 'vertical';
     let nickInput: HTMLInputElement | null = null;
+    let pollTimer = 0;
     const isDesktop =
       typeof window !== 'undefined' &&
       !window.matchMedia('(pointer: coarse)').matches &&
@@ -3024,6 +3091,7 @@ export class DomOverlay implements IOverlay {
     card.addEventListener('click', (e) => e.stopPropagation());
 
     const cleanup = () => {
+      if (pollTimer) window.clearInterval(pollTimer);
       window.removeEventListener('keydown', onKey);
       m.remove();
     };
@@ -3117,26 +3185,39 @@ export class DomOverlay implements IOverlay {
     bikesRow.append(blueBtn, redBtn);
     card.appendChild(bikesRow);
 
-    // Seletor 1P vs 2P Local + Divisão de tela (apenas Desktop)
+    // Seletor 1P / 2P Local (Desktop) / Multiplayer Online (Logados)
     let splitWrap: HTMLDivElement | null = null;
     let soloExtrasWrap: HTMLDivElement | null = null;
+    let onlineWrap: HTMLDivElement | null = null;
     const obj = document.createElement('p');
     obj.className = 'tron-grid-objective';
     obj.textContent = t('ui.tron.objective');
 
-    if (isDesktop) {
-      const modeRow = document.createElement('div');
-      modeRow.className = 'tron-mode-row';
-      const soloBtn = document.createElement('button');
-      soloBtn.type = 'button';
-      soloBtn.className = 'tron-mode-btn sel';
-      soloBtn.textContent = `👤 ${t('ui.tron.modeSolo')}`;
+    const modeRow = document.createElement('div');
+    modeRow.className = 'tron-mode-row';
+    const soloBtn = document.createElement('button');
+    soloBtn.type = 'button';
+    soloBtn.className = 'tron-mode-btn sel';
+    soloBtn.textContent = `👤 ${t('ui.tron.modeSolo')}`;
+    modeRow.appendChild(soloBtn);
 
-      const twoPBtn = document.createElement('button');
+    let twoPBtn: HTMLButtonElement | null = null;
+    if (isDesktop) {
+      twoPBtn = document.createElement('button');
       twoPBtn.type = 'button';
       twoPBtn.className = 'tron-mode-btn';
       twoPBtn.textContent = `👥 ${t('ui.tron.mode2p')}`;
+      modeRow.appendChild(twoPBtn);
+    }
 
+    const onlineBtn = document.createElement('button');
+    onlineBtn.type = 'button';
+    onlineBtn.className = 'tron-mode-btn';
+    onlineBtn.textContent = `🌐 ${t('ui.tron.modeOnline')}`;
+    modeRow.appendChild(onlineBtn);
+    card.appendChild(modeRow);
+
+    if (isDesktop) {
       splitWrap = document.createElement('div');
       splitWrap.className = 'tron-split-wrap';
       splitWrap.style.display = 'none';
@@ -3167,32 +3248,232 @@ export class DomOverlay implements IOverlay {
       });
       splitRow.append(vBtn, hBtn);
       splitWrap.append(splitLbl, splitRow);
-
-      const syncModeUi = () => {
-        soloBtn.classList.toggle('sel', selectedMode === 'solo');
-        twoPBtn.classList.toggle('sel', selectedMode === 'local2p');
-        if (splitWrap) splitWrap.style.display = selectedMode === 'local2p' ? 'block' : 'none';
-        if (soloExtrasWrap) soloExtrasWrap.style.display = selectedMode === 'solo' ? 'block' : 'none';
-        obj.textContent =
-          selectedMode === 'local2p' ? t('ui.tron.controls2pHint') : t('ui.tron.objective');
-      };
-
-      soloBtn.addEventListener('click', () => {
-        selectedMode = 'solo';
-        syncModeUi();
-      });
-      twoPBtn.addEventListener('click', () => {
-        selectedMode = 'local2p';
-        syncModeUi();
-      });
-
-      modeRow.append(soloBtn, twoPBtn);
-      card.appendChild(modeRow);
       card.appendChild(splitWrap);
     }
 
     // Objetivo
     card.appendChild(obj);
+
+    // Painel Multiplayer Online
+    onlineWrap = document.createElement('div');
+    onlineWrap.className = 'tron-online-wrap';
+    onlineWrap.style.display = 'none';
+    if (!opts?.isLoggedIn) {
+      const msg = document.createElement('div');
+      msg.className = 'tron-online-locked';
+      msg.textContent = `🔒 ${t('ui.tron.onlineLoginReq')}`;
+      onlineWrap.appendChild(msg);
+    } else {
+      const onNickLbl = document.createElement('label');
+      onNickLbl.className = 'tron-pick-label';
+      onNickLbl.textContent = t('ui.tron.nicknameLabel');
+      const onNickIn = document.createElement('input');
+      onNickIn.type = 'text';
+      onNickIn.maxLength = 20;
+      onNickIn.className = 'tron-nick-input';
+      onNickIn.placeholder = t('ui.tron.nicknamePh');
+      onNickIn.value = opts.initialNickname ?? '';
+
+      const controlsBox = document.createElement('div');
+      controlsBox.className = 'tron-online-controls';
+
+      const maxLbl = document.createElement('label');
+      maxLbl.className = 'tron-pick-label';
+      maxLbl.textContent = t('ui.tron.maxPlayers');
+      const maxSel = document.createElement('select');
+      maxSel.className = 'tron-nick-input';
+      maxSel.innerHTML = `<option value="5">5 jogadores</option><option value="10">10 jogadores</option>`;
+
+      let taigaSel: HTMLSelectElement | null = null;
+      if (opts.taigaBoxes && opts.taigaBoxes.length > 0) {
+        const tLbl = document.createElement('label');
+        tLbl.className = 'tron-pick-label';
+        tLbl.textContent = t('ui.tron.arenaBoxLabel');
+        taigaSel = document.createElement('select');
+        taigaSel.className = 'tron-nick-input';
+        const cleanOpt = document.createElement('option');
+        cleanOpt.value = '';
+        cleanOpt.textContent = t('ui.tron.cleanArena');
+        taigaSel.appendChild(cleanOpt);
+        for (const tb of opts.taigaBoxes) {
+          const o = document.createElement('option');
+          o.value = tb.taigaProject;
+          o.setAttribute('data-name', tb.name);
+          o.textContent = tb.name;
+          taigaSel.appendChild(o);
+        }
+        controlsBox.append(tLbl, taigaSel);
+      }
+
+      const createBtn = document.createElement('button');
+      createBtn.type = 'button';
+      createBtn.className = 'tron-start-btn';
+      createBtn.textContent = t('ui.tron.createRoom');
+
+      const joinRow = document.createElement('div');
+      joinRow.className = 'tron-online-join-row';
+      const codeIn = document.createElement('input');
+      codeIn.type = 'text';
+      codeIn.maxLength = 5;
+      codeIn.className = 'tron-nick-input';
+      codeIn.placeholder = t('ui.tron.roomCodePh');
+      const joinBtn = document.createElement('button');
+      joinBtn.type = 'button';
+      joinBtn.className = 'tron-mode-btn sel';
+      joinBtn.textContent = t('ui.tron.joinRoom');
+      joinRow.append(codeIn, joinBtn);
+
+      const errEl = document.createElement('div');
+      errEl.className = 'tron-online-err';
+
+      const lobbyBox = document.createElement('div');
+      lobbyBox.className = 'tron-lobby-box';
+      lobbyBox.style.display = 'none';
+
+      controlsBox.append(maxLbl, maxSel, createBtn, joinRow, errEl);
+      onlineWrap.append(onNickLbl, onNickIn, controlsBox, lobbyBox);
+
+      const enterLobby = (initialRoom: TronOnlineRoom) => {
+        controlsBox.style.display = 'none';
+        lobbyBox.style.display = 'block';
+
+        const renderLobby = (room: TronOnlineRoom) => {
+          lobbyBox.textContent = '';
+          const codeBadge = document.createElement('div');
+          codeBadge.className = 'tron-room-code-badge';
+          codeBadge.textContent = `${t('ui.tron.roomCodeLabel')}: ${room.code}`;
+          lobbyBox.appendChild(codeBadge);
+
+          if (room.taigaBoxName) {
+            const arenaInfo = document.createElement('div');
+            arenaInfo.className = 'tron-ranking-me-best';
+            arenaInfo.textContent = `Arena Taiga: ${room.taigaBoxName}`;
+            lobbyBox.appendChild(arenaInfo);
+          }
+
+          const pList = document.createElement('div');
+          pList.className = 'tron-ranking-table';
+          for (const p of room.players) {
+            const r = document.createElement('div');
+            r.className = p.userId === room.myUserId ? 'tron-ranking-row me' : 'tron-ranking-row';
+            r.innerHTML =
+              `<span>#${p.slot + 1}</span>` +
+              `<span class="tron-ranking-nick">${p.nickname}</span>` +
+              `<span>${p.color}</span>` +
+              `<span>${p.slot === 0 ? 'Host' : 'Pronto'}</span>`;
+            pList.appendChild(r);
+          }
+          lobbyBox.appendChild(pList);
+
+          if (room.isHost) {
+            const goBtn = document.createElement('button');
+            goBtn.type = 'button';
+            goBtn.className = 'tron-start-btn';
+            goBtn.style.marginTop = '12px';
+            goBtn.style.width = '100%';
+            goBtn.textContent = `▶ ${t('ui.tron.startMatch')} (${room.players.length}/${room.maxPlayers})`;
+            goBtn.disabled = room.players.length < 2;
+            goBtn.addEventListener('click', () => {
+              void opts.onStartOnlineRoom?.(room.code).then((started) => {
+                if (started && started.status === 'playing') {
+                  cleanup();
+                  onStart(selectedColor, onNickIn.value.trim(), 'online', undefined, started);
+                }
+              });
+            });
+            lobbyBox.appendChild(goBtn);
+          } else {
+            const waitEl = document.createElement('div');
+            waitEl.className = 'tron-ranking-empty';
+            waitEl.textContent = t('ui.tron.waitingHost');
+            lobbyBox.appendChild(waitEl);
+          }
+        };
+
+        renderLobby(initialRoom);
+        pollTimer = window.setInterval(() => {
+          void opts.onPollOnlineRoom?.(initialRoom.code).then((r) => {
+            if (!r) return;
+            if (r.status === 'playing') {
+              cleanup();
+              onStart(selectedColor, onNickIn.value.trim(), 'online', undefined, r);
+              return;
+            }
+            renderLobby(r);
+          });
+        }, 1000);
+      };
+
+      createBtn.addEventListener('click', () => {
+        errEl.textContent = '';
+        const nick = onNickIn.value.trim() || opts.initialNickname || 'Piloto';
+        const opt = taigaSel?.selectedOptions[0];
+        const tProj = taigaSel?.value || null;
+        const tName = opt?.getAttribute('data-name') || null;
+        void opts
+          .onCreateOnlineRoom?.({
+            nickname: nick,
+            maxPlayers: Number(maxSel.value) || 5,
+            taigaProject: tProj,
+            taigaBoxName: tName,
+          })
+          .then((room) => {
+            if (!room) {
+              errEl.textContent = 'Erro ao criar sala.';
+              return;
+            }
+            enterLobby(room);
+          });
+      });
+
+      joinBtn.addEventListener('click', () => {
+        errEl.textContent = '';
+        const code = codeIn.value.trim();
+        if (!/^\d{5}$/.test(code)) {
+          errEl.textContent = 'Informe o código de 5 dígitos.';
+          return;
+        }
+        const nick = onNickIn.value.trim() || opts.initialNickname || 'Piloto';
+        void opts.onJoinOnlineRoom?.({ code, nickname: nick }).then((res) => {
+          if (!res?.room) {
+            errEl.textContent = res?.error || 'Sala não encontrada.';
+            return;
+          }
+          enterLobby(res.room);
+        });
+      });
+    }
+    card.appendChild(onlineWrap);
+
+    const footer = document.createElement('div');
+    footer.className = 'tron-grid-footer';
+
+    const syncModeUi = () => {
+      soloBtn.classList.toggle('sel', selectedMode === 'solo');
+      twoPBtn?.classList.toggle('sel', selectedMode === 'local2p');
+      onlineBtn.classList.toggle('sel', selectedMode === 'online');
+      if (splitWrap) splitWrap.style.display = selectedMode === 'local2p' ? 'block' : 'none';
+      if (soloExtrasWrap) soloExtrasWrap.style.display = selectedMode === 'solo' ? 'block' : 'none';
+      if (onlineWrap) onlineWrap.style.display = selectedMode === 'online' ? 'block' : 'none';
+      footer.style.display = selectedMode === 'online' ? 'none' : 'flex';
+      bikesRow.style.display = selectedMode === 'online' ? 'none' : 'grid';
+      pickLabel.style.display = selectedMode === 'online' ? 'none' : 'block';
+      obj.textContent =
+        selectedMode === 'local2p' ? t('ui.tron.controls2pHint') : t('ui.tron.objective');
+    };
+
+    soloBtn.addEventListener('click', () => {
+      selectedMode = 'solo';
+      syncModeUi();
+    });
+    twoPBtn?.addEventListener('click', () => {
+      selectedMode = 'local2p';
+      syncModeUi();
+    });
+    onlineBtn.addEventListener('click', () => {
+      selectedMode = 'online';
+      syncModeUi();
+    });
 
     // Nickname + Ranking (apenas para usuários logados no modo 1P)
     if (opts?.isLoggedIn) {
@@ -3225,9 +3506,7 @@ export class DomOverlay implements IOverlay {
       }
     }
 
-    // Footer com botão Iniciar
-    const footer = document.createElement('div');
-    footer.className = 'tron-grid-footer';
+    // Footer com botão Iniciar (1P e 2P)
     const startBtn = document.createElement('button');
     startBtn.type = 'button';
     startBtn.className = 'tron-start-btn';
@@ -3238,7 +3517,7 @@ export class DomOverlay implements IOverlay {
       const mode = selectedMode;
       const split = selectedSplit;
       cleanup();
-      onStart(chosen, nick, mode, split);
+      onStart(chosen, nick, mode, split, undefined);
     });
     footer.appendChild(startBtn);
     card.appendChild(footer);

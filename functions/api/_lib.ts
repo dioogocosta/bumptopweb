@@ -103,6 +103,32 @@ export async function ensureSchema(db: D1Like): Promise<void> {
       updated_at INTEGER NOT NULL
     )`,
   ).run();
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS tron_rooms (
+      code TEXT PRIMARY KEY,
+      host_user_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      max_players INTEGER NOT NULL DEFAULT 5,
+      taiga_project TEXT,
+      taiga_box_name TEXT,
+      players_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+  ).run();
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS tron_match_history (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      room_code TEXT NOT NULL,
+      nickname TEXT NOT NULL,
+      placement INTEGER NOT NULL,
+      total_players INTEGER NOT NULL,
+      score INTEGER NOT NULL,
+      is_winner INTEGER NOT NULL,
+      played_at INTEGER NOT NULL
+    )`,
+  ).run();
   schemaReady = true;
 }
 
