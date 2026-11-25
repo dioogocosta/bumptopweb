@@ -844,14 +844,14 @@ body.auth-walled #scene-root {
 
 /* Modal de vidro (efeito vidro + leve transparência) */
 .auth-modal {
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(2, 6, 23, 0.45);
-  backdrop-filter: blur(2px);
-  z-index: 60;
+  background: rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 10002;
   pointer-events: auto;
 }
 .auth-card {
