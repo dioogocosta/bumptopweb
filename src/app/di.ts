@@ -418,6 +418,14 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
           return { ok: false, error: msg };
         }
       },
+      loadTronHistory: async () => {
+        if (!isAuth) return null;
+        const { fetchTronMatchHistory } = await import('../game/tronMultiplayer');
+        return fetchTronMatchHistory({
+          taigaToken: token,
+          taigaName: me?.fullName || me?.username || null,
+        });
+      },
     });
   }
 
@@ -1688,10 +1696,27 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
     if (activeTronGame) return;
     void (async () => {
       const { fetchTronRanking, submitTronScore, getSavedTronNickname } = await import('../game/tronRanking');
+      const {
+        createTronRoom,
+        joinTronRoom,
+        fetchTronRoom,
+        startTronRoom,
+      } = await import('../game/tronMultiplayer');
       const appSession = auth.current();
       const taigaToken = getTaigaToken();
       const taigaMe = taigaToken ? await fetchTaigaMe().catch(() => null) : null;
       const isLoggedIn = !!appSession || !!taigaMe;
+      const mpAuth = {
+        taigaToken,
+        taigaName: taigaMe?.fullName || taigaMe?.username || null,
+        localUserId: appSession?.email || (taigaMe ? `taiga:${taigaMe.id}` : null),
+      };
+      const taigaBoxes = taigaMe
+        ? world
+            .listBoxes()
+            .filter((b) => !!b.taigaProject)
+            .map((b) => ({ id: b.id, name: b.name, taigaProject: b.taigaProject! }))
+        : [];
       const defaultNick =
         getSavedTronNickname() ||
         taigaMe?.fullName ||
@@ -1700,9 +1725,13 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         '';
 
       overlay.showTronGameGridModal(
-        (playerColor, nickname, mode, splitOrientation) => {
+        (playerColor, nickname, mode, splitOrientation, onlineRoom) => {
           const wasInBuilding = buildingView.isVisible();
-          const boxId = world.getCurrentBoxId();
+          let boxId = world.getCurrentBoxId();
+          if (mode === 'online' && onlineRoom?.taigaProject) {
+            const matchBox = world.listBoxes().find((b) => b.taigaProject === onlineRoom.taigaProject);
+            if (matchBox) boxId = matchBox.id;
+          }
           const prevShowNames = world.isShowNames();
           const chosenNick = nickname || defaultNick || undefined;
 
@@ -1718,6 +1747,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
                 mode: mode ?? 'solo',
                 splitOrientation: splitOrientation ?? 'vertical',
                 boxId,
+                onlineOpts:
+                  mode === 'online' && onlineRoom
+                    ? { room: onlineRoom, auth: mpAuth }
+                    : undefined,
                 rankingOpts: {
                   isLoggedIn,
                   onScoreSubmit: (score, level) =>
@@ -1748,6 +1781,7 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
         {
           isLoggedIn,
           initialNickname: defaultNick,
+          taigaBoxes,
           loadRanking: isLoggedIn
             ? () =>
                 fetchTronRanking({
@@ -1755,6 +1789,10 @@ export async function createApp(sceneRoot: HTMLElement, overlayRoot: HTMLElement
                   taigaName: taigaMe?.fullName || taigaMe?.username || null,
                 })
             : undefined,
+          onCreateOnlineRoom: (p) => createTronRoom({ ...p, auth: mpAuth }),
+          onJoinOnlineRoom: (p) => joinTronRoom({ ...p, auth: mpAuth }),
+          onPollOnlineRoom: (code) => fetchTronRoom(code, mpAuth),
+          onStartOnlineRoom: (code) => startTronRoom(code, mpAuth),
         },
       );
     })();
